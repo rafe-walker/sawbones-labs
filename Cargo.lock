@@ -324,6 +324,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sawbones-busguard"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "sawbones-interlock"
 version = "0.0.0"
 dependencies = [
