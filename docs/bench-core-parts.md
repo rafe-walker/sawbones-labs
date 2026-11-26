@@ -6,6 +6,8 @@ Total at one of each: **$679.77** for 36 lines. With the four lines that need tw
 
 "Skip if you have it" lines come to about $110.
 
+Why each part is on the list, and what has to be checked before ordering, is in the [cross-reference](bench-core-cross-reference.md). Nothing is ordered until that check is done.
+
 ## Rung 1: the brain
 
 | Item | Qty | Price | Delivery | Note |

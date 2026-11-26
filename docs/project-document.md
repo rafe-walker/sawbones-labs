@@ -2,10 +2,9 @@
 
 Project document
 
-Working design document. Last synced 25 November 2026, after review round 1. Joshua Bryan, with Claude.
+Working design document. Last synced 26 November 2026, rev 104. Joshua Bryan, with Claude.
 
 > Status: design phase. Nothing here is built or bench-tested yet. Prices marked estimate or unverified have no checked page behind them. "You" in this document is the project owner; "I" is Claude, the agent the bench is designed for.
-
 
 ## Status after review round 1
 
@@ -25,7 +24,7 @@ The full point-by-point response, with every verdict and the checks behind it, i
 | World text | Network names, device names, decoded packets, OCR and speech are typed as untrusted and can never raise a fact above unverified. |
 | Module standard | A small spine beside USB-C: armed rail, calibration pair, sync. Nothing is frozen until three unlike modules exist. |
 | Isolation | Every terminal declares its ground domain, and the supervisor refuses a connection plan that makes a loop. The Mac on its charger is on the map. |
-| Parts | USB-C RP2350 boards in place of Picos. A USB 2 hub. Storage, cooler, clock battery, a 5 A supply and one reference meter added. The PiKVMs stay on the fixed bench. |
+| Parts | USB-C RP2350 boards in place of Picos. A USB 2 hub. Storage, cooler, clock battery, and a 5 A supply added. No meter is bought for P1. The PiKVMs stay on the fixed bench. Cooling is designed and simulated in P0: an aluminium heat spreader and a temperature-switched fan. Charging in peak heat is not a design driver, because the pack can cool down and charge indoors. |
 | Measurement | "Self-test passed", not "calibrated". Each stream reports its own timing uncertainty. The 48 V bank is measured through an impedance-limited tap and a rated shunt. |
 | Solar | The agent's part ends at the no-contact stages. It does not direct connector or string work. |
 | Evidence | Results are ranked hypotheses with what would prove them wrong. A borrowed viewer, Rerun, in place of a home-built dashboard. |
@@ -36,7 +35,7 @@ The full point-by-point response, with every verdict and the checks behind it, i
 
 **P0: everything that needs no hardware.** The brain's software running on the Mac against simulated modules, the firmware for the first boards, and the hardware itself designed, simulated and tested as files: one pack model from which budgets, schematics, wiring drawings, printed parts and the parts list are generated and checked on every change. P0 ends with a blueprint pack. A simulation result is never "measured", and every prediction is written down next to the P1 measurement that will check it.
 
-**P1, proposed: the Bench Core.** Mains-powered, on the bench, read-only.
+**P1: the Bench Core. Approved on 26 November.** Mains-powered, on the bench, read-only.
 
 | Rung | Build | Verified by |
 | --- | --- | --- |
@@ -48,7 +47,7 @@ The full point-by-point response, with every verdict and the checks behind it, i
 | 6 | Module 2: isolated listen-only RS485 and RS232 pod | The logic analyzer and Solar Assistant |
 | 7 | One real EG4 question answered end to end | Everything above |
 
-The brain is first because every later rung is flashed, powered, timed and recorded by it. Analog capture, the thrust stand, the site port, senses, radio, portability and the vehicle follow in later phases.
+The brain is first because every later rung is flashed, powered, timed and recorded by it. The parts are on a private Amazon list: 36 lines, about $729 before tax with quantities, of which about $110 is wire, boards and cables to skip if they are on hand. No meter is bought for this phase; the voltage reference module and the meter on hand cover low-voltage work. Analog capture, the thrust stand, the site port, senses, radio, portability and the vehicle follow in later phases.
 
 ## Concept and scope
 
@@ -879,7 +878,7 @@ Everything already owned gets a job. Only the PinePower supplies are dead ends f
 
 ### PiKVM off-label uses
 
-The PiKVM API already gives screen capture to 1920 x 1200, typed keys and mouse, a virtual USB drive, and built-in OCR on snapshots. Corrected after review: the V4 Mini has no USB host port and no documented user GPIO header, so it cannot drive relays, servos or USB switches.
+The PiKVM API already gives screen capture to 1920 x 1200, typed keys and mouse, a virtual USB drive, and built-in OCR on snapshots. Corrected after review: the V4 Mini has no USB host port and no documented user GPIO header, so it cannot drive servos or USB switches. Its ATX port does give two isolated outputs, meant to press a PC's power and reset buttons, and two inputs meant to read its LEDs. On the fixed bench those can press a button on a device under test or trigger an external relay.
 
 - **Run vendor-only software by proxy.** A junk Windows mini PC runs the tools that have no open protocol (Toyota Techstream, the JBD battery PC tool, inverter updaters). The PiKVM is the agent's eyes and hands on it. This reuses HNAO work directly.
 - **Read instruments that only have a screen.** An HDMI microscope or HDMI-out scope becomes a camera feed with OCR.
@@ -1188,4 +1187,4 @@ A third round of four lanes followed your answers.
 
 Next research pass: the two low-coverage lanes, an inventory of active assessment tools for owned gear, then price checks on every estimated line before anything is ordered.
 
-The full notes behind each lane run to about 1.4 MB across 22 files. They are in the research folder of the public repo, github.com/rafe-walker/sawbones-labs, apart from the read of the private IsoKron archive, which is held back. Work items are in the Sawbones project on GitHub. P0 is laid out there. Later phases follow the owner's answers to review round 1.
+The full notes behind each lane run to about 1.4 MB across 22 files. They are in the research folder of the public repo, github.com/rafe-walker/sawbones-labs, apart from the read of the private IsoKron archive, which is held back. Work items are in the Sawbones project on GitHub. P0 is laid out there. Later phases follow your answers to review round 1.
