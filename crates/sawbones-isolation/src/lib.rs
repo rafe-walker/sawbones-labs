@@ -15,7 +15,10 @@
 //!   plugged in" gets onto the map.
 //! - A ground domain is a set of nodes joined by bonded edges.
 //!
-//! [`IsolationMap::check`] returns a [`Report`] of typed [`Finding`]s. A map
+//! [`IsolationMap::check`] returns a [`Report`] of typed [`Finding`]s: a declared
+//! isolation that a bonded path defeats, a ground loop, a barrier rated below
+//! the voltage declared across it, what is bonded to mains earth, and a
+//! measuring module that must float but is bonded to the brain. A map
 //! is written as JSON ([`IsolationMap::from_json`]) or assembled in code:
 //!
 //! ```

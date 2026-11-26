@@ -61,6 +61,29 @@ pub enum Finding {
         /// The shortest bonded path from `a` to `b`.
         path: Path,
     },
+    /// Two nodes are joined by more than one bonded path: a ground loop.
+    GroundLoop {
+        /// One end of the edge that closes the loop.
+        a: NodeId,
+        /// The other end of that edge.
+        b: NodeId,
+        /// The edge that closes the loop, as a path of one hop from `a` to
+        /// `b`.
+        first: Path,
+        /// Another bonded path from `a` to `b` that shares no edge with
+        /// `first`.
+        second: Path,
+    },
+    /// A barrier is rated below the voltage difference declared across it.
+    /// Reported whether or not the barrier's switch is closed.
+    UnderratedBarrier {
+        /// The barrier.
+        edge: EdgeId,
+        /// What it is rated to stand.
+        rating_volts: u32,
+        /// The largest difference declared across it.
+        max_difference_volts: u32,
+    },
     /// A domain contains mains earth. This is information for the operator,
     /// not a violation.
     EarthedDomain {
@@ -95,6 +118,20 @@ impl fmt::Display for Finding {
             Self::IsolationBroken { a, b, path } => {
                 write!(f, "{a} and {b} must be isolated but are bonded: {path}")
             }
+            Self::GroundLoop {
+                a,
+                b,
+                first,
+                second,
+            } => write!(f, "ground loop between {a} and {b}: {first} and {second}"),
+            Self::UnderratedBarrier {
+                edge,
+                rating_volts,
+                max_difference_volts,
+            } => write!(
+                f,
+                "barrier {edge} is rated {rating_volts} V but may see {max_difference_volts} V"
+            ),
             Self::EarthedDomain { earth, members } if members.is_empty() => {
                 write!(f, "nothing is bonded to {earth}")
             }
@@ -259,6 +296,50 @@ impl IsolationMap {
                         a: rule.a.clone(),
                         b: rule.b.clone(),
                         path,
+                    });
+                }
+            }
+        }
+
+        // 2. Ground loops. Edges are taken in the order the map declares
+        // them; one that joins two nodes already joined closes a loop.
+        let mut kept = vec![false; spec.edges.len()];
+        for (e, edge) in spec.edges.iter().enumerate() {
+            if edge.link != Link::Bonded || !self.is_active(edge) {
+                continue;
+            }
+            let (Some(a), Some(b)) = (self.index(&edge.a), self.index(&edge.b)) else {
+                continue;
+            };
+            match bonds.path(a, b, |other| kept[other]) {
+                Some(second) => findings.push(Finding::GroundLoop {
+                    a: edge.a.clone(),
+                    b: edge.b.clone(),
+                    first: Path {
+                        start: edge.a.clone(),
+                        steps: vec![Step {
+                            via: edge.id.clone(),
+                            to: edge.b.clone(),
+                        }],
+                    },
+                    second,
+                }),
+                None => kept[e] = true,
+            }
+        }
+
+        // 3. Barriers rated below what they may see.
+        for edge in &spec.edges {
+            if let Link::Isolated {
+                rating_volts,
+                max_difference_volts: Some(max_difference_volts),
+            } = edge.link
+            {
+                if rating_volts < max_difference_volts {
+                    findings.push(Finding::UnderratedBarrier {
+                        edge: edge.id.clone(),
+                        rating_volts,
+                        max_difference_volts,
                     });
                 }
             }

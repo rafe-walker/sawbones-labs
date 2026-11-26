@@ -57,6 +57,74 @@ fn a_bridged_barrier_is_reported_with_the_shortest_path() {
 }
 
 #[test]
+fn a_second_bonded_path_is_a_ground_loop_with_both_paths() {
+    let map = small()
+        .node(Node::new("probe", Role::Other))
+        .node(Node::new("board", Role::Other))
+        .edge(Edge::bonded("probe-usb", "hub", "probe"))
+        .edge(Edge::bonded("board-usb", "hub", "board"))
+        .build()
+        .unwrap();
+    assert!(map.check().is_clean());
+
+    let looped = map
+        .with_edge(Edge::bonded("probe-clip", "probe", "board"))
+        .unwrap();
+    let report = looped.check();
+    let loops: Vec<_> = report
+        .findings
+        .iter()
+        .filter_map(|f| match f {
+            Finding::GroundLoop { first, second, .. } => {
+                Some((first.to_string(), second.to_string()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        loops,
+        [(
+            "probe -[probe-clip]- board".to_owned(),
+            "probe -[probe-usb]- hub -[board-usb]- board".to_owned()
+        )]
+    );
+    assert!(!report.is_clean());
+
+    // Two cables between the same pair are a loop too.
+    let doubled = map
+        .with_edge(Edge::bonded("pi-usb-2", "pi", "hub"))
+        .unwrap();
+    assert_eq!(doubled.check().violations().count(), 1);
+}
+
+#[test]
+fn a_barrier_rated_below_its_declared_difference_is_reported() {
+    let enough = small()
+        .node(Node::new("pack", Role::Other))
+        .edge(Edge::isolated("pod", "hub", "pack", 1000).max_difference(1000))
+        .build()
+        .unwrap();
+    assert!(enough.check().is_clean());
+
+    let short = small()
+        .node(Node::new("pack", Role::Other))
+        .edge(Edge::isolated("pod", "hub", "pack", 50).max_difference(60))
+        .build()
+        .unwrap();
+    let report = short.check();
+    let found: Vec<_> = report.violations().collect();
+    assert!(matches!(
+        found[..],
+        [Finding::UnderratedBarrier { edge, rating_volts: 50, max_difference_volts: 60 }]
+            if edge.as_str() == "pod"
+    ));
+    assert_eq!(
+        found[0].to_string(),
+        "barrier pod is rated 50 V but may see 60 V"
+    );
+}
+
+#[test]
 fn the_earthed_domain_is_listed_and_is_not_a_violation() {
     let floating = small().build().unwrap().check();
     assert!(floating.findings.iter().any(|f| matches!(
