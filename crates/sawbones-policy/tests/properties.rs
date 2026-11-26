@@ -25,11 +25,13 @@ fn assert_consistent(decision: &Decision, request: &EffectRequest, context: &str
             HazardClass::Class3,
             Requirement::RailBLease {
                 port,
+                action,
                 action_digest,
             },
         ) => {
             assert_eq!(port, request.port(), "{context}");
-            assert_eq!(*action_digest, ActionDigest::of(request), "{context}");
+            assert_eq!(*action, expected_action(request), "{context}");
+            assert_eq!(*action_digest, ActionDigest::of(action), "{context}");
         }
         (HazardClass::Class4, Requirement::Refused { .. }) => {}
         (class, req) => panic!("{context}: class {class:?} with {req:?}"),
@@ -125,6 +127,7 @@ fn random_request(rng: &mut Rng, writes: &WriteMap) -> EffectRequest {
         {
             Some(e) => EffectRequest::BusWrite(BusWrite {
                 port: e.port.clone(),
+                unit: e.unit,
                 signal: e.signal.clone(),
                 value: rng.value(),
             }),
@@ -154,7 +157,7 @@ fn random_decisions_obey_every_property() {
             );
 
             match &request {
-                EffectRequest::BusWrite(w) => match writes.get(&w.port, &w.signal) {
+                EffectRequest::BusWrite(w) => match writes.get(&w.port, w.unit, &w.signal) {
                     // Never lower than the entry's class.
                     Some(e) => {
                         assert!(class_rank(d.class()) >= class_rank(e.class), "{context}");
@@ -259,8 +262,13 @@ fn mutations(request: &EffectRequest, rng: &mut Rng) -> Vec<EffectRequest> {
                     signal: other_signal,
                     ..w.clone()
                 }),
+                EffectRequest::BusWrite(BusWrite {
+                    unit: w.unit % 247 + 1,
+                    ..w.clone()
+                }),
                 EffectRequest::BusRead(BusRead {
                     port: w.port.clone(),
+                    unit: w.unit,
                     signal: w.signal.clone(),
                 }),
             ];
@@ -295,6 +303,10 @@ fn mutations(request: &EffectRequest, rng: &mut Rng) -> Vec<EffectRequest> {
                 signal: other_signal,
                 ..r.clone()
             }),
+            EffectRequest::BusRead(BusRead {
+                unit: r.unit % 247 + 1,
+                ..r.clone()
+            }),
             EffectRequest::BusListen(BusListen {
                 port: r.port.clone(),
             }),
@@ -303,6 +315,7 @@ fn mutations(request: &EffectRequest, rng: &mut Rng) -> Vec<EffectRequest> {
             EffectRequest::BusListen(BusListen { port: other_port }),
             EffectRequest::BusRead(BusRead {
                 port: l.port.clone(),
+                unit: UNIT,
                 signal: other_signal,
             }),
         ],
@@ -310,18 +323,18 @@ fn mutations(request: &EffectRequest, rng: &mut Rng) -> Vec<EffectRequest> {
 }
 
 #[test]
-fn the_digest_changes_if_any_field_changes() {
+fn the_encoding_changes_if_any_field_changes() {
     let empty = WriteMap::default();
     for seed in 0..CASES {
         let mut rng = Rng::new(seed);
         let request = random_request(&mut rng, &empty);
-        let digest = ActionDigest::of(&request);
-        assert_eq!(digest, ActionDigest::of(&request.clone()), "seed {seed}");
+        let bytes = request.canonical_bytes();
+        assert_eq!(bytes, request.clone().canonical_bytes(), "seed {seed}");
         for changed in mutations(&request, &mut rng) {
             assert_ne!(changed, request, "seed {seed}: mutation must differ");
             assert_ne!(
-                ActionDigest::of(&changed),
-                digest,
+                changed.canonical_bytes(),
+                bytes,
                 "seed {seed}: {request:?} vs {changed:?}"
             );
         }
@@ -335,5 +348,4 @@ fn the_encoding_is_injective_across_field_boundaries() {
     let a = write("ab", "c", WriteValue::U16(1));
     let b = write("a", "bc", WriteValue::U16(1));
     assert_ne!(a.canonical_bytes(), b.canonical_bytes());
-    assert_ne!(ActionDigest::of(&a), ActionDigest::of(&b));
 }

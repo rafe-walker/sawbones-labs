@@ -90,6 +90,7 @@
 pub mod test_keys;
 
 use ed25519_dalek::VerifyingKey;
+pub use sawbones_modbus_encode::{ActionError, BusWriteAction, WriteFunction, ACTION_ENCODED_LEN};
 
 /// A tick on the verifier's clock. The tick period is the caller's choice
 /// and is not fixed yet.
@@ -121,12 +122,18 @@ const OFFSET_KIND: usize = 26;
 const OFFSET_PAYLOAD: usize = 27;
 const PAYLOAD_LEN: usize = MESSAGE_LEN - OFFSET_PAYLOAD;
 
+// A lease's action and its digest fit the payload.
+const _: () = assert!(ACTION_ENCODED_LEN + 32 <= PAYLOAD_LEN);
+
 const ROLE_TRUST_ROOT: u8 = 1;
 const ROLE_OWNER_PHONE: u8 = 2;
 const ROLE_MODULE: u8 = 3;
 
 const KIND_INSTALL_CORE_RELEASE: u8 = 1;
-const KIND_GRANT_LEASE: u8 = 2;
+// Kind 2 was a lease bound to a frame digest only (before #203). It is
+// retired: `decode` refuses it, so no approval signed in the old layout can
+// be read as a lease in the new one.
+const KIND_GRANT_LEASE: u8 = 7;
 const KIND_BUS_GUARD_ALLOW_LIST: u8 = 3;
 const KIND_PLUGIN_PERMISSION_GROWTH: u8 = 4;
 const KIND_NATIVE_INSTALL: u8 = 5;
@@ -168,13 +175,38 @@ pub struct InstallCoreRelease {
     pub release: Digest,
 }
 
-/// Grant a bus-guard lease: one write of exactly this frame, on this port.
+/// Grant a bus-guard lease: one write of exactly this action (#203).
+///
+/// The approval carries the typed action itself, so the bus guard can
+/// re-derive the one frame it encodes to, and the action's digest, so the
+/// guard can check that the action is the one the policy engine and the
+/// interlock bound the lease to. The guard refuses a grant whose digest is
+/// not [`BusWriteAction::digest`] of its action.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GrantLease {
-    /// The bus-guard port the write goes out on.
-    pub port: u8,
-    /// The SHA-256 of the exact frame approved.
-    pub action: Digest,
+    /// The one write approved: bench port, unit, function, register and
+    /// values.
+    pub action: BusWriteAction,
+    /// The digest of `action`, from
+    /// [`sawbones_modbus_encode::ActionDigest::of`].
+    pub action_digest: Digest,
+}
+
+impl GrantLease {
+    /// A grant for `action`, carrying its digest.
+    #[must_use]
+    pub fn new(action: BusWriteAction) -> GrantLease {
+        GrantLease {
+            action,
+            action_digest: Digest(action.digest().0),
+        }
+    }
+
+    /// True if `action_digest` is the digest of `action`.
+    #[must_use]
+    pub fn is_consistent(&self) -> bool {
+        self.action_digest.0 == self.action.digest().0
+    }
 }
 
 /// Replace the bus guard's allow-list with the one that has this digest.
@@ -277,7 +309,8 @@ pub const fn may_approve(role: Role, approval: &Approval) -> bool {
 /// | Kind | Approval | Payload |
 /// | --- | --- | --- |
 /// | 1 | [`InstallCoreRelease`] | release digest (32) |
-/// | 2 | [`GrantLease`] | port (1), frame digest (32) |
+/// | 2 | retired (a frame-digest-only lease, before #203): refused | |
+/// | 7 | [`GrantLease`] | action ([`ACTION_ENCODED_LEN`]), action digest (32) |
 /// | 3 | [`BusGuardAllowList`] | allow-list digest (32) |
 /// | 4 | [`PluginPermissionGrowth`] | plugin id (32), manifest digest (32) |
 /// | 5 | [`NativeInstall`] | package digest (32) |
@@ -315,6 +348,8 @@ pub enum DecodeError {
     UnknownKind,
     /// A non-zero byte after the payload.
     NonZeroPadding,
+    /// A lease's action bytes are not an encoded [`BusWriteAction`].
+    Action(ActionError),
 }
 
 const fn put_u32(out: &mut [u8; MESSAGE_LEN], at: usize, value: u32) {
@@ -385,8 +420,13 @@ impl Message {
             }
             Approval::GrantLease(a) => {
                 out[OFFSET_KIND] = KIND_GRANT_LEASE;
-                out[p] = a.port;
-                put_32(&mut out, p + 1, &a.action.0);
+                let action = a.action.encode();
+                let mut i = 0;
+                while i < ACTION_ENCODED_LEN {
+                    out[p + i] = action[i];
+                    i += 1;
+                }
+                put_32(&mut out, p + ACTION_ENCODED_LEN, &a.action_digest.0);
             }
             Approval::BusGuardAllowList(a) => {
                 out[OFFSET_KIND] = KIND_BUS_GUARD_ALLOW_LIST;
@@ -439,10 +479,11 @@ impl Message {
             ),
             KIND_GRANT_LEASE => (
                 Approval::GrantLease(GrantLease {
-                    port: bytes[p],
-                    action: digest(p + 1),
+                    action: BusWriteAction::decode(&bytes[p..p + ACTION_ENCODED_LEN])
+                        .map_err(DecodeError::Action)?,
+                    action_digest: digest(p + ACTION_ENCODED_LEN),
                 }),
-                33,
+                ACTION_ENCODED_LEN + 32,
             ),
             KIND_BUS_GUARD_ALLOW_LIST => (
                 Approval::BusGuardAllowList(BusGuardAllowList {
@@ -643,7 +684,7 @@ impl Approvable for Approval {
 /// use sawbones_approvals::{Approved, Digest, GrantLease, Role};
 /// // The fields are private: no struct literal.
 /// let _ = Approved {
-///     approval: GrantLease { port: 0, action: Digest([0; 32]) },
+///     approval: GrantLease { action: todo!(), action_digest: Digest([0; 32]) },
 ///     signer: Role::TrustRoot,
 ///     counter: 1,
 ///     expires_at: 10,

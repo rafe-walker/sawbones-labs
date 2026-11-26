@@ -391,6 +391,7 @@ version = "0.0.0"
 dependencies = [
  "ed25519-dalek",
  "sawbones-approvals",
+ "sawbones-modbus-encode",
 ]
 
 [[package]]
@@ -399,6 +400,7 @@ version = "0.0.0"
 dependencies = [
  "sawbones-approvals",
  "sawbones-busguard",
+ "sawbones-modbus-encode",
  "serde",
  "serde_json",
  "sha2",
@@ -422,14 +424,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "sawbones-modbus-encode"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "sha2",
+]
+
+[[package]]
 name = "sawbones-policy"
 version = "0.0.0"
 dependencies = [
+ "sawbones-approvals",
+ "sawbones-busguard",
  "sawbones-interlock",
+ "sawbones-modbus-encode",
  "sawbones-reading",
  "serde",
  "serde_json",
- "sha2",
  "thiserror",
 ]
 

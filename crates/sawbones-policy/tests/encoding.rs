@@ -6,7 +6,7 @@ mod common;
 use common::*;
 use sawbones_policy::{
     classify, ActionDigest, BusFacts, EffectRequest, HazardClass, Mastership, SettingKind,
-    WriteMap, WriteValue, ACTION_ENCODING,
+    WriteMap, WriteValue, REQUEST_ENCODING,
 };
 use sawbones_reading::Trust;
 
@@ -14,19 +14,21 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// The canonical bytes and digest of one request. If this fails, every lease
-/// digest changed: bump [`ACTION_ENCODING`] and update both deliberately.
-/// The digest was checked against `sha256sum` over the same bytes.
+/// The canonical bytes of one request, unit included (#203). If this fails,
+/// bump [`REQUEST_ENCODING`] and update it deliberately. The lease digest is
+/// not over these bytes but over the bus action; its golden is in
+/// `sawbones-modbus-encode`.
 #[test]
-fn canonical_bytes_and_digest_are_pinned() {
-    assert_eq!(ACTION_ENCODING, "sawbones.policy.action/0-provisional");
+fn canonical_bytes_are_pinned() {
+    assert_eq!(REQUEST_ENCODING, "sawbones.policy.request/1-provisional");
     let request = write("rs485-1", "battery_low_cutoff", WriteValue::U16(4600));
     let expected = [
-        "00000024",
-        &hex(ACTION_ENCODING.as_bytes()),
+        "00000025",
+        &hex(REQUEST_ENCODING.as_bytes()),
         "01",
         "00000007",
         &hex(b"rs485-1"),
+        "01",
         "00000012",
         &hex(b"battery_low_cutoff"),
         "02",
@@ -34,19 +36,32 @@ fn canonical_bytes_and_digest_are_pinned() {
     ]
     .concat();
     assert_eq!(hex(&request.canonical_bytes()), expected);
-    assert_eq!(
-        ActionDigest::of(&request).to_hex(),
-        "d919c2284f7a71a5166e13d20751e99f8cdbf1720d4899004a10977bb521c30d"
-    );
+    let read = read("rs485-1", "pv_power");
+    let expected = [
+        "00000025",
+        &hex(REQUEST_ENCODING.as_bytes()),
+        "02",
+        "00000007",
+        &hex(b"rs485-1"),
+        "01",
+        "00000008",
+        &hex(b"pv_power"),
+    ]
+    .concat();
+    assert_eq!(hex(&read.canonical_bytes()), expected);
 }
 
-/// The digest the interlock binds a lease to is the same 32 bytes.
+/// The digest the interlock binds a lease to, and the one the approval and
+/// the bus guard carry, are the same 32 bytes.
 #[test]
-fn the_interlock_digest_is_the_same_bytes() {
+fn the_interlock_and_guard_digests_are_the_same_bytes() {
     let request = write("rs485-1", "battery_low_cutoff", WriteValue::U16(4600));
-    let digest = ActionDigest::of(&request);
+    let action = expected_action(&request);
+    let digest = ActionDigest::of(&action);
     let for_interlock = sawbones_interlock::ActionDigest::from(digest);
     assert_eq!(&for_interlock.0, digest.as_bytes());
+    let for_guard = sawbones_modbus_encode::ActionDigest::from(digest);
+    assert_eq!(for_guard, action.digest());
 }
 
 #[test]
@@ -63,7 +78,7 @@ fn requests_round_trip_through_json() {
     }
     assert_eq!(
         serde_json::to_string(&write("rs485-1", "s", WriteValue::U16(3))).unwrap(),
-        r#"{"effect":"bus_write","port":"rs485-1","signal":"s","value":{"u16":3}}"#
+        r#"{"effect":"bus_write","port":"rs485-1","unit":1,"signal":"s","value":{"u16":3}}"#
     );
 }
 
@@ -89,36 +104,65 @@ fn a_raw_address_or_free_text_is_not_a_request() {
 #[test]
 fn facts_load_from_json_and_reject_duplicates_and_unknown_fields() {
     let writes: WriteMap = serde_json::from_str(
-        r#"[{"port":"rs485-1","signal":"charge_voltage","class":"class1",
+        r#"[{"port":"rs485-1","unit":2,"signal":"charge_voltage","register":4096,"class":"class1",
              "kind":"charge_voltage","energy_relevant":true,"trust":"operator_attested"}]"#,
     )
     .unwrap();
+    assert!(writes
+        .get(&port("rs485-1"), 1, &signal("charge_voltage"))
+        .is_none());
     let e = writes
-        .get(&port("rs485-1"), &signal("charge_voltage"))
+        .get(&port("rs485-1"), 2, &signal("charge_voltage"))
         .unwrap();
+    assert_eq!(e.register, 4096);
     assert_eq!(e.kind, SettingKind::ChargeVoltage);
     assert_eq!(e.class, HazardClass::Class1);
 
     let dup = r#"[
-        {"port":"p","signal":"s","class":"class1","kind":"config","energy_relevant":false,"trust":"measured"},
-        {"port":"p","signal":"s","class":"class3","kind":"config","energy_relevant":false,"trust":"measured"}
+        {"port":"p","unit":1,"signal":"s","register":1,"class":"class1","kind":"config","energy_relevant":false,"trust":"measured"},
+        {"port":"p","unit":1,"signal":"s","register":2,"class":"class3","kind":"config","energy_relevant":false,"trust":"measured"}
     ]"#;
     assert!(serde_json::from_str::<WriteMap>(dup).is_err());
+    // The same signal of two units is two facts.
+    let two_units = r#"[
+        {"port":"p","unit":1,"signal":"s","register":1,"class":"class1","kind":"config","energy_relevant":false,"trust":"measured"},
+        {"port":"p","unit":2,"signal":"s","register":1,"class":"class3","kind":"config","energy_relevant":false,"trust":"measured"}
+    ]"#;
+    assert_eq!(
+        serde_json::from_str::<WriteMap>(two_units)
+            .unwrap()
+            .entries()
+            .count(),
+        2
+    );
+    // A missing unit or register is not an entry.
+    let no_unit = r#"[{"port":"p","signal":"s","register":1,"class":"class1","kind":"config",
+        "energy_relevant":false,"trust":"measured"}]"#;
+    assert!(serde_json::from_str::<WriteMap>(no_unit).is_err());
+    let no_register = r#"[{"port":"p","unit":1,"signal":"s","class":"class1","kind":"config",
+        "energy_relevant":false,"trust":"measured"}]"#;
+    assert!(serde_json::from_str::<WriteMap>(no_register).is_err());
 
-    let extra = r#"[{"port":"p","signal":"s","class":"class1","kind":"config",
+    let extra = r#"[{"port":"p","unit":1,"signal":"s","register":1,"class":"class1","kind":"config",
         "energy_relevant":false,"trust":"measured","override":"class0"}]"#;
     assert!(serde_json::from_str::<WriteMap>(extra).is_err());
 
-    let buses: BusFacts =
-        serde_json::from_str(r#"[{"port":"p","mastership":"bench_only","trust":"measured"}]"#)
-            .unwrap();
+    let buses: BusFacts = serde_json::from_str(
+        r#"[{"port":"p","bench_port":0,"mastership":"bench_only","trust":"measured"}]"#,
+    )
+    .unwrap();
     assert_eq!(
         buses.get(&port("p")).unwrap().mastership,
         Mastership::BenchOnly
     );
-    let dup = r#"[{"port":"p","mastership":"bench_only","trust":"measured"},
-                  {"port":"p","mastership":"other_master_active","trust":"measured"}]"#;
+    let dup = r#"[{"port":"p","bench_port":0,"mastership":"bench_only","trust":"measured"},
+                  {"port":"p","bench_port":1,"mastership":"other_master_active","trust":"measured"}]"#;
     assert!(serde_json::from_str::<BusFacts>(dup).is_err());
+    let one_wire = r#"[{"port":"p","bench_port":0,"mastership":"bench_only","trust":"measured"},
+                  {"port":"q","bench_port":0,"mastership":"bench_only","trust":"measured"}]"#;
+    assert!(serde_json::from_str::<BusFacts>(one_wire).is_err());
+    let no_bench_port = r#"[{"port":"p","mastership":"bench_only","trust":"measured"}]"#;
+    assert!(serde_json::from_str::<BusFacts>(no_bench_port).is_err());
 }
 
 #[test]
@@ -138,9 +182,17 @@ fn decisions_serialise_with_their_class_and_need() {
     assert_eq!(v["class"], "class3");
     assert_eq!(v["requirement"]["needs"], "rail_b_lease");
     assert_eq!(v["requirement"]["port"], "p");
+    let action = expected_action(&request);
     assert_eq!(
         v["requirement"]["action_digest"],
-        ActionDigest::of(&request).to_hex()
+        ActionDigest::of(&action).to_hex()
+    );
+    assert_eq!(
+        v["requirement"]["action"],
+        serde_json::json!({
+            "port": bench_port_of("p"), "unit": 1, "function": "write_single_register",
+            "register": register_of("limit"), "values": [1]
+        })
     );
 
     let v = serde_json::to_value(classify(

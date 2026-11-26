@@ -21,8 +21,12 @@ test-keys = []
 # Default features off: no precomputed tables, no zeroize, no alloc. The
 # verify path needs none of them.
 ed25519-dalek = { version = "3.0.0", default-features = false }
+# The typed bus-write action a lease approval carries (#203). No default
+# features: no serde in the firmware build.
+sawbones-modbus-encode = { path = "../sawbones-modbus-encode", default-features = false }
 
 [dev-dependencies]
 # The tests sign with the fixed test keys. A dev-dependency on this crate
 # itself turns the feature on for test builds only.
 sawbones-approvals = { path = ".", features = ["test-keys"] }
+sawbones-modbus-encode = { path = "../sawbones-modbus-encode" }

@@ -3,12 +3,12 @@
 use std::fmt;
 
 use sawbones_interlock::HazardClass;
+use sawbones_modbus_encode::{BusWriteAction, WriteFunction};
 use sawbones_reading::Trust;
 use serde::{Serialize, Serializer};
-use sha2::{Digest, Sha256};
 
 use crate::facts::actionable;
-use crate::{BusFacts, EffectRequest, Mastership, PortId, WriteMap};
+use crate::{BusFacts, EffectRequest, Mastership, PortId, WriteMap, WriteValue};
 
 /// The rank of a class, 0 to 4, for comparing classes.
 pub const fn class_rank(class: HazardClass) -> u8 {
@@ -41,16 +41,23 @@ impl Floor {
     }
 }
 
-/// SHA-256 over [`EffectRequest::canonical_bytes`]: the exact action a class
-/// 3 lease approves. Any change to any field of the request gives another
-/// digest, so a lease cannot be spent on a different action.
+/// The digest of the exact bus action a class 3 lease approves (#203): the
+/// shared encoder's [`sawbones_modbus_encode::ActionDigest`] of the
+/// [`BusWriteAction`] the request resolves to through the write map (bench
+/// port, unit address, function, register, values).
+///
+/// The interlock's lease, the trust root's approval and the bus guard's lease
+/// carry the same 32 bytes, and the guard passes only the one frame that
+/// action encodes to. Any change to the port, unit, register, function or
+/// value gives another digest, so a lease cannot be spent on a different
+/// action.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ActionDigest([u8; 32]);
 
 impl ActionDigest {
-    /// The digest of a request.
-    pub fn of(request: &EffectRequest) -> Self {
-        Self(Sha256::digest(request.canonical_bytes()).into())
+    /// The digest of a bus action.
+    pub fn of(action: &BusWriteAction) -> Self {
+        Self(action.digest().0)
     }
 
     /// The 32 digest bytes.
@@ -96,6 +103,52 @@ impl From<ActionDigest> for sawbones_interlock::ActionDigest {
     }
 }
 
+/// The same 32 bytes as the shared encoder's digest, which the approval and
+/// the bus guard carry.
+impl From<ActionDigest> for sawbones_modbus_encode::ActionDigest {
+    fn from(digest: ActionDigest) -> Self {
+        sawbones_modbus_encode::ActionDigest(digest.0)
+    }
+}
+
+/// The register values and write function for a value: one register with
+/// write single register (0x06) for a bool (0 or 1), u16 or i16; two
+/// registers, high word first, with write multiple registers (0x10) for a
+/// u32 or i32. Signed values are sent as their two's-complement bits.
+fn register_words(value: WriteValue) -> (WriteFunction, [u16; 2], usize) {
+    let single = |word: u16| (WriteFunction::WriteSingleRegister, [word, 0], 1);
+    let double = |bytes: [u8; 4]| {
+        (
+            WriteFunction::WriteMultipleRegisters,
+            [
+                u16::from_be_bytes([bytes[0], bytes[1]]),
+                u16::from_be_bytes([bytes[2], bytes[3]]),
+            ],
+            2,
+        )
+    };
+    match value {
+        WriteValue::Bool(b) => single(u16::from(b)),
+        WriteValue::U16(n) => single(n),
+        WriteValue::I16(n) => single(u16::from_be_bytes(n.to_be_bytes())),
+        WriteValue::U32(n) => double(n.to_be_bytes()),
+        WriteValue::I32(n) => double(n.to_be_bytes()),
+    }
+}
+
+/// The one bus action a write is: `value` to `register` of `unit` on bench
+/// port `bench_port`. `None` if no frame can carry it (a two-register value
+/// at register 0xFFFF, or a unit outside 1 to 247).
+pub fn bus_action(
+    bench_port: u8,
+    unit: u8,
+    register: u16,
+    value: WriteValue,
+) -> Option<BusWriteAction> {
+    let (function, words, count) = register_words(value);
+    BusWriteAction::new(bench_port, unit, function, register, &words[..count]).ok()
+}
+
 /// Why a request was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "reason", rename_all = "snake_case")]
@@ -124,6 +177,9 @@ pub enum RefusalReason {
     },
     /// The request transmits on a port where another master is active.
     OtherMasterActive,
+    /// No Modbus frame can carry the write: a two-register value at the last
+    /// register.
+    UnencodableWrite,
 }
 
 /// What a request needs before it may run.
@@ -142,7 +198,12 @@ pub enum Requirement {
     RailBLease {
         /// The port the action is on.
         port: PortId,
-        /// The digest of the exact request the lease approves.
+        /// The one bus write the lease approves, resolved through the write
+        /// map. The trust root's approval carries it, and the bus guard
+        /// passes only the frame it encodes to.
+        action: BusWriteAction,
+        /// The digest of `action`, which the interlock and the bus guard bind
+        /// the lease to.
         action_digest: ActionDigest,
     },
     /// Not done. The class is 4.
@@ -150,6 +211,24 @@ pub enum Requirement {
         /// Why.
         reason: RefusalReason,
     },
+}
+
+impl Requirement {
+    /// The interlock lease a [`Requirement::RailBLease`] asks for: the
+    /// action's bench port and digest. `None` for every other requirement.
+    pub fn lease_target(&self) -> Option<sawbones_interlock::LeaseTarget> {
+        match self {
+            Requirement::RailBLease {
+                action,
+                action_digest,
+                ..
+            } => Some(sawbones_interlock::LeaseTarget {
+                port: sawbones_interlock::Port(action.port()),
+                action_digest: (*action_digest).into(),
+            }),
+            _ => None,
+        }
+    }
 }
 
 /// The engine's answer: a class and what that class needs.
@@ -187,16 +266,23 @@ impl Decision {
         }
     }
 
-    /// The single place a class is turned into a requirement.
-    fn for_class(floor: Floor, request: &EffectRequest) -> Self {
+    /// The single place a class is turned into a requirement. `action` is
+    /// the bus action of a write; only writes reach class 3.
+    fn for_class(floor: Floor, request: &EffectRequest, action: Option<BusWriteAction>) -> Self {
         let port = request.port().clone();
         let requirement = match floor.0 {
             HazardClass::Class0 | HazardClass::Class1 => Requirement::Nothing,
             HazardClass::Class2 => Requirement::RailA { port },
-            HazardClass::Class3 => Requirement::RailBLease {
-                port,
-                action_digest: ActionDigest::of(request),
-            },
+            HazardClass::Class3 => {
+                let Some(action) = action else {
+                    return Self::refused(RefusalReason::UnencodableWrite);
+                };
+                Requirement::RailBLease {
+                    port,
+                    action,
+                    action_digest: ActionDigest::of(&action),
+                }
+            }
             HazardClass::Class4 => return Self::refused(RefusalReason::ClassNeverPermitted),
         };
         Self {
@@ -212,7 +298,7 @@ impl Decision {
 /// arguments. The rules, in order:
 ///
 /// - **Passive listening** transmits nothing and is class 0.
-/// - **A bus write** needs a write-map entry for its port and signal, at
+/// - **A bus write** needs a write-map entry for its port, unit and signal, at
 ///   [`Trust::Measured`] or [`Trust::OperatorAttested`]; otherwise it is
 ///   refused as class 4. Its class is the highest of the entry's class, the
 ///   setting kind's minimum ([`crate::SettingKind::minimum_class`]), class 2
@@ -228,14 +314,22 @@ impl Decision {
 ///   with [`RefusalReason::ValueOutOfRange`]. An entry with no range accepts
 ///   any value. Class 4 is still reported first.
 ///
+/// - **The bus action**: a write is resolved to one [`BusWriteAction`]: the
+///   port's bench port number from its bus fact, the request's unit, the
+///   entry's register, and the value as register words (see
+///   [`bus_action`]). If no frame can carry it, it is refused with
+///   [`RefusalReason::UnencodableWrite`]. A class 3 decision carries that
+///   action and its [`ActionDigest`].
+///
 /// Context only ever raises a class. The value of a write never changes the
 /// class; it can only make the write refused.
 pub fn classify(request: &EffectRequest, writes: &WriteMap, buses: &BusFacts) -> Decision {
+    let mut write_entry = None;
     let floor = match request {
         EffectRequest::BusListen(_) => Floor(HazardClass::Class0),
         EffectRequest::BusRead(_) => Floor(HazardClass::Class0).raise(HazardClass::Class2),
         EffectRequest::BusWrite(w) => {
-            let Some(entry) = writes.get(&w.port, &w.signal) else {
+            let Some(entry) = writes.get(&w.port, w.unit, &w.signal) else {
                 return Decision::refused(RefusalReason::UnknownSignal);
             };
             if !actionable(entry.trust) {
@@ -251,6 +345,7 @@ pub fn classify(request: &EffectRequest, writes: &WriteMap, buses: &BusFacts) ->
                     return Decision::refused(RefusalReason::ValueOutOfRange);
                 }
             }
+            write_entry = Some((entry, w));
             let mut floor = Floor(entry.class).raise(entry.kind.minimum_class());
             if entry.energy_relevant {
                 floor = floor.raise(HazardClass::Class2);
@@ -264,6 +359,7 @@ pub fn classify(request: &EffectRequest, writes: &WriteMap, buses: &BusFacts) ->
         return Decision::refused(RefusalReason::ClassNeverPermitted);
     }
 
+    let mut action = None;
     if transmits(request) {
         let Some(fact) = buses.get(request.port()) else {
             return Decision::refused(RefusalReason::NoMastershipFact);
@@ -277,9 +373,16 @@ pub fn classify(request: &EffectRequest, writes: &WriteMap, buses: &BusFacts) ->
                 return Decision::refused(RefusalReason::OtherMasterActive)
             }
         }
+        if let Some((entry, w)) = write_entry {
+            let Some(resolved) = bus_action(fact.bench_port, entry.unit, entry.register, w.value)
+            else {
+                return Decision::refused(RefusalReason::UnencodableWrite);
+            };
+            action = Some(resolved);
+        }
     }
 
-    Decision::for_class(floor, request)
+    Decision::for_class(floor, request, action)
 }
 
 /// Whether carrying out the request puts anything on the bus.

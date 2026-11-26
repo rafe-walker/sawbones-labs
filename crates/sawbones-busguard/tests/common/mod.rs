@@ -2,7 +2,8 @@
 #![allow(dead_code)]
 
 use sawbones_busguard::{
-    crc16_modbus, AllowList, FrameDigest, Function, LeaseGrant, Port, Rule, TrustRootEvent, Update,
+    crc16_modbus, parse, AllowList, BusWriteAction, Function, LeaseGrant, Port, Rule,
+    TrustRootEvent, Update, WriteFunction,
 };
 
 /// `body` with its CRC-16/MODBUS appended, low byte first.
@@ -65,10 +66,67 @@ pub fn replace(rules: &[Rule]) -> TrustRootEvent {
     TrustRootEvent::unverified_from_trust_root(Update::ReplaceAllowList(allow_list(rules)))
 }
 
-/// The trust root grants a lease for exactly `frame` on `port`.
+/// The action `frame` is the write of, on `port`, if it is a well-formed
+/// write the shared encoder can express.
+pub fn action_for(port: u8, frame: &[u8]) -> Option<BusWriteAction> {
+    let parsed = parse(frame).ok()?;
+    let function = match parsed.function() {
+        Function::WriteSingleRegister => WriteFunction::WriteSingleRegister,
+        Function::WriteMultipleRegisters => WriteFunction::WriteMultipleRegisters,
+        _ => return None,
+    };
+    let values: Vec<u16> = parsed
+        .payload()
+        .chunks_exact(2)
+        .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+        .collect();
+    let action =
+        BusWriteAction::new(port, parsed.unit(), function, parsed.start(), &values).ok()?;
+    // The encoder must give back exactly the frame it was read from.
+    assert_eq!(action.frame().as_bytes(), frame);
+    Some(action)
+}
+
+/// The trust root grants a lease for the action `frame` encodes, on `port`.
+pub fn grant_action(action: BusWriteAction) -> TrustRootEvent {
+    TrustRootEvent::unverified_from_trust_root(Update::GrantLease(LeaseGrant::for_action(action)))
+}
+
+/// The trust root grants a lease for exactly `frame` on `port`. Panics if
+/// `frame` is not a write an action can express.
 pub fn grant(port: u8, frame: &[u8]) -> TrustRootEvent {
-    TrustRootEvent::unverified_from_trust_root(Update::GrantLease(LeaseGrant {
-        port: Port(port),
-        digest: FrameDigest::of(frame),
-    }))
+    try_grant(port, frame).unwrap_or_else(|| panic!("no action is the frame {frame:02X?}"))
+}
+
+/// As [`grant`], or `None` if no action encodes to `frame`.
+pub fn try_grant(port: u8, frame: &[u8]) -> Option<TrustRootEvent> {
+    action_for(port, frame).map(grant_action)
+}
+
+/// A frame sink that records what it sent, for the transmit tests. Clones
+/// share one record, so a test keeps one clone and hands the other to the
+/// line.
+#[derive(Debug, Default, Clone)]
+pub struct Wire {
+    pub sent: std::rc::Rc<std::cell::RefCell<Vec<Vec<u8>>>>,
+}
+
+impl Wire {
+    /// Every frame sent so far.
+    pub fn frames(&self) -> Vec<Vec<u8>> {
+        self.sent.borrow().clone()
+    }
+}
+
+impl sawbones_busguard::FrameSink for Wire {
+    type Error = core::convert::Infallible;
+    fn send_frame(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
+        self.sent.borrow_mut().push(bytes.to_vec());
+        Ok(())
+    }
+}
+
+/// `Port(port)`, for brevity.
+pub const fn port(port: u8) -> Port {
+    Port(port)
 }
