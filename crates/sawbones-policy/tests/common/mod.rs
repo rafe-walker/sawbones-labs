@@ -72,6 +72,7 @@ pub fn entry(
         unit: UNIT,
         signal: signal(s),
         register: register_of(s),
+        width: 1,
         class,
         kind,
         energy_relevant,

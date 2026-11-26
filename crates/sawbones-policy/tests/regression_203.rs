@@ -164,7 +164,11 @@ fn regression_203_values_become_these_words() {
 
 #[test]
 fn regression_203_an_unencodable_write_is_refused() {
-    let map = WriteMap::new([limit_entry(1, 0xFFFF)]).unwrap();
+    let map = WriteMap::new([WriteEntry {
+        width: 2,
+        ..limit_entry(1, 0xFFFF)
+    }])
+    .unwrap();
     let d = classify(&write_to(1, WriteValue::U32(7)), &map, &bench_buses());
     assert_eq!(
         d.requirement(),
@@ -173,6 +177,7 @@ fn regression_203_an_unencodable_write_is_refused() {
         }
     );
     assert_eq!(d.class(), HazardClass::Class4);
+    let map = WriteMap::new([limit_entry(1, 0xFFFF)]).unwrap();
     let d = classify(&write_to(1, WriteValue::U16(7)), &map, &bench_buses());
     assert_eq!(d.class(), HazardClass::Class3);
 }
@@ -293,6 +298,8 @@ fn regression_203_policy_interlock_approval_and_guard_agree_on_one_action() {
         });
         let map = WriteMap::new(map.entries().map(|e| WriteEntry {
             port: port(&p),
+            // The entry states the width of the value written (#214).
+            width: value.width(),
             ..e.clone()
         }))
         .unwrap();

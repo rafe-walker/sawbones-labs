@@ -137,16 +137,34 @@ fn register_words(value: WriteValue) -> (WriteFunction, [u16; 2], usize) {
 }
 
 /// The one bus action a write is: `value` to `register` of `unit` on bench
-/// port `bench_port`. `None` if no frame can carry it (a two-register value
-/// at register 0xFFFF, or a unit outside 1 to 247).
+/// port `bench_port`, for a signal as wide as the value. `None` if no frame
+/// can carry it (a two-register value at register 0xFFFF, or a unit outside
+/// 1 to 247).
+///
+/// The engine does not use this: a signal's width comes from its write-map
+/// entry, not from the value (#214); see [`bus_action_for_width`].
 pub fn bus_action(
     bench_port: u8,
     unit: u8,
     register: u16,
     value: WriteValue,
 ) -> Option<BusWriteAction> {
+    bus_action_for_width(bench_port, unit, register, value.width(), value)
+}
+
+/// The one bus action a write is, for a signal the write-map entry says is
+/// `width` registers wide (#214). `None` if the value is not `width`
+/// registers wide, or no frame can carry it.
+pub fn bus_action_for_width(
+    bench_port: u8,
+    unit: u8,
+    register: u16,
+    width: u8,
+    value: WriteValue,
+) -> Option<BusWriteAction> {
     let (function, words, count) = register_words(value);
-    BusWriteAction::new(bench_port, unit, function, register, &words[..count]).ok()
+    BusWriteAction::new_with_width(bench_port, unit, function, register, width, &words[..count])
+        .ok()
 }
 
 /// Why a request was refused.
@@ -177,6 +195,15 @@ pub enum RefusalReason {
     },
     /// The request transmits on a port where another master is active.
     OtherMasterActive,
+    /// The value is not as many registers wide as the entry says the signal
+    /// is (#214): for example a 32-bit value for a one-register signal, which
+    /// would overwrite the next register.
+    WidthMismatch {
+        /// The register count the write-map entry states.
+        expected: u8,
+        /// The register count of the value.
+        got: u8,
+    },
     /// No Modbus frame can carry the write: a two-register value at the last
     /// register.
     UnencodableWrite,
@@ -314,6 +341,10 @@ impl Decision {
 ///   with [`RefusalReason::ValueOutOfRange`]. An entry with no range accepts
 ///   any value. Class 4 is still reported first.
 ///
+/// - **Width** (#214): a signal's register width is its entry's
+///   [`crate::WriteEntry::width`]. A value of another width is refused with
+///   [`RefusalReason::WidthMismatch`], range or no range.
+///
 /// - **The bus action**: a write is resolved to one [`BusWriteAction`]: the
 ///   port's bench port number from its bus fact, the request's unit, the
 ///   entry's register, and the value as register words (see
@@ -335,12 +366,19 @@ pub fn classify(request: &EffectRequest, writes: &WriteMap, buses: &BusFacts) ->
             if !actionable(entry.trust) {
                 return Decision::refused(RefusalReason::EntryNotAttested { trust: entry.trust });
             }
+            if matches!(entry.class, HazardClass::Class4)
+                || matches!(entry.kind.minimum_class(), HazardClass::Class4)
+            {
+                return Decision::refused(RefusalReason::ClassNeverPermitted);
+            }
+            // The signal's width is the entry's, not the value's (#214).
+            if w.value.width() != entry.width {
+                return Decision::refused(RefusalReason::WidthMismatch {
+                    expected: entry.width,
+                    got: w.value.width(),
+                });
+            }
             if let Some(range) = entry.range {
-                if matches!(entry.class, HazardClass::Class4)
-                    || matches!(entry.kind.minimum_class(), HazardClass::Class4)
-                {
-                    return Decision::refused(RefusalReason::ClassNeverPermitted);
-                }
                 if !range.contains(w.value) {
                     return Decision::refused(RefusalReason::ValueOutOfRange);
                 }
@@ -374,8 +412,13 @@ pub fn classify(request: &EffectRequest, writes: &WriteMap, buses: &BusFacts) ->
             }
         }
         if let Some((entry, w)) = write_entry {
-            let Some(resolved) = bus_action(fact.bench_port, entry.unit, entry.register, w.value)
-            else {
+            let Some(resolved) = bus_action_for_width(
+                fact.bench_port,
+                entry.unit,
+                entry.register,
+                entry.width,
+                w.value,
+            ) else {
                 return Decision::refused(RefusalReason::UnencodableWrite);
             };
             action = Some(resolved);

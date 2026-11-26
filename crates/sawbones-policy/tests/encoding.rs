@@ -122,7 +122,7 @@ fn a_raw_address_or_free_text_is_not_a_request() {
 #[test]
 fn facts_load_from_json_and_reject_duplicates_and_unknown_fields() {
     let writes: WriteMap = serde_json::from_str(
-        r#"[{"port":"rs485-1","unit":2,"signal":"charge_voltage","register":4096,"class":"class1",
+        r#"[{"port":"rs485-1","unit":2,"signal":"charge_voltage","register":4096,"width":1,"class":"class1",
              "kind":"charge_voltage","energy_relevant":true,"trust":"operator_attested"}]"#,
     )
     .unwrap();
@@ -137,14 +137,14 @@ fn facts_load_from_json_and_reject_duplicates_and_unknown_fields() {
     assert_eq!(e.class, HazardClass::Class1);
 
     let dup = r#"[
-        {"port":"p","unit":1,"signal":"s","register":1,"class":"class1","kind":"config","energy_relevant":false,"trust":"measured"},
-        {"port":"p","unit":1,"signal":"s","register":2,"class":"class3","kind":"config","energy_relevant":false,"trust":"measured"}
+        {"port":"p","unit":1,"signal":"s","register":1,"width":1,"class":"class1","kind":"config","energy_relevant":false,"trust":"measured"},
+        {"port":"p","unit":1,"signal":"s","register":2,"width":1,"class":"class3","kind":"config","energy_relevant":false,"trust":"measured"}
     ]"#;
     assert!(serde_json::from_str::<WriteMap>(dup).is_err());
     // The same signal of two units is two facts.
     let two_units = r#"[
-        {"port":"p","unit":1,"signal":"s","register":1,"class":"class1","kind":"config","energy_relevant":false,"trust":"measured"},
-        {"port":"p","unit":2,"signal":"s","register":1,"class":"class3","kind":"config","energy_relevant":false,"trust":"measured"}
+        {"port":"p","unit":1,"signal":"s","register":1,"width":1,"class":"class1","kind":"config","energy_relevant":false,"trust":"measured"},
+        {"port":"p","unit":2,"signal":"s","register":1,"width":1,"class":"class3","kind":"config","energy_relevant":false,"trust":"measured"}
     ]"#;
     assert_eq!(
         serde_json::from_str::<WriteMap>(two_units)
@@ -154,14 +154,18 @@ fn facts_load_from_json_and_reject_duplicates_and_unknown_fields() {
         2
     );
     // A missing unit or register is not an entry.
-    let no_unit = r#"[{"port":"p","signal":"s","register":1,"class":"class1","kind":"config",
+    let no_unit = r#"[{"port":"p","signal":"s","register":1,"width":1,"class":"class1","kind":"config",
         "energy_relevant":false,"trust":"measured"}]"#;
     assert!(serde_json::from_str::<WriteMap>(no_unit).is_err());
+    // A missing width is not an entry either (#214): it is never guessed.
+    let no_width = r#"[{"port":"p","unit":1,"signal":"s","register":1,"class":"class1",
+        "kind":"config","energy_relevant":false,"trust":"measured"}]"#;
+    assert!(serde_json::from_str::<WriteMap>(no_width).is_err());
     let no_register = r#"[{"port":"p","unit":1,"signal":"s","class":"class1","kind":"config",
         "energy_relevant":false,"trust":"measured"}]"#;
     assert!(serde_json::from_str::<WriteMap>(no_register).is_err());
 
-    let extra = r#"[{"port":"p","unit":1,"signal":"s","register":1,"class":"class1","kind":"config",
+    let extra = r#"[{"port":"p","unit":1,"signal":"s","register":1,"width":1,"class":"class1","kind":"config",
         "energy_relevant":false,"trust":"measured","override":"class0"}]"#;
     assert!(serde_json::from_str::<WriteMap>(extra).is_err());
 

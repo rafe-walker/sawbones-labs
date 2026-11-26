@@ -5,7 +5,7 @@ mod common;
 use common::*;
 use sawbones_policy::{
     classify, BusFacts, Decision, EffectRequest, FactError, HazardClass, Mastership, RefusalReason,
-    Requirement, SettingKind, WriteMap, WriteValue,
+    Requirement, SettingKind, WriteEntry, WriteMap, WriteValue,
 };
 use sawbones_reading::Trust;
 
@@ -433,7 +433,15 @@ fn the_value_plays_no_part_in_the_class() {
     for s in ["display_brightness", "battery_low_cutoff", "grid_relay"] {
         let classes: Vec<_> = values
             .iter()
-            .map(|v| classify(&write(BENCH, s, *v), &writes(), &buses()).class())
+            .map(|v| {
+                // Each entry states the width of the value written (#214).
+                let map = WriteMap::new(writes().entries().map(|e| WriteEntry {
+                    width: v.width(),
+                    ..e.clone()
+                }))
+                .unwrap();
+                classify(&write(BENCH, s, *v), &map, &buses()).class()
+            })
             .collect();
         assert!(classes.windows(2).all(|w| w[0] == w[1]), "{s}: {classes:?}");
     }

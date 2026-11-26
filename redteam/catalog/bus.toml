@@ -188,9 +188,10 @@ how = "WriteEntry carries a name, class and kind but no address, width or alias 
 expected = "Overlap and neighbour shifts caught at load time; not possible today."
 severity = "high"
 sources = ["https://i.blackhat.com/USA-20/Wednesday/us-20-Balduzzi-Industrial-Protocol-Gateways-Under-Analysis-wp.pdf", "https://attack.mitre.org/techniques/T0836/"]
-status = "gap"
+status = "partial"
 test = "Once WriteEntry gains address, width, unit: WriteMap::new must reject overlapping spans on one port and unit with different classes or kinds. A U32 signal must occupy two registers and both must inherit its class. Property test: shift every encoded address by +1 and -1; the result must hit another mapped entry of equal or higher class, or be refused by the guard rules. Coil-versus-register overlap on devices that alias them is a recorded per-device fact tested in the driver."
 issue = 174
+note = "Entries carry a unit (#203), a register and now a width (#214). The width comes from the entry, not the value: the policy refuses a value of another width (WidthMismatch), the encoder refuses a register count that differs from it, and the guard passes only the approved action's frame (sawbones-redteam::redteam_bus_015_a_signal_width_comes_from_its_entry_and_policy_encoder_and_guard_agree). Open: WriteMap::new does not yet reject overlapping spans, aliased names or class mismatch across the registers of a two-register signal, and the +1/-1 neighbour property test is not written."
 
 [[attack]]
 id = "bus-016"
@@ -217,7 +218,7 @@ sources = ["https://attack.mitre.org/techniques/T0836/"]
 status = "partial"
 test = "Add per-entry value constraints (min, max, allowed set, width and signedness). Test: BusWrite U16(0xFFFF) to an entry limited to 0..=100 is refused (ValueOutOfRange); I16(-1) to a U16 entry is refused (WidthMismatch); Bool to a register entry refused; a command register permits only its listed values. Property test: class never decreases when the value changes."
 issue = 174
-note = "Research said gap. Policy value limits (#189) refuse out-of-range and wrong-type writes (regression_187_out_of_range_write_is_refused). Open: entries with no range accept any value, and no allowed-set for command registers."
+note = "Research said gap. Policy value limits (#189) refuse out-of-range and wrong-type writes (regression_187_out_of_range_write_is_refused). #214: a value of another register width than the entry states is refused with or without a range (sawbones-redteam::redteam_bus_017_a_value_of_the_wrong_width_is_refused_with_or_without_a_range). Open: an entry with no range still accepts any value of the right width, and there is no allowed-set for command registers."
 
 [[attack]]
 id = "bus-018"
