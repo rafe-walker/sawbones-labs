@@ -1,0 +1,52 @@
+name: Benchmarks
+
+# Instruction-count benchmarks under valgrind [#220]: stable on shared
+# runners, unlike wall-clock time. Compared with the checked-in baseline
+# ci/bench_baseline.json; more than 10% more instructions in any case fails.
+# To re-bless, see CONTRIBUTING.md.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bench-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  bench:
+    name: instruction counts (callgrind)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Install valgrind
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends valgrind
+          valgrind --version
+      - name: Build the benchmark binary
+        run: cargo build --release --locked -p sawbones-bench
+      - name: Compare with the baseline (fails above the threshold)
+        run: python3 -I ci/bench.py check --bin target/release/sawbones-bench
+      - name: Measure again as a new baseline (artifact only, nothing is committed)
+        if: ${{ !cancelled() }}
+        run: python3 -I ci/bench.py bless --bin target/release/sawbones-bench
+      - name: Upload the measured baseline
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-baseline
+          path: ci/bench_baseline.json
+          retention-days: 30

@@ -1,0 +1,50 @@
+# cargo-fuzz project for the decoders that read bytes from outside (#220).
+# Not a member of the root workspace (see `exclude` there): it needs a nightly
+# compiler, and its libFuzzer dependencies must stay out of the root Cargo.lock
+# that cargo-deny and the supply-chain checks read. It has its own lock file.
+[package]
+name = "sawbones-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+sawbones-approvals = { path = "../crates/sawbones-approvals" }
+sawbones-busguard = { path = "../crates/sawbones-busguard", default-features = false }
+sawbones-module-protocol = { path = "../crates/sawbones-module-protocol" }
+sawbones-reading = { path = "../crates/sawbones-reading" }
+
+[[bin]]
+name = "module_protocol_frame"
+path = "fuzz_targets/module_protocol_frame.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "busguard_modbus_rtu"
+path = "fuzz_targets/busguard_modbus_rtu.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "approvals_message"
+path = "fuzz_targets/approvals_message.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "world_text_fence"
+path = "fuzz_targets/world_text_fence.rs"
+test = false
+doc = false
+bench = false

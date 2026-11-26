@@ -1,0 +1,97 @@
+name: Mutation testing (weekly)
+
+# cargo-mutants on the safety crates [#220]. Informational, never gating: a
+# missed mutant is a candidate test gap, listed in the job summary. Each shard
+# is time-boxed; a shard that runs out of time still reports what it finished.
+on:
+  schedule:
+    - cron: "43 4 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutants-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  mutants:
+    name: mutants ${{ matrix.crate }} ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { crate: sawbones-interlock, shard: "0/4" }
+          - { crate: sawbones-interlock, shard: "1/4" }
+          - { crate: sawbones-interlock, shard: "2/4" }
+          - { crate: sawbones-interlock, shard: "3/4" }
+          - { crate: sawbones-policy, shard: "0/2" }
+          - { crate: sawbones-policy, shard: "1/2" }
+          - { crate: sawbones-busguard, shard: "0/2" }
+          - { crate: sawbones-busguard, shard: "1/2" }
+          - { crate: sawbones-approvals, shard: "0/1" }
+          - { crate: sawbones-module-protocol, shard: "0/2" }
+          - { crate: sawbones-module-protocol, shard: "1/2" }
+    env:
+      CRATE: ${{ matrix.crate }}
+      SHARD: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: mutants
+      - uses: taiki-e/install-action@18101caa61cb89118e2ee749786f33c6d1f8a8cb # v2.90.9
+        with:
+          tool: cargo-mutants@27.1.0
+      - name: Run cargo-mutants (time-boxed)
+        # `timeout` stops the run at 130 minutes so the summary and the
+        # artifact steps below still run. Exit 124 (time box) and cargo-mutants'
+        # own "mutants were missed" exit codes are not failures here.
+        run: |
+          set +e
+          timeout 130m cargo mutants --package "$CRATE" --shard "$SHARD" \
+            --jobs 2 --timeout-multiplier 4 --minimum-test-timeout 60 \
+            --cargo-arg=--locked --output "$RUNNER_TEMP/out" --no-shuffle
+          status=$?
+          echo "cargo-mutants exit status: $status"
+          if [ "$status" -eq 124 ]; then echo "::warning::$CRATE $SHARD hit its time box; counts are partial"; fi
+          mkdir -p "mutants-result/${CRATE}--${SHARD//\//-}"
+          cp "$RUNNER_TEMP"/out/mutants.out/*.txt "mutants-result/${CRATE}--${SHARD//\//-}/" || true
+          exit 0
+      - name: Upload the result
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: mutants-${{ matrix.crate }}-${{ strategy.job-index }}
+          path: mutants-result/
+          retention-days: 30
+
+  summary:
+    name: mutation summary
+    needs: mutants
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: mutants-*
+          path: results
+          merge-multiple: true
+      - name: Per-crate table and the missed mutants
+        run: python3 -I ci/mutants_summary.py results >> "$GITHUB_STEP_SUMMARY"

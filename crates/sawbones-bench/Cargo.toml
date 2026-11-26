@@ -1,0 +1,21 @@
+[package]
+name = "sawbones-bench"
+description = "Instruction-count benchmarks for the Sawbones safety crates (#220). Run under valgrind by ci/bench.py; not shipped."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# The crates under measurement. No external dependency: the harness is plain
+# std, so this crate adds nothing to Cargo.lock and nothing to the supply-chain
+# checks.
+sawbones-busguard = { path = "../sawbones-busguard", default-features = false }
+sawbones-interlock = { path = "../sawbones-interlock", default-features = false }
+sawbones-module-protocol = { path = "../sawbones-module-protocol" }
+sawbones-policy = { path = "../sawbones-policy" }
+sawbones-reading = { path = "../sawbones-reading" }
