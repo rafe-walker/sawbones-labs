@@ -322,8 +322,14 @@ fn mutations(request: &EffectRequest, rng: &mut Rng) -> Vec<EffectRequest> {
     }
 }
 
+/// Every single-field change, the unit included, changes the request's
+/// encoding. For writes, the lease digest is over the bus action (#203): a
+/// change of port, unit or signal (so register) always changes it, and any
+/// change changes it exactly when the action, and so the frame, changes. A
+/// change of width with the same wire words, such as `Bool(true)` and
+/// `U16(1)`, is the same frame and the same digest.
 #[test]
-fn the_encoding_changes_if_any_field_changes() {
+fn the_digest_changes_if_any_field_changes() {
     let empty = WriteMap::default();
     for seed in 0..CASES {
         let mut rng = Rng::new(seed);
@@ -337,6 +343,20 @@ fn the_encoding_changes_if_any_field_changes() {
                 bytes,
                 "seed {seed}: {request:?} vs {changed:?}"
             );
+            let (EffectRequest::BusWrite(w), EffectRequest::BusWrite(c)) = (&request, &changed)
+            else {
+                continue;
+            };
+            let (a, b) = (expected_action(&request), expected_action(&changed));
+            let (da, db) = (ActionDigest::of(&a), ActionDigest::of(&b));
+            assert_eq!(a == b, da == db, "seed {seed}: {w:?} vs {c:?}");
+            // The port is the line, not part of the frame.
+            if a.port() == b.port() {
+                assert_eq!(a == b, a.frame() == b.frame(), "seed {seed}");
+            }
+            if w.port != c.port || w.unit != c.unit || w.signal != c.signal {
+                assert_ne!(da, db, "seed {seed}: {w:?} vs {c:?}");
+            }
         }
     }
 }

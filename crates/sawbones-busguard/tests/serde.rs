@@ -11,7 +11,7 @@ use sawbones_busguard::{
 };
 
 #[test]
-fn verdicts_and_allow_lists_round_trip_through_json() {
+fn decisions_and_allow_lists_round_trip_through_json() {
     let verdict = Verdict::Block(BlockReason::Frame(FrameError::UnsupportedFunction(5)));
     let json = serde_json::to_string(&verdict).unwrap();
     assert_eq!(json, r#"{"block":{"frame":{"unsupported_function":5}}}"#);

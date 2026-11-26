@@ -14,12 +14,14 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// The canonical bytes of one request, unit included (#203). If this fails,
-/// bump [`REQUEST_ENCODING`] and update it deliberately. The lease digest is
-/// not over these bytes but over the bus action; its golden is in
-/// `sawbones-modbus-encode`.
+/// The canonical bytes of one request, unit included (#203), and the digest
+/// a class 3 lease for it is bound to: since #203 that is the digest of the
+/// bus action the request resolves to, not of these bytes. If either fails,
+/// bump [`REQUEST_ENCODING`] or the encoder's domain and update it
+/// deliberately. The digest was checked against Python's hashlib over the
+/// action's domain label and encoding.
 #[test]
-fn canonical_bytes_are_pinned() {
+fn canonical_bytes_and_digest_are_pinned() {
     assert_eq!(REQUEST_ENCODING, "sawbones.policy.request/1-provisional");
     let request = write("rs485-1", "battery_low_cutoff", WriteValue::U16(4600));
     let expected = [
@@ -49,12 +51,28 @@ fn canonical_bytes_are_pinned() {
     ]
     .concat();
     assert_eq!(hex(&read.canonical_bytes()), expected);
+
+    // The lease digest: write 4600 to the signal's register of unit 1 on the
+    // port's bench port, as the test facts wire them.
+    let action = expected_action(&request);
+    assert_eq!(
+        hex(&action.encode()),
+        format!(
+            "{:02x}0106{:04x}0111f8000000000000",
+            bench_port_of("rs485-1"),
+            register_of("battery_low_cutoff")
+        )
+    );
+    assert_eq!(ActionDigest::of(&action).to_hex(), PINNED_LEASE_DIGEST);
 }
+
+const PINNED_LEASE_DIGEST: &str =
+    "6dd15ce857eecfdf29733d8d020fd6d5e3479f3b3f9e0c18f78c8763847bd497";
 
 /// The digest the interlock binds a lease to, and the one the approval and
 /// the bus guard carry, are the same 32 bytes.
 #[test]
-fn the_interlock_and_guard_digests_are_the_same_bytes() {
+fn the_interlock_digest_is_the_same_bytes() {
     let request = write("rs485-1", "battery_low_cutoff", WriteValue::U16(4600));
     let action = expected_action(&request);
     let digest = ActionDigest::of(&action);
