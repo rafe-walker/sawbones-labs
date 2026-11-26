@@ -16,7 +16,10 @@ serde_json.workspace = true
 toml = { version = "1", default-features = false, features = ["parse", "serde"] }
 
 [dev-dependencies]
+# Signs module identities in the module-link tests, with seeds kept under tests/.
+ed25519-dalek = { version = "3.0.0", default-features = false }
 sawbones-busguard = { path = "../sawbones-busguard", features = ["test-unverified"] }
 sawbones-interlock = { path = "../sawbones-interlock" }
+sawbones-module-protocol = { path = "../sawbones-module-protocol", features = ["verify"] }
 sawbones-policy = { path = "../sawbones-policy" }
 sawbones-reading = { path = "../sawbones-reading" }

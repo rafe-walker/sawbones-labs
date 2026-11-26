@@ -303,9 +303,10 @@ how = "If a module is trusted because it says it is the meter, a replaced or con
 expected = "A module that is not where or what it was enrolled as is quarantined until a person re-enrolls it."
 severity = "medium"
 sources = ["https://netwrix.com/en/resources/blog/badusb-attack-prevention"]
-status = "gap"
-test = "software: module-protocol tests for duplicate IDs, an ID that changes port, and an unsigned capability change; bench: swap two modules between ports and run the reference check."
-issue = 98
+status = "partial"
+test = "software: supervisor registry tests for duplicate IDs and an ID that changes hub port, with the module quarantined until re-enrolled (#100). bench: swap two modules between ports and run the reference check."
+issue = 100
+note = "The protocol side landed with #98 (sawbones-module-protocol): identity is an Ed25519 signature over the host's fresh challenge, the session the module opened, the claimed id, its capabilities (can_emit and highest class), its manifest digest and its firmware digest, checked against the key enrolled for that id. A module claiming another module's id, an identity replayed from another challenge or session, and a changed capability or manifest with no new signature all fail to verify (sawbones-redteam::redteam_hw_023_a_module_cannot_claim_another_modules_id, redteam_hw_023_a_captured_identity_does_not_answer_a_new_challenge, redteam_hw_023_an_unsigned_capability_change_does_not_verify, redteam_hw_023_a_swapped_manifest_does_not_match_the_signed_digest). Open: the hub-port binding and duplicate-id quarantine in the supervisor's registry (#100)."
 
 [[attack]]
 id = "hw-024"

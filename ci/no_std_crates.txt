@@ -6,3 +6,5 @@ sawbones-modbus-encode --no-default-features
 sawbones-busguard --no-default-features
 sawbones-busguard --no-default-features --features approvals
 sawbones-approvals --no-default-features
+sawbones-module-protocol --no-default-features
+sawbones-module-protocol --no-default-features --features verify
