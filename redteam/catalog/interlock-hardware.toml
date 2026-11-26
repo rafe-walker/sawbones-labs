@@ -146,7 +146,7 @@ sources = ["https://interrupt.memfault.com/blog/firmware-watchdog-best-practices
 status = "partial"
 test = "bench: freeze the supervisor with SIGSTOP and replay a captured heartbeat; rails drop within the stated budget. supervisor: answer challenges from its main loop only."
 issue = 144
-note = "Software side landed in #198: the interlock issues a challenge each HEARTBEAT_PERIOD_TICKS from a boot nonce; a wrong, stale, early, repeated, missing or cross-boot reply, or a stalled step loop, latches HeartbeatLost, and rails drop within two periods of the last good reply (sawbones-interlock::regression_198_every_bad_reply_latches, regression_198_stopping_time_is_two_periods_at_most). The reply proves freshness, not identity, until #172 keys make it a MAC. Open: the supervisor side and the bench test."
+note = "Software side landed in #198: the interlock issues a challenge each HEARTBEAT_PERIOD_TICKS from a boot nonce; a wrong, stale, early, repeated, missing or cross-boot reply, or a stalled step loop, latches HeartbeatLost, and rails drop within two periods of the last good reply (sawbones-interlock::regression_198_every_bad_reply_latches, regression_198_stopping_time_is_two_periods_at_most). The reply proves freshness, not identity, until #172 keys make it a MAC. The supervisor side landed with the skeleton (#100): Supervisor::step answers each challenge once at the start of every pass and nothing else replies, so a stalled loop loses the rails within two periods of its last reply (sawbones-redteam::redteam_hw_011_a_hung_supervisor_loses_the_rails_within_two_periods). Open: the bench test."
 
 [[attack]]
 id = "hw-012"
@@ -304,9 +304,9 @@ expected = "A module that is not where or what it was enrolled as is quarantined
 severity = "medium"
 sources = ["https://netwrix.com/en/resources/blog/badusb-attack-prevention"]
 status = "partial"
-test = "software: supervisor registry tests for duplicate IDs and an ID that changes hub port, with the module quarantined until re-enrolled (#100). bench: swap two modules between ports and run the reference check."
+test = "bench: swap two modules between ports and run the reference check; per-device keys from RP2350 signed boot with the key hash in OTP. software: the supervisor's registry runs on the Pi against real USB enumeration (#100)."
 issue = 100
-note = "The protocol side landed with #98 (sawbones-module-protocol): identity is an Ed25519 signature over the host's fresh challenge, the session the module opened, the claimed id, its capabilities (can_emit and highest class), its manifest digest and its firmware digest, checked against the key enrolled for that id. A module claiming another module's id, an identity replayed from another challenge or session, and a changed capability or manifest with no new signature all fail to verify (sawbones-redteam::redteam_hw_023_a_module_cannot_claim_another_modules_id, redteam_hw_023_a_captured_identity_does_not_answer_a_new_challenge, redteam_hw_023_an_unsigned_capability_change_does_not_verify, redteam_hw_023_a_swapped_manifest_does_not_match_the_signed_digest). Open: the hub-port binding and duplicate-id quarantine in the supervisor's registry (#100)."
+note = "The protocol side landed with #98 (sawbones-module-protocol): identity is an Ed25519 signature over the host's fresh challenge, the session the module opened, the claimed id, its capabilities (can_emit and highest class), its manifest digest and its firmware digest, checked against the key enrolled for that id. A module claiming another module's id, an identity replayed from another challenge or session, and a changed capability or manifest with no new signature all fail to verify (sawbones-redteam::redteam_hw_023_a_module_cannot_claim_another_modules_id, redteam_hw_023_a_captured_identity_does_not_answer_a_new_challenge, redteam_hw_023_an_unsigned_capability_change_does_not_verify, redteam_hw_023_a_swapped_manifest_does_not_match_the_signed_digest). The supervisor skeleton (#100) binds each module to its enrolled hub port: a module that proves its id on another port, on two ports at once, or with signed capabilities or a manifest beyond its enrollment is quarantined, told to go to its safe state, has its facts invalidated, and stays out until re-enrolled (sawbones-redteam::redteam_hw_023_a_duplicate_id_is_quarantined, redteam_hw_023_a_module_that_changes_hub_port_is_quarantined). Open: the bench swap test, real per-device keys and real enumeration."
 
 [[attack]]
 id = "hw-024"
@@ -410,9 +410,9 @@ expected = "The module only ever goes safe, the host's later requests are droppe
 severity = "medium"
 sources = ["https://attack.mitre.org/techniques/T0814/", "https://cwe.mitre.org/data/definitions/294.html"]
 status = "partial"
-test = "Authenticated session open: signed commands (#172) so the module refuses an Identify the host did not send. Supervisor test (#100): N session losses in a window raise a fault and quarantine the module; the interlock is told."
+test = "Authenticated session open: signed commands (#172) so the module refuses an Identify the host did not send. Then telling the trust root about a quarantined module, once it has an event for that."
 issue = 172
-note = "What the protocol layer guarantees is proven: the replay forces the safe state and nothing else, the host's old session is dropped as WrongSession, and the host reopens and re-verifies (sawbones-redteam::redteam_hw_031_a_replayed_identify_only_forces_a_safe_state, sawbones-sim-modules::a_replayed_identify_ends_the_session_and_forces_the_safe_state). Open: it can still be done at will (#172), and nothing yet counts it (#100)."
+note = "What the protocol layer guarantees is proven: the replay forces the safe state and nothing else, the host's old session is dropped as WrongSession, and the host reopens and re-verifies (sawbones-redteam::redteam_hw_031_a_replayed_identify_only_forces_a_safe_state, sawbones-sim-modules::a_replayed_identify_ends_the_session_and_forces_the_safe_state). The supervisor skeleton (#100) counts it: each replay is a loss that invalidates the module's facts, and MAX_LOSSES losses within LOSS_WINDOW_TICKS quarantine the module until a person re-enrolls it (sawbones-redteam::redteam_hw_031_repeated_identify_replays_quarantine_the_module). Open: it can still be done at will (#172), and the trust root is not told: it has no event for it."
 
 [[attack]]
 id = "hw-032"
@@ -423,10 +423,9 @@ how = "A device on another hub port, or one swapped in, replies to the host's Id
 expected = "An identity that does not verify against the key enrolled for that id is never trusted and gets no command; a duplicate or moved id quarantines the module until a person re-enrolls it."
 severity = "high"
 sources = ["https://attack.mitre.org/techniques/T0856/", "https://cwe.mitre.org/data/definitions/290.html"]
-status = "partial"
-test = "Supervisor registry tests (#100): two ports answering one id, and an id that moves port, quarantine both until re-enrolled. Bench: swap two modules between ports and run the reference check."
-issue = 100
-note = "Proven: a device signing under its own key but naming the enrolled id fails with BadSignature and is sent nothing but another Identify (sawbones-redteam::redteam_hw_032_a_second_device_cannot_answer_under_an_enrolled_id, sawbones-sim-modules::a_module_claiming_another_ones_id_is_never_trusted). The wire-level half of hw-023. Open: hub-port binding and duplicate-id quarantine (#100)."
+status = "blocked"
+test = "sawbones-redteam::redteam_hw_032_a_second_device_cannot_answer_under_an_enrolled_id + sawbones-sim-modules::a_module_claiming_another_ones_id_is_never_trusted + sawbones-redteam::redteam_hw_032_a_second_device_under_an_enrolled_id_is_never_trusted + sawbones-redteam::redteam_hw_023_a_module_that_changes_hub_port_is_quarantined"
+note = "A device signing under its own key but naming the enrolled id fails with BadSignature and is sent nothing but another Identify. The supervisor skeleton (#100) refuses it on its port without quarantining the id, and quarantines the id when a second device proves it with the enrolled key on another port, or when the module proves it on a port it was not enrolled on, until a person re-enrolls it; the genuine module is sent to its safe state. The bench swap test stays with hw-023."
 
 [[attack]]
 id = "hw-033"
@@ -438,9 +437,9 @@ expected = "No flooded frame is accepted as an answer, none runs as a command, a
 severity = "medium"
 sources = ["https://attack.mitre.org/techniques/T0814/", "https://cwe.mitre.org/data/definitions/400.html"]
 status = "partial"
-test = "Supervisor test (#100): a per-module budget of refused frames per second; over it the module is quarantined and the interlock is told. Signed commands (#172) so forged frames cannot move a module's sequence window."
+test = "Signed commands (#172) so forged frames cannot move a module's sequence window. Telling the trust root about a quarantined module, once it has an event for that."
 issue = 100
-note = "Proven: toward the host every junk frame is refused and the call ends Flooded at its budget; toward the module nothing executes but the host's own commands, and a new session recovers (sawbones-redteam::redteam_hw_033_a_flood_gets_no_frame_accepted_and_the_call_gives_up, sawbones-sim-modules::a_babbling_module_is_refused_frame_by_frame_and_the_call_gives_up, babbling_at_the_module_executes_nothing_and_a_new_session_recovers). The call budget lives in the simulated host, not in the protocol crate. Open: rate limiting and quarantine in the supervisor (#100); the sequence-window wedge needs #172."
+note = "Proven: toward the host every junk frame is refused and the call ends Flooded at its budget; toward the module nothing executes but the host's own commands, and a new session recovers (sawbones-redteam::redteam_hw_033_a_flood_gets_no_frame_accepted_and_the_call_gives_up, sawbones-sim-modules::a_babbling_module_is_refused_frame_by_frame_and_the_call_gives_up, babbling_at_the_module_executes_nothing_and_a_new_session_recovers). The supervisor skeleton (#100) reads at most MAX_FRAMES_PER_STEP frames per port per pass, so a flood cannot stall the main loop or the heartbeat, and quarantines a module whose port sends more than FLOOD_BUDGET frames it cannot take in one poll period, invalidating its facts (sawbones-redteam::redteam_hw_033_a_flooding_module_is_quarantined, sawbones-supervisor::a_flooding_port_is_quarantined_and_the_loop_stays_bounded). Open: the trust root is not told, and the sequence-window wedge needs #172."
 
 [[attack]]
 id = "hw-034"
@@ -464,9 +463,9 @@ expected = "Every call times out and nothing is left outstanding; a module that 
 severity = "high"
 sources = ["https://attack.mitre.org/techniques/T0804/", "https://attack.mitre.org/techniques/T0803/"]
 status = "partial"
-test = "Supervisor test (#100): N consecutive timeouts mark the module lost, raise a fault to the interlock and stop its readings counting as fresh; after a lost reply to a command that is not idempotent the supervisor reads the state back."
+test = "Telling the trust root when a module is lost, once it has an event for that; the bench test of a pulled cable."
 issue = 100
-note = "Proven at the protocol and simulated-firmware layer: host calls end in a timeout and are abandoned, late replies are refused, a stuck-high line is refused as BadMagic every tick, and a module with no accepted request for its link timeout ends its session and goes safe (sawbones-redteam::redteam_hw_035_a_stuck_line_times_out_and_the_module_goes_safe_by_itself, sawbones-sim-modules::a_silent_line_times_out_every_call_and_the_module_goes_safe_on_its_own). The link timeout is firmware's half of the contract; the crate has no clock. Open: the host timeout policy and loss handling (#100)."
+note = "Proven at the protocol and simulated-firmware layer: host calls end in a timeout and are abandoned, late replies are refused, a stuck-high line is refused as BadMagic every tick, and a module with no accepted request for its link timeout ends its session and goes safe (sawbones-redteam::redteam_hw_035_a_stuck_line_times_out_and_the_module_goes_safe_by_itself, sawbones-sim-modules::a_silent_line_times_out_every_call_and_the_module_goes_safe_on_its_own). The supervisor skeleton (#100) marks a module lost on its first missed deadline, from passed-in ticks, and invalidates every fact on the ports it carries and every fact it measured, so nothing it reported counts until earned again (sawbones-redteam::redteam_hw_035_a_silent_or_stuck_line_loses_the_module_and_its_facts); a bus write with no reply blocks its port until a read back (bus-007). Open: the trust root is not told; it has no event for a lost module."
 
 [[attack]]
 id = "hw-036"

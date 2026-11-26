@@ -80,13 +80,12 @@ title = "Spent lease, retries after exception or timeout, and lease lifetime"
 category = "replay of a captured write; lifetime abuse"
 target = "bus guard (lease), policy engine (lease semantics)"
 how = "After a write passes, an identical resend (agent retry after a busy or exception reply, or a replayed capture on the line side) needs a fresh press. A lease also dies on expiry, on a backward clock and on restart. Passing spends the lease at decision time, so a write with no reply leaves its effect unknown and the host must not assume it can resend."
-expected = "Crate cases blocked. The outcome_unknown host rule does not exist yet."
+expected = "All blocked: a spent, expired, backward-clock or restarted lease blocks, and after a write with no reply the host refuses a new lease and every other action on the port until a read back answers."
 severity = "high"
 sources = ["https://attack.mitre.org/techniques/T0830/", "https://industrialmonitordirect.com/blogs/knowledgebase/exploring-modbus-rtu-function-codes-timing-and-data-encoding"]
-status = "partial"
-test = "Grant lease for W, decide(W) Pass, decide(W) again Block(NoLease). Grant, advance clock to expiry: Block(LeaseExpired). Grant, clock goes backwards then decide: Block(ClockWentBackwards); grant on a backward clock: Err(ClockWentBackwards). Grant, restart(): Block(NoLease), allow-list intact. Grant at tick u64::MAX-1 must still expire. Host-level test (gap): after a Pass with no reply, the host marks the action outcome_unknown and refuses a new lease request until a readback succeeds."
-issue = 100
-note = "The crate cases are tested (rules.rs). The host rule outcome_unknown after a Pass with no reply does not exist."
+status = "blocked"
+test = "sawbones-busguard::a_leased_write_passes_once_then_blocks + sawbones-busguard::an_expired_lease_blocks + sawbones-busguard::regression_169_a_clock_that_goes_backwards_ends_the_lease + sawbones-busguard::a_grant_on_a_backward_clock_is_refused + sawbones-busguard::a_restart_ends_the_lease_and_keeps_the_allow_list + sawbones-busguard::a_lease_near_the_end_of_time_still_expires + sawbones-redteam::redteam_bus_007_a_write_with_no_reply_blocks_new_leases_until_a_readback + sawbones-supervisor::a_write_with_no_reply_blocks_its_port_until_a_read_back"
+note = "The crate cases are tested (rules.rs). The host rule landed with the supervisor skeleton (#100): a write with no reply is recorded as pending, and until a read of the same signal answers, Supervisor::request_lease and Supervisor::invoke refuse everything else on the port with OutcomeUnknown. Checking every reply for a wrong unit, function or exception is bus-022 (#174)."
 
 [[attack]]
 id = "bus-008"
@@ -271,7 +270,7 @@ sources = ["https://www.cisa.gov/news-events/ics-advisories/icsa-25-219-07", "ht
 status = "partial"
 test = "sawbones-redteam::redteam_bus_021_a_change_between_preflight_and_action_voids_the_token + sawbones-policy::any_change_to_the_ledger_voids_a_token + sawbones-policy::a_firmware_change_after_preflight_voids_the_token"
 issue = 110
-note = "Was gap. #110 binds the check to the state: preflight returns a single-use token bound to the request bytes, the action digest, the fact versions, the ledger generation and the store's chain head, and confirm refuses it if any of them changed, if the write map was edited, or after PREFLIGHT_TTL_TICKS. Still open: the device's own value is not part of the state. Still to write: an optional expected_current precondition on BusWrite, part of canonical_bytes, refused when a fresh readback differs, and a before/after readback pair for every leased write that flags a change by an unknown writer. The MCP invoke tools that must present the token do not exist yet."
+note = "Was gap. #110 binds the check to the state: preflight returns a single-use token bound to the request bytes, the action digest, the fact versions, the ledger generation and the store's chain head, and confirm refuses it if any of them changed, if the write map was edited, or after PREFLIGHT_TTL_TICKS. Still open: the device's own value is not part of the state. Still to write: an optional expected_current precondition on BusWrite, part of canonical_bytes, refused when a fresh readback differs, and a before/after readback pair for every leased write that flags a change by an unknown writer. The supervisor's one write path (#100) now requires the token by type: Supervisor::invoke takes a PreflightToken by value, confirm consumes it, and the bus transport acts only on an Authorized action that nothing else can make. The MCP invoke tools on top of it do not exist yet."
 
 [[attack]]
 id = "bus-022"

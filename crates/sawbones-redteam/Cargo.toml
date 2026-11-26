@@ -23,4 +23,7 @@ sawbones-interlock = { path = "../sawbones-interlock" }
 sawbones-module-protocol = { path = "../sawbones-module-protocol", features = ["verify"] }
 sawbones-policy = { path = "../sawbones-policy" }
 sawbones-reading = { path = "../sawbones-reading" }
+# The supervisor skeleton (#100), driven by the fakes in its own tests/.
+sawbones-isolation = { path = "../sawbones-isolation" }
+sawbones-supervisor = { path = "../sawbones-supervisor" }
 sawbones-sim-modules = { path = "../sawbones-sim-modules" }
