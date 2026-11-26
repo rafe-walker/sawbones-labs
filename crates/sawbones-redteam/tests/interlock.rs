@@ -1,8 +1,8 @@
 //! Interlock attacks (lane `interlock-hardware`), at the pure state machine.
 
 use sawbones_interlock::{
-    step, ActionDigest, Event, FaultReason, HazardClass, Inputs, LeaseTarget, Outputs, Port, Rail,
-    Refusal, State, OUTPUT_SETTLE_TICKS, RAIL_B_PORTS,
+    step, ActionDigest, Event, FaultReason, FaultRecord, HazardClass, HeartbeatChallenge, Inputs,
+    LeaseTarget, Outputs, Port, Rail, Refusal, State, OUTPUT_SETTLE_TICKS, RAIL_B_PORTS,
 };
 
 const TARGET: LeaseTarget = LeaseTarget {
@@ -18,31 +18,41 @@ const OTHER_PORT: LeaseTarget = LeaseTarget {
     action_digest: ActionDigest([1; 32]),
 };
 
-/// A bench with healthy feedback: each rail is sensed as last driven.
+/// A bench with healthy feedback (each rail is sensed as last driven) and a
+/// healthy supervisor (each heartbeat challenge answered once, on the next
+/// tick), booted cleanly at tick 0.
 struct Bench {
     state: State,
     last: Outputs,
     now: u64,
     inputs: Inputs,
+    answered: Option<HeartbeatChallenge>,
 }
 
 impl Bench {
     fn new() -> Self {
-        Self {
-            state: State::POWER_ON,
-            last: State::POWER_ON.outputs(),
+        let inputs = Inputs {
+            estop_pressed: false,
+            arm_switch_on: false,
+            key_switch_on: false,
+            heartbeat: None,
+            panel_button_pressed: false,
+            rail_a_sensed: false,
+            rail_b_sensed: [false; RAIL_B_PORTS],
+            firmware_jumper_fitted: false,
             now: 0,
-            inputs: Inputs {
-                estop_pressed: false,
-                arm_switch_on: false,
-                key_switch_on: false,
-                heartbeat_healthy: true,
-                panel_button_pressed: false,
-                rail_a_sensed: false,
-                rail_b_sensed: [false; RAIL_B_PORTS],
-                firmware_jumper_fitted: false,
-                now: 0,
-            },
+        };
+        let boot = Event::Restart {
+            record: Some(FaultRecord::Clear),
+            nonce: 0x0b00_7ed0,
+        };
+        let (state, last) = step(State::POWER_ON, inputs, Some(boot));
+        Self {
+            state,
+            last,
+            now: 0,
+            inputs,
+            answered: None,
         }
     }
 
@@ -60,10 +70,18 @@ impl Bench {
             }
             (self.last.rail_a, b)
         });
+        let challenge = self.last.challenge;
+        let heartbeat = if self.answered == challenge {
+            None
+        } else {
+            self.answered = challenge;
+            challenge.map(HeartbeatChallenge::reply)
+        };
         let inputs = Inputs {
             now: self.now,
             rail_a_sensed: a,
             rail_b_sensed: b,
+            heartbeat,
             ..self.inputs
         };
         let (state, outputs) = step(self.state, inputs, event);

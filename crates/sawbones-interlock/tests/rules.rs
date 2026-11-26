@@ -1,11 +1,46 @@
 //! Table tests: one table per rule. Each row is a script of ticks and what the
 //! outputs must be after the last one.
+//!
+//! The harness plays the firmware around the interlock: it keeps the fault
+//! record as non-volatile memory would, and it plays a supervisor that
+//! answers each heartbeat challenge once, on the tick after it appears,
+//! unless the script says otherwise.
 
 use sawbones_interlock::{
-    step, ActionDigest, Event, FaultReason, HazardClass, Inputs, LeaseTarget, Outputs, PanelState,
-    Port, Rail, Refusal, State, LEASE_TTL_TICKS, OUTPUT_SETTLE_TICKS, RAIL_B_PORTS,
-    REQUEST_TTL_TICKS,
+    step, ActionDigest, ClearSource, Event, FaultReason, FaultRecord, HazardClass,
+    HeartbeatChallenge, HeartbeatReply, HeartbeatWatch, Inputs, LeaseTarget, Mode, Outputs,
+    PanelState, PanelToken, Port, Rail, Refusal, State, HEARTBEAT_PERIOD_TICKS, LEASE_TTL_TICKS,
+    OUTPUT_SETTLE_TICKS, RAIL_B_PORTS, REQUEST_TTL_TICKS,
 };
+
+/// What the simulated supervisor sends on a tick.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Beat {
+    /// Answers the outstanding challenge if it has not answered it yet.
+    Answer,
+    /// Sends nothing.
+    Silent,
+    /// Sends a reply that answers nothing.
+    Wrong,
+    /// Sends the last reply it sent again.
+    Repeat,
+    /// Sends the reply to the challenge before the outstanding one.
+    Stale,
+}
+
+/// How a tick restarts the controller, if it does.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Boot {
+    /// No restart.
+    No,
+    /// A reset that keeps RAM: the state is passed in, with the record.
+    Reset,
+    /// A power loss: RAM is gone, so the state passed in is `POWER_ON`, and
+    /// the record is what non-volatile memory holds.
+    PowerLoss,
+    /// A power loss with this record read back instead (`None`: unreadable).
+    PowerLossWith(Option<FaultRecord>),
+}
 
 /// One tick of a script.
 #[derive(Clone, Copy)]
@@ -18,6 +53,8 @@ struct Tick {
     /// is sensed exactly as the previous tick drove it, and off after a
     /// restart.
     sensed: Option<(bool, [bool; RAIL_B_PORTS])>,
+    beat: Beat,
+    boot: Boot,
 }
 
 const NO_RAIL_B: [bool; RAIL_B_PORTS] = [false; RAIL_B_PORTS];
@@ -35,7 +72,7 @@ const IDLE: Tick = Tick {
         estop_pressed: false,
         arm_switch_on: false,
         key_switch_on: false,
-        heartbeat_healthy: true,
+        heartbeat: None,
         panel_button_pressed: false,
         rail_a_sensed: false,
         rail_b_sensed: NO_RAIL_B,
@@ -45,6 +82,15 @@ const IDLE: Tick = Tick {
     event: None,
     advance: 1,
     sensed: None,
+    beat: Beat::Answer,
+    boot: Boot::No,
+};
+
+const PANEL_CLEAR: Event = Event::ClearFault {
+    source: ClearSource::Panel(PanelToken::from_panel_button()),
+};
+const SUPERVISOR_CLEAR: Event = Event::ClearFault {
+    source: ClearSource::Supervisor,
 };
 
 impl Tick {
@@ -60,12 +106,33 @@ impl Tick {
         self.inputs.estop_pressed = true;
         self
     }
-    fn no_heartbeat(mut self) -> Self {
-        self.inputs.heartbeat_healthy = false;
+    /// The supervisor sends a wrong reply on this tick.
+    fn no_heartbeat(self) -> Self {
+        self.beat(Beat::Wrong)
+    }
+    fn beat(mut self, beat: Beat) -> Self {
+        self.beat = beat;
         self
     }
     fn event(mut self, event: Event) -> Self {
         self.event = Some(event);
+        self
+    }
+    /// A press of the panel button that the panel driver turns into a clear.
+    fn panel_clear(self) -> Self {
+        self.button().event(PANEL_CLEAR)
+    }
+    /// A reset that keeps RAM, with the record read back from memory.
+    fn restart(mut self) -> Self {
+        self.boot = Boot::Reset;
+        self
+    }
+    fn power_loss(mut self) -> Self {
+        self.boot = Boot::PowerLoss;
+        self
+    }
+    fn power_loss_with(mut self, record: Option<FaultRecord>) -> Self {
+        self.boot = Boot::PowerLossWith(record);
         self
     }
     fn after(mut self, ticks: u64) -> Self {
@@ -117,6 +184,8 @@ const fn fault(reason: FaultReason) -> Want {
     }
 }
 
+const UNKNOWN: Want = fault(FaultReason::FaultStateUnknown);
+
 const FIRMWARE: Want = Want {
     rail_a: false,
     rail_b: None,
@@ -165,49 +234,185 @@ const fn used(target: LeaseTarget) -> Event {
 }
 const LEASE3: Event = lease3(T0);
 
-/// Runs a script from power-on and returns the last tick's outputs.
-fn run(script: &[Tick]) -> Outputs {
-    let mut state = State::POWER_ON;
-    let mut now = 0;
-    let mut last = state.outputs();
-    for tick in script {
-        now += tick.advance;
+/// The firmware and supervisor around the interlock.
+struct Bench {
+    state: State,
+    now: u64,
+    last: Outputs,
+    /// The fault record in non-volatile memory.
+    record: FaultRecord,
+    /// The next boot nonce.
+    nonce: u64,
+    /// The challenge the supervisor last answered, the reply it last sent,
+    /// and the challenge before the outstanding one.
+    answered: Option<HeartbeatChallenge>,
+    sent: Option<HeartbeatReply>,
+    previous: Option<HeartbeatChallenge>,
+    /// The inputs of the last tick, for the quiet ticks of a gap.
+    inputs: Inputs,
+}
+
+impl Bench {
+    /// A bench that has just booted cleanly at tick 0 with the arm switch on,
+    /// so nothing is armed and the switch must be seen off. No reply yet.
+    fn booted() -> Self {
+        let boot = Inputs {
+            arm_switch_on: true,
+            ..IDLE.inputs
+        };
+        let restart = Event::Restart {
+            record: Some(FaultRecord::Clear),
+            nonce: 1,
+        };
+        let (state, last) = step(State::POWER_ON, boot, Some(restart));
+        assert_eq!(state.mode, Mode::AwaitArmOff);
+        Self::from(state, last, 0)
+    }
+
+    /// A bench at power-on with no restart event fed at all.
+    fn unbooted() -> Self {
+        Self::from(State::POWER_ON, State::POWER_ON.outputs(), 0)
+    }
+
+    fn from(state: State, last: Outputs, now: u64) -> Self {
+        Bench {
+            state,
+            now,
+            last,
+            record: state.fault_record(),
+            nonce: 2,
+            answered: None,
+            sent: None,
+            previous: None,
+            inputs: IDLE.inputs,
+        }
+    }
+
+    /// Runs one script tick. A tick that moves the clock by more than one
+    /// is preceded by quiet ticks, one per tick of the gap, with the previous
+    /// inputs and no event, as the firmware loop samples every tick. The
+    /// supervisor keeps answering through them unless this tick is silent.
+    fn tick(&mut self, tick: &Tick) -> Outputs {
+        for _ in 1..tick.advance {
+            let quiet = Tick {
+                inputs: self.inputs,
+                event: None,
+                advance: 1,
+                sensed: None,
+                beat: if tick.beat == Beat::Silent {
+                    Beat::Silent
+                } else {
+                    Beat::Answer
+                },
+                boot: Boot::No,
+            };
+            self.one(&quiet);
+        }
+        self.one(&Tick {
+            advance: tick.advance.min(1),
+            ..*tick
+        })
+    }
+
+    fn one(&mut self, tick: &Tick) -> Outputs {
+        self.now += tick.advance;
+        let now = self.now;
+        let restarting = tick.boot != Boot::No;
         let (rail_a_sensed, rail_b_sensed) = match tick.sensed {
             Some(sensed) => sensed,
-            None if tick.event == Some(Event::Restart) => (false, NO_RAIL_B),
+            None if restarting => (false, NO_RAIL_B),
             None => {
                 let mut b = NO_RAIL_B;
-                if let Some(port) = last.rail_b {
+                if let Some(port) = self.last.rail_b {
                     b[usize::from(port.0)] = true;
                 }
-                (last.rail_a, b)
+                (self.last.rail_a, b)
+            }
+        };
+
+        // The supervisor answers what the previous tick showed it. Across a
+        // restart there is nothing in flight.
+        let outstanding = self.last.challenge;
+        let heartbeat = match tick.beat {
+            _ if restarting => None,
+            Beat::Silent => None,
+            // Nothing shown (the heartbeat has not started): nothing to answer.
+            Beat::Answer if outstanding.is_none() || self.answered == outstanding => None,
+            Beat::Answer => {
+                self.answered = outstanding;
+                outstanding.map(HeartbeatChallenge::reply)
+            }
+            Beat::Wrong => Some(HeartbeatReply(outstanding.map_or(1, |c| c.reply().0 ^ 1))),
+            Beat::Repeat => Some(self.sent.expect("nothing sent yet to repeat")),
+            Beat::Stale => Some(self.previous.expect("no earlier challenge").reply()),
+        };
+        if heartbeat.is_some() {
+            self.sent = heartbeat;
+        }
+
+        let mut state = self.state;
+        let event = match tick.boot {
+            Boot::No => tick.event,
+            Boot::Reset | Boot::PowerLoss | Boot::PowerLossWith(_) => {
+                let record = match tick.boot {
+                    Boot::PowerLossWith(record) => record,
+                    _ => Some(self.record),
+                };
+                if tick.boot != Boot::Reset {
+                    state = State::POWER_ON;
+                }
+                self.nonce += 1;
+                Some(Event::Restart {
+                    record,
+                    nonce: self.nonce,
+                })
             }
         };
         let inputs = Inputs {
             now,
             rail_a_sensed,
             rail_b_sensed,
+            heartbeat,
             ..tick.inputs
         };
-        let (next, outputs) = step(state, inputs, tick.event);
-        state = next;
-        last = outputs;
+        let (next, outputs) = step(state, inputs, event);
+        if outputs.challenge != outstanding {
+            self.previous = outstanding;
+        }
+        self.inputs = Inputs {
+            heartbeat: None,
+            ..tick.inputs
+        };
+        self.state = next;
+        self.last = outputs;
+        self.record = next.fault_record();
+        outputs
     }
-    last
+}
+
+/// Runs a script from a clean boot and returns the last tick's outputs.
+fn run(script: &[Tick]) -> Outputs {
+    let mut bench = Bench::booted();
+    for tick in script {
+        bench.tick(tick);
+    }
+    bench.last
+}
+
+fn trim(got: Outputs) -> Want {
+    Want {
+        rail_a: got.rail_a,
+        rail_b: got.rail_b,
+        firmware_update_allowed: got.firmware_update_allowed,
+        panel: got.panel,
+        fault: got.fault,
+        refusal: got.refusal,
+    }
 }
 
 fn check(table: &[(&str, &[Tick], Want)]) {
     for (name, script, want) in table {
-        let got = run(script);
-        let got = Want {
-            rail_a: got.rail_a,
-            rail_b: got.rail_b,
-            firmware_update_allowed: got.firmware_update_allowed,
-            panel: got.panel,
-            fault: got.fault,
-            refusal: got.refusal,
-        };
-        assert_eq!(&got, want, "row: {name}");
+        assert_eq!(&trim(run(script)), want, "row: {name}");
     }
 }
 
@@ -230,7 +435,8 @@ fn power_on_drives_nothing() {
     let outputs = State::POWER_ON.outputs();
     assert!(!outputs.rail_a && outputs.rail_b.is_none());
     assert!(!outputs.firmware_update_allowed);
-    assert_eq!(outputs.panel, PanelState::AwaitingArmOff);
+    assert_eq!(outputs.panel, PanelState::Fault);
+    assert_eq!(outputs.fault, Some(FaultReason::FaultStateUnknown));
     assert_eq!(State::default(), State::POWER_ON);
 }
 
@@ -286,28 +492,48 @@ fn arm_sequence() {
 fn restart_turns_everything_off() {
     check(&[
         (
-            "restart while armed, switch left on",
-            &[IDLE, ARM, ARM.event(Event::Restart)],
+            "a clean restart with the switch left on",
+            &[IDLE, ARM, IDLE, ARM.restart()],
             ALL_OFF_AWAIT,
         ),
         (
             "still off on later ticks with the switch left on",
-            &[IDLE, ARM, ARM.event(Event::Restart), ARM, ARM],
+            &[IDLE, ARM, IDLE, ARM.restart(), ARM, ARM],
             ALL_OFF_AWAIT,
         ),
         (
-            "a restart with the switch off still needs off then on",
-            &[IDLE, ARM, IDLE.event(Event::Restart)],
+            "a clean restart with the switch off still needs off then on",
+            &[IDLE, IDLE.restart()],
             ALL_OFF_DISARMED,
         ),
         (
-            "fresh sequence after restart re-arms",
-            &[IDLE, ARM, ARM.event(Event::Restart), IDLE, ARM],
+            "fresh sequence after a clean restart re-arms",
+            &[IDLE, ARM.restart(), IDLE, ARM],
+            RAIL_A_ONLY,
+        ),
+        (
+            "a restart while armed comes up with the fault state unknown",
+            &[IDLE, ARM, ARM.restart()],
+            UNKNOWN,
+        ),
+        (
+            "and the arm switch alone does not bring the rail back",
+            &[IDLE, ARM, ARM.restart(), IDLE, ARM],
+            UNKNOWN,
+        ),
+        (
+            "a panel clear, then off and on, does",
+            &[IDLE, ARM, ARM.restart(), IDLE.panel_clear(), ARM],
             RAIL_A_ONLY,
         ),
         (
             "restart does not clear a latched fault",
-            &[IDLE.estop(), IDLE.event(Event::Restart)],
+            &[IDLE.estop(), IDLE.restart()],
+            fault(FaultReason::EmergencyStop),
+        ),
+        (
+            "nor does a power loss",
+            &[IDLE.estop(), IDLE.power_loss(), IDLE, ARM],
             fault(FaultReason::EmergencyStop),
         ),
     ]);
@@ -329,9 +555,14 @@ fn emergency_stop_latches() {
             fault(FaultReason::EmergencyStop),
         ),
         (
-            "outranks a restart on the same tick",
-            &[IDLE, ARM, ARM.estop().event(Event::Restart)],
+            "outranks a clean restart on the same tick",
+            &[IDLE, ARM, IDLE, ARM.estop().restart()],
             fault(FaultReason::EmergencyStop),
+        ),
+        (
+            "a restart while armed is unknown first, and the stop keeps it latched",
+            &[IDLE, ARM, ARM.estop().restart(), IDLE.estop().panel_clear()],
+            UNKNOWN.refused(Refusal::EmergencyStopPressed),
         ),
         (
             "outranks a lost heartbeat on the same tick",
@@ -374,22 +605,21 @@ fn lost_heartbeat_latches() {
 
 #[test]
 fn clearing_a_fault() {
-    let clear = Event::ClearFault;
     let stopped = fault(FaultReason::EmergencyStop);
     check(&[
         (
             "clears with the stop released and the switch off",
-            &[IDLE, ARM, ARM.estop(), IDLE.event(clear)],
+            &[IDLE, ARM, ARM.estop(), IDLE.panel_clear()],
             ALL_OFF_DISARMED,
         ),
         (
             "refused while the stop is pressed",
-            &[IDLE, ARM, ARM.estop(), IDLE.estop().event(clear)],
+            &[IDLE, ARM, ARM.estop(), IDLE.estop().panel_clear()],
             fault(FaultReason::EmergencyStop).refused(Refusal::EmergencyStopPressed),
         ),
         (
             "refused while the arm switch is on",
-            &[IDLE, ARM, ARM.estop(), ARM.event(clear)],
+            &[IDLE, ARM, ARM.estop(), ARM.panel_clear()],
             fault(FaultReason::EmergencyStop).refused(Refusal::ArmSwitchOn),
         ),
         (
@@ -398,7 +628,7 @@ fn clearing_a_fault() {
                 IDLE,
                 ARM,
                 ARM.no_heartbeat(),
-                IDLE.no_heartbeat().event(clear),
+                IDLE.no_heartbeat().panel_clear(),
             ],
             fault(FaultReason::HeartbeatLost).refused(Refusal::HeartbeatUnhealthy),
         ),
@@ -409,7 +639,7 @@ fn clearing_a_fault() {
         ),
         (
             "after a clear, the switch going on arms again",
-            &[IDLE, ARM, ARM.estop(), IDLE.event(clear), ARM],
+            &[IDLE, ARM, ARM.estop(), IDLE.panel_clear(), ARM],
             RAIL_A_ONLY,
         ),
         (
@@ -419,8 +649,39 @@ fn clearing_a_fault() {
         ),
         (
             "a clear with nothing latched is a no-op",
-            &[IDLE, ARM, ARM.event(clear)],
+            &[IDLE, ARM, ARM.panel_clear()],
             RAIL_A_ONLY,
+        ),
+        (
+            "a clear from the supervisor is refused",
+            &[
+                IDLE,
+                ARM,
+                ARM.estop(),
+                IDLE.button().event(SUPERVISOR_CLEAR),
+            ],
+            stopped.refused(Refusal::ClearNotFromPanel),
+        ),
+        (
+            "a panel clear with the button not sensed is refused",
+            &[IDLE, ARM, ARM.estop(), IDLE.event(PANEL_CLEAR)],
+            stopped.refused(Refusal::PanelButtonNotPressed),
+        ),
+        (
+            "after a bad reply, a clear waits for the next challenge's answer",
+            &[IDLE, ARM, ARM.no_heartbeat(), IDLE.panel_clear()],
+            fault(FaultReason::HeartbeatLost).refused(Refusal::HeartbeatUnhealthy),
+        ),
+        (
+            "and succeeds once it is answered",
+            &[
+                IDLE,
+                ARM,
+                ARM.no_heartbeat(),
+                IDLE.after(HEARTBEAT_PERIOD_TICKS),
+                IDLE.panel_clear(),
+            ],
+            ALL_OFF_DISARMED,
         ),
     ]);
 }
@@ -635,8 +896,8 @@ fn lease_does_not_survive_disarm_restart_or_fault() {
         ),
         (
             "restart drops both rails",
-            &script(&granted(), &[KEYED.event(Event::Restart)]),
-            ALL_OFF_AWAIT,
+            &script(&granted(), &[KEYED.restart()]),
+            UNKNOWN,
         ),
         (
             "emergency stop drops both rails",
@@ -654,7 +915,7 @@ fn lease_does_not_survive_disarm_restart_or_fault() {
                 &granted(),
                 &[
                     KEYED.estop(),
-                    IDLE.key().event(Event::ClearFault),
+                    IDLE.key().panel_clear(),
                     KEYED,
                     KEYED.button(),
                 ],
@@ -667,8 +928,8 @@ fn lease_does_not_survive_disarm_restart_or_fault() {
                 &ARMED,
                 &[
                     KEYED.event(LEASE3),
-                    KEYED.event(Event::Restart),
-                    IDLE.key(),
+                    KEYED.restart(),
+                    IDLE.key().panel_clear(),
                     KEYED,
                     KEYED.button(),
                 ],
@@ -684,7 +945,13 @@ fn a_clock_that_goes_backwards_drops_the_lease() {
         now,
         ..KEYED.inputs
     };
-    let (state, _) = step(State::POWER_ON, at(10).with_arm(false), None);
+    let restart = Event::Restart {
+        record: Some(FaultRecord::Clear),
+        nonce: 7,
+    };
+    let (state, _) = step(State::POWER_ON, at(9).with_arm(false), Some(restart));
+    let reply = state.heartbeat.challenge().expect("started").reply();
+    let (state, _) = step(state, at(10).with_arm(false).with_reply(reply), None);
     let (state, _) = step(state, at(11), None);
     let (state, _) = step(state, at(12).with_rail_a(), Some(LEASE3));
     let (state, outputs) = step(state, at(13).with_rail_a().with_button(), None);
@@ -696,6 +963,15 @@ fn a_clock_that_goes_backwards_drops_the_lease() {
     let (_, outputs) = step(state, healthy, None);
     assert!(outputs.rail_a && outputs.rail_b.is_none());
     assert_eq!(outputs.fault, None);
+    // Back before the outstanding challenge was issued: the heartbeat's
+    // timing cannot be judged, so it counts as lost.
+    let before_issue = Inputs {
+        rail_b_sensed: b_live(0),
+        ..at(state.heartbeat.issued_at - 1).with_rail_a()
+    };
+    let (_, outputs) = step(state, before_issue, None);
+    assert!(!outputs.rail_a && outputs.rail_b.is_none());
+    assert_eq!(outputs.fault, Some(FaultReason::HeartbeatLost));
 }
 
 #[test]
@@ -764,9 +1040,14 @@ trait InputsExt {
     fn with_arm(self, on: bool) -> Self;
     fn with_button(self) -> Self;
     fn with_rail_a(self) -> Self;
+    fn with_reply(self, reply: HeartbeatReply) -> Self;
 }
 
 impl InputsExt for Inputs {
+    fn with_reply(mut self, reply: HeartbeatReply) -> Self {
+        self.heartbeat = Some(reply);
+        self
+    }
     fn with_arm(mut self, on: bool) -> Self {
         self.arm_switch_on = on;
         self
@@ -911,9 +1192,14 @@ fn a_stuck_on_rail_drops_everything_and_latches() {
             stuck_a,
         ),
         (
-            "rail A live on the tick of a restart, whatever was driven",
-            &[IDLE, ARM, ARM.event(Event::Restart).sensed(true, NO_RAIL_B)],
+            "rail A live on the tick of a clean restart",
+            &[IDLE, ARM, IDLE, ARM.restart().sensed(true, NO_RAIL_B)],
             stuck_a,
+        ),
+        (
+            "rail A live on the tick of a restart from armed stays faulted",
+            &[IDLE, ARM, ARM.restart().sensed(true, NO_RAIL_B)],
+            UNKNOWN,
         ),
         (
             "rail B live on a port with no lease, while armed",
@@ -960,7 +1246,7 @@ fn a_stuck_on_rail_drops_everything_and_latches() {
             "a clear is refused while a rail is still live",
             &[
                 IDLE.sensed(true, NO_RAIL_B),
-                IDLE.event(Event::ClearFault).sensed(true, NO_RAIL_B),
+                IDLE.panel_clear().sensed(true, NO_RAIL_B),
             ],
             stuck_a.refused(Refusal::RailSensedLive),
         ),
@@ -968,13 +1254,13 @@ fn a_stuck_on_rail_drops_everything_and_latches() {
             "a clear is refused while rail B is live on any port",
             &[
                 IDLE.sensed(false, b_live(3)),
-                IDLE.event(Event::ClearFault).sensed(false, b_live(3)),
+                IDLE.panel_clear().sensed(false, b_live(3)),
             ],
             mismatch(Rail::B(Port(3)), true).refused(Refusal::RailSensedLive),
         ),
         (
             "a clear succeeds once every rail is dead",
-            &[IDLE.sensed(true, NO_RAIL_B), IDLE.event(Event::ClearFault)],
+            &[IDLE.sensed(true, NO_RAIL_B), IDLE.panel_clear()],
             ALL_OFF_DISARMED,
         ),
     ]);
@@ -1030,7 +1316,7 @@ fn a_rail_dead_while_commanded_on_latches_after_the_settle_window() {
                 IDLE,
                 ARM,
                 ARM.sensed(false, NO_RAIL_B).after(OUTPUT_SETTLE_TICKS),
-                IDLE.event(Event::ClearFault),
+                IDLE.panel_clear(),
                 ARM,
             ],
             RAIL_A_ONLY,
@@ -1123,14 +1409,14 @@ fn firmware_jumper() {
                 IDLE,
                 ARM,
                 ARM.jumper(),
-                IDLE.jumper().event(Event::ClearFault),
+                IDLE.jumper().panel_clear(),
                 IDLE.jumper(),
             ],
             FIRMWARE,
         ),
         (
             "a restart during an update keeps it once the jumper is seen",
-            &[IDLE, IDLE.jumper(), ARM.jumper().event(Event::Restart)],
+            &[IDLE, IDLE.jumper(), ARM.jumper().restart()],
             FIRMWARE,
         ),
     ]);
@@ -1142,7 +1428,592 @@ fn rules_id_is_pinned() {
     // If this fails, a placeholder constant or RULES_VERSION changed. Update
     // it on purpose: the supervisor's expected id changes with it. The value
     // was checked against an independent FNV-1a in Python over the words
-    // [2, 100, 300, 5, 4] as little-endian u64s.
-    assert_eq!(RULES_VERSION, 2);
-    assert_eq!(rules_id(), 0x24ac_74ab_b848_d6b5);
+    // [3, 100, 300, 5, 4, 10] as little-endian u64s.
+    assert_eq!(RULES_VERSION, 3);
+    assert_eq!(rules_id(), 0x1233_e61c_0e2e_b342);
+}
+
+// ---------------------------------------------------------------------------
+// #197: a restart must not forget a fault, and only the panel clears one.
+// ---------------------------------------------------------------------------
+
+/// The gap from hw-008: a fault latched while armed, then the power goes and
+/// RAM with it. The record brings the fault back; the arm switch alone does
+/// nothing.
+#[test]
+fn regression_197_a_power_loss_keeps_a_recorded_fault() {
+    check(&[
+        (
+            "e-stop while armed, power lost, stop released, switch cycled",
+            &[
+                IDLE,
+                ARM,
+                ARM.estop(),
+                ARM.power_loss(),
+                IDLE,
+                ARM,
+                IDLE,
+                ARM,
+            ],
+            fault(FaultReason::EmergencyStop),
+        ),
+        (
+            "lost heartbeat while armed, power lost",
+            &[IDLE, ARM, ARM.no_heartbeat(), IDLE.power_loss(), IDLE, ARM],
+            fault(FaultReason::HeartbeatLost),
+        ),
+        (
+            "jumper fault, power lost",
+            &[IDLE, ARM, ARM.jumper(), IDLE.power_loss(), IDLE, ARM],
+            fault(FaultReason::FirmwareJumperWhileArmed),
+        ),
+        (
+            "only a panel clear with the switch off brings it back",
+            &[
+                IDLE,
+                ARM,
+                ARM.estop(),
+                ARM.power_loss(),
+                IDLE.panel_clear(),
+                ARM,
+            ],
+            RAIL_A_ONLY,
+        ),
+    ]);
+}
+
+/// The record was last written while armed: a fault may have latched after,
+/// with no time to write it. The restart cannot prove there was none.
+#[test]
+fn regression_197_a_power_loss_while_armed_is_unknown() {
+    check(&[
+        (
+            "power lost while armed",
+            &[IDLE, ARM, ARM.power_loss()],
+            UNKNOWN,
+        ),
+        (
+            "power lost with a lease live",
+            &script(&granted(), &[KEYED.power_loss()]),
+            UNKNOWN,
+        ),
+        (
+            "the switch going off then on does not arm",
+            &[IDLE, ARM, ARM.power_loss(), IDLE, ARM, IDLE, ARM],
+            UNKNOWN,
+        ),
+        (
+            "a supervisor clear does not clear it",
+            &[
+                IDLE,
+                ARM,
+                ARM.power_loss(),
+                IDLE.button().event(SUPERVISOR_CLEAR),
+                ARM,
+            ],
+            UNKNOWN,
+        ),
+        (
+            "a panel clear then off and on arms",
+            &[IDLE, ARM, ARM.power_loss(), IDLE.panel_clear(), ARM],
+            RAIL_A_ONLY,
+        ),
+    ]);
+}
+
+#[test]
+fn regression_197_no_readable_record_is_unknown() {
+    let torn = IDLE.power_loss_with(None);
+    check(&[
+        ("from disarmed", &[IDLE, torn], UNKNOWN),
+        ("and stays so", &[IDLE, torn, ARM, IDLE, ARM], UNKNOWN),
+        (
+            "until the panel clears it",
+            &[IDLE, torn, IDLE.panel_clear()],
+            ALL_OFF_DISARMED,
+        ),
+        (
+            "and the switch then arms",
+            &[IDLE, torn, IDLE.panel_clear(), ARM],
+            RAIL_A_ONLY,
+        ),
+        (
+            "a clean record comes up unfaulted",
+            &[IDLE, IDLE.power_loss_with(Some(FaultRecord::Clear))],
+            ALL_OFF_DISARMED,
+        ),
+        (
+            "a recorded fault comes up latched",
+            &[
+                IDLE,
+                IDLE.power_loss_with(Some(FaultRecord::Latched(FaultReason::EmergencyStop))),
+            ],
+            fault(FaultReason::EmergencyStop),
+        ),
+    ]);
+}
+
+/// A firmware that never feeds the restart stays at power-on: everything
+/// off, the fault state unknown, whatever the switches do.
+#[test]
+fn regression_197_power_on_without_a_restart_stays_unknown() {
+    let mut bench = Bench::unbooted();
+    for tick in [IDLE, ARM, IDLE, ARM, KEYED.button(), IDLE, ARM] {
+        let out = bench.tick(&tick);
+        assert_eq!(trim(out), UNKNOWN);
+    }
+}
+
+/// The state kept in RAM and the record are combined: the worse one wins.
+#[test]
+fn regression_197_a_restart_is_never_cleaner_than_ram_or_record() {
+    let boot = |mode: Mode, record: Option<FaultRecord>| {
+        let state = State {
+            mode,
+            ..State::POWER_ON
+        };
+        let inputs = Inputs {
+            now: 5,
+            ..IDLE.inputs
+        };
+        let (next, _) = step(state, inputs, Some(Event::Restart { record, nonce: 9 }));
+        next.mode
+    };
+    let stopped = Mode::Faulted(FaultReason::EmergencyStop);
+    let unknown = Mode::Faulted(FaultReason::FaultStateUnknown);
+    let armed = Mode::Armed {
+        since: 1,
+        approval: sawbones_interlock::Approval::Idle,
+    };
+    let latched_hb = Some(FaultRecord::Latched(FaultReason::HeartbeatLost));
+    for (kept, record, want) in [
+        (stopped, Some(FaultRecord::Clear), stopped),
+        (stopped, None, stopped),
+        (stopped, latched_hb, stopped),
+        (armed, Some(FaultRecord::Clear), unknown),
+        (armed, latched_hb, Mode::Faulted(FaultReason::HeartbeatLost)),
+        (Mode::Disarmed, Some(FaultRecord::Armed), unknown),
+        (Mode::Disarmed, None, unknown),
+        (
+            Mode::Disarmed,
+            latched_hb,
+            Mode::Faulted(FaultReason::HeartbeatLost),
+        ),
+        // Disarmed and clear: up, but waiting for the switch (it is off here).
+        (Mode::Disarmed, Some(FaultRecord::Clear), Mode::Disarmed),
+        // POWER_ON says nothing: the record decides.
+        (unknown, Some(FaultRecord::Clear), Mode::Disarmed),
+        (unknown, None, unknown),
+        (unknown, Some(FaultRecord::Armed), unknown),
+    ] {
+        assert_eq!(boot(kept, record), want, "{kept:?} + {record:?}");
+    }
+}
+
+#[test]
+fn regression_197_the_record_says_what_to_persist() {
+    let armed = Mode::Armed {
+        since: 1,
+        approval: sawbones_interlock::Approval::Idle,
+    };
+    assert_eq!(armed.fault_record(), FaultRecord::Armed);
+    for mode in [Mode::AwaitArmOff, Mode::Disarmed, Mode::FirmwareUpdate] {
+        assert_eq!(mode.fault_record(), FaultRecord::Clear, "{mode:?}");
+    }
+    for reason in [
+        FaultReason::EmergencyStop,
+        FaultReason::HeartbeatLost,
+        FaultReason::FaultStateUnknown,
+    ] {
+        assert_eq!(
+            Mode::Faulted(reason).fault_record(),
+            FaultRecord::Latched(reason)
+        );
+    }
+    assert_eq!(
+        State::POWER_ON.fault_record(),
+        FaultRecord::Latched(FaultReason::FaultStateUnknown)
+    );
+}
+
+/// hw-009: a clear from the supervisor is refused in every state, with the
+/// button held or not, and changes nothing.
+#[test]
+fn regression_197_a_supervisor_clear_is_refused_in_every_state() {
+    let prefixes: [(&str, Vec<Tick>); 7] = [
+        ("awaiting arm off", vec![ARM]),
+        ("disarmed", vec![IDLE]),
+        ("armed", ARMED.to_vec()),
+        ("lease live", granted()),
+        ("firmware update", vec![IDLE, IDLE.jumper()]),
+        ("e-stop latched", vec![IDLE, ARM, ARM.estop()]),
+        ("unknown after restart", vec![IDLE, ARM, ARM.restart()]),
+    ];
+    for (name, prefix) in prefixes {
+        let last = *prefix.last().unwrap();
+        let before = trim(run(&prefix));
+        for held in [false, true] {
+            let mut tick = last.event(SUPERVISOR_CLEAR);
+            tick.boot = Boot::No;
+            tick.inputs.arm_switch_on = false;
+            tick.inputs.panel_button_pressed = held;
+            // The same tick as a panel clear would need, so only the source
+            // differs.
+            let got = trim(run(&script(&prefix, &[tick])));
+            assert_eq!(got.refusal, Some(Refusal::ClearNotFromPanel), "{name}");
+            assert_eq!(got.fault, before.fault, "{name}: the fault changed");
+        }
+    }
+}
+
+#[test]
+fn regression_197_a_panel_clear_needs_the_button_sensed() {
+    let stopped = fault(FaultReason::EmergencyStop);
+    check(&[
+        (
+            "token without the pin",
+            &[IDLE, ARM, ARM.estop(), IDLE.event(PANEL_CLEAR)],
+            stopped.refused(Refusal::PanelButtonNotPressed),
+        ),
+        (
+            "token with the pin",
+            &[IDLE, ARM, ARM.estop(), IDLE.panel_clear()],
+            ALL_OFF_DISARMED,
+        ),
+        (
+            "the pin alone clears nothing",
+            &[IDLE, ARM, ARM.estop(), IDLE.button(), IDLE.button()],
+            stopped,
+        ),
+    ]);
+}
+
+// ---------------------------------------------------------------------------
+// #198: the heartbeat is a challenge the interlock issues and the supervisor
+// answers.
+// ---------------------------------------------------------------------------
+
+/// The bench armed, with the outstanding challenge answered.
+fn armed_bench() -> Bench {
+    let mut bench = Bench::booted();
+    for tick in ARMED {
+        bench.tick(&tick);
+    }
+    assert!(bench.last.rail_a);
+    bench
+}
+
+#[test]
+fn regression_198_correct_replies_keep_the_rail_on() {
+    let mut bench = armed_bench();
+    let first = bench.last.challenge;
+    for _ in 0..(20 * HEARTBEAT_PERIOD_TICKS) {
+        let out = bench.tick(&ARM);
+        assert!(out.rail_a && out.fault.is_none());
+    }
+    assert_ne!(bench.last.challenge, first, "the challenge never changed");
+}
+
+#[test]
+fn regression_198_every_bad_reply_latches() {
+    let lost = fault(FaultReason::HeartbeatLost);
+    check(&[
+        ("a wrong reply", &[IDLE, ARM, ARM.no_heartbeat()], lost),
+        (
+            "a repeated reply",
+            &[IDLE, ARM, ARM.beat(Beat::Repeat)],
+            lost,
+        ),
+        (
+            "a stale reply, to the challenge before",
+            &script(
+                &ARMED,
+                &[
+                    ARM.after(HEARTBEAT_PERIOD_TICKS),
+                    ARM,
+                    ARM.beat(Beat::Stale),
+                ],
+            ),
+            lost,
+        ),
+        (
+            "a reply sent twice",
+            &script(
+                &ARMED,
+                &[ARM.after(HEARTBEAT_PERIOD_TICKS), ARM.beat(Beat::Repeat)],
+            ),
+            lost,
+        ),
+    ]);
+}
+
+#[test]
+fn regression_198_a_missing_reply_latches_at_the_deadline() {
+    let mut bench = armed_bench();
+    // Run to a fresh challenge, answered on the tick after it appears.
+    while bench.state.heartbeat.answered || bench.state.heartbeat.issued_at == 0 {
+        bench.tick(&ARM);
+    }
+    let issued = bench.state.heartbeat.issued_at;
+    // Silent from here: the rail holds until the period ends unanswered.
+    loop {
+        let out = bench.tick(&ARM.beat(Beat::Silent));
+        if out.fault.is_some() {
+            assert_eq!(out.fault, Some(FaultReason::HeartbeatLost));
+            assert!(!out.rail_a && out.rail_b.is_none());
+            assert_eq!(bench.now, issued + HEARTBEAT_PERIOD_TICKS);
+            break;
+        }
+        assert!(out.rail_a);
+    }
+}
+
+/// The stated stopping-time budget: from the last good reply to every rail
+/// off is at most two periods.
+#[test]
+fn regression_198_stopping_time_is_two_periods_at_most() {
+    for answer_at in 1..HEARTBEAT_PERIOD_TICKS {
+        let mut bench = armed_bench();
+        // Wait for a new challenge, then let the supervisor answer it late
+        // by `answer_at` ticks and fall silent.
+        let start = bench.state.heartbeat.seq;
+        while bench.state.heartbeat.seq == start {
+            bench.tick(&ARM);
+        }
+        for _ in 1..answer_at {
+            bench.tick(&ARM.beat(Beat::Silent));
+        }
+        bench.tick(&ARM);
+        assert!(bench.last.rail_a, "answered at {answer_at}");
+        let last_good = bench.now;
+        while bench.last.fault.is_none() {
+            bench.tick(&ARM.beat(Beat::Silent));
+        }
+        assert!(
+            bench.now - last_good < 2 * HEARTBEAT_PERIOD_TICKS,
+            "dropped {} ticks after the last good reply",
+            bench.now - last_good
+        );
+    }
+}
+
+/// A reply on the tick its challenge is issued cannot have seen it.
+#[test]
+fn regression_198_a_reply_before_the_challenge_is_seen_is_lost() {
+    let bench = armed_bench();
+    let watch = bench.state.heartbeat;
+    let next = HeartbeatWatch {
+        seq: watch.seq + 1,
+        ..watch
+    };
+    // Jump to the tick the next challenge is issued, and answer it there.
+    let inputs = Inputs {
+        now: watch.issued_at + HEARTBEAT_PERIOD_TICKS,
+        rail_a_sensed: true,
+        heartbeat: next.challenge().map(HeartbeatChallenge::reply),
+        ..ARM.inputs
+    };
+    let (state, out) = step(bench.state, inputs, None);
+    assert_eq!(state.heartbeat.seq, next.seq);
+    assert_eq!(out.fault, Some(FaultReason::HeartbeatLost));
+}
+
+/// Nothing arms until a correct reply has been seen, and a reply that comes
+/// later does not arm a switch that was already on.
+#[test]
+fn regression_198_no_arm_without_a_reply() {
+    check(&[
+        (
+            "switch off then on with no reply at all",
+            &[
+                IDLE.beat(Beat::Silent),
+                ARM.beat(Beat::Silent).event(Event::RequestArm),
+            ],
+            ALL_OFF_AWAIT.refused(Refusal::HeartbeatUnhealthy),
+        ),
+        (
+            "the first reply comes with the switch still on",
+            &[IDLE.beat(Beat::Silent), ARM.beat(Beat::Silent), ARM, ARM],
+            ALL_OFF_AWAIT,
+        ),
+        (
+            "then off and on arms",
+            &[
+                IDLE.beat(Beat::Silent),
+                ARM.beat(Beat::Silent),
+                ARM,
+                IDLE,
+                ARM,
+            ],
+            RAIL_A_ONLY,
+        ),
+        (
+            "no reply for a whole period after boot latches",
+            &[
+                IDLE.beat(Beat::Silent),
+                IDLE.beat(Beat::Silent).after(HEARTBEAT_PERIOD_TICKS),
+            ],
+            fault(FaultReason::HeartbeatLost),
+        ),
+    ]);
+}
+
+/// Replies recorded in one boot are worthless in the next: the challenges
+/// come from the boot nonce.
+#[test]
+fn regression_198_replies_from_another_boot_do_not_count() {
+    let boot = |nonce| {
+        let inputs = Inputs {
+            now: 0,
+            ..IDLE.inputs
+        };
+        let restart = Event::Restart {
+            record: Some(FaultRecord::Clear),
+            nonce,
+        };
+        step(State::POWER_ON, inputs, Some(restart)).0
+    };
+    let old = boot(1);
+    let new = boot(2);
+    assert_ne!(old.heartbeat.challenge(), new.heartbeat.challenge());
+    let replay = Inputs {
+        now: 1,
+        heartbeat: old.heartbeat.challenge().map(HeartbeatChallenge::reply),
+        ..IDLE.inputs
+    };
+    let (_, out) = step(new, replay, None);
+    assert_eq!(out.fault, Some(FaultReason::HeartbeatLost));
+}
+
+/// The reply is not an echo of the challenge, and challenges do not repeat
+/// within a boot.
+#[test]
+fn regression_198_the_reply_is_not_an_echo() {
+    let mut seen = std::collections::HashSet::new();
+    for seq in 0..10_000 {
+        let challenge = HeartbeatWatch {
+            seq,
+            ..HeartbeatWatch::start(3, 0)
+        }
+        .challenge()
+        .expect("started");
+        assert_ne!(challenge.reply().0, challenge.0);
+        assert!(seen.insert(challenge), "challenge repeated at {seq}");
+    }
+}
+
+/// A stalled step loop cannot stretch the budget: a sample two periods after
+/// the challenge was issued is a loss, even with that challenge answered.
+#[test]
+fn regression_198_a_stalled_loop_is_a_loss() {
+    let bench = armed_bench();
+    let watch = bench.state.heartbeat;
+    assert!(watch.answered && bench.last.rail_a);
+    let sample = |now| Inputs {
+        now,
+        rail_a_sensed: true,
+        ..ARM.inputs
+    };
+    // One period on, answered: a new challenge, rail still on.
+    let (_, out) = step(bench.state, sample(watch.issued_at + P), None);
+    assert!(out.rail_a, "a period on, answered, the rail stays on");
+    // Two periods on, with no sample between: lost.
+    let (_, out) = step(bench.state, sample(watch.issued_at + 2 * P), None);
+    assert_eq!(out.fault, Some(FaultReason::HeartbeatLost));
+    assert!(!out.rail_a);
+}
+
+const P: u64 = HEARTBEAT_PERIOD_TICKS;
+
+/// What the challenge of a heartbeat "started" with nonce 0 at tick 0 would
+/// have been, computed here independently: FNV-1a over the challenge tag,
+/// the nonce and the sequence number. A reply to it looks correct.
+fn zero_nonce_reply() -> HeartbeatReply {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for word in [0x6567_6e65_6c6c_6168_u64, 0, 0] {
+        for b in word.to_le_bytes() {
+            hash ^= u64::from(b);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    HeartbeatChallenge(hash).reply()
+}
+
+/// Until a restart delivers a non-zero hardware nonce, the heartbeat has not
+/// started: no challenge, every reply fails, no clear succeeds and nothing
+/// arms, even if the firmware never sends the restart at all.
+#[test]
+fn regression_198_no_heartbeat_before_restart() {
+    let reply = zero_nonce_reply();
+    let tick = |state: State, now, arm, button, event| {
+        let inputs = Inputs {
+            now,
+            arm_switch_on: arm,
+            panel_button_pressed: button,
+            heartbeat: Some(reply),
+            ..IDLE.inputs
+        };
+        step(state, inputs, event)
+    };
+    assert_eq!(State::POWER_ON.outputs().challenge, None);
+    assert!(!State::POWER_ON.heartbeat.started());
+
+    // From POWER_ON with no restart: a correct-looking reply, a panel clear
+    // with the switch off, then the switch on. Rails stay off throughout.
+    let mut state = State::POWER_ON;
+    for (now, arm, button, event) in [
+        (1, false, false, None),
+        (2, false, true, Some(PANEL_CLEAR)),
+        (3, false, false, None),
+        (4, true, false, Some(Event::RequestArm)),
+        (5, false, true, Some(PANEL_CLEAR)),
+        (6, true, false, None),
+    ] {
+        let (next, out) = tick(state, now, arm, button, event);
+        assert!(!out.rail_a && out.rail_b.is_none(), "tick {now}: a rail on");
+        assert!(out.fault.is_some(), "tick {now}: the fault cleared");
+        assert_eq!(out.challenge, None, "tick {now}: a challenge with no nonce");
+        if event == Some(PANEL_CLEAR) {
+            assert_eq!(out.refusal, Some(Refusal::HeartbeatUnhealthy));
+        }
+        assert!(!next.heartbeat.alive);
+        state = next;
+    }
+
+    // A restart with nonce 0 is no start: a clean record comes up unfaulted,
+    // but there is still no challenge, any reply is a loss, and with no reply
+    // the arm switch cannot arm.
+    let restart = Event::Restart {
+        record: Some(FaultRecord::Clear),
+        nonce: 0,
+    };
+    let boot = Inputs {
+        now: 1,
+        ..IDLE.inputs
+    };
+    let (booted, out) = step(State::POWER_ON, boot, Some(restart));
+    assert_eq!(booted.mode, Mode::Disarmed);
+    assert_eq!(out.challenge, None);
+    let (_, out) = tick(booted, 2, true, false, None);
+    assert_eq!(out.fault, Some(FaultReason::HeartbeatLost));
+    assert!(!out.rail_a);
+    let silent = Inputs {
+        now: 2,
+        arm_switch_on: true,
+        ..IDLE.inputs
+    };
+    let (next, out) = step(booted, silent, Some(Event::RequestArm));
+    assert!(!out.rail_a);
+    assert_eq!(next.mode, Mode::AwaitArmOff);
+    assert_eq!(out.refusal, Some(Refusal::HeartbeatUnhealthy));
+    let (_, out) = step(next, Inputs { now: 3, ..silent }, None);
+    assert!(!out.rail_a);
+
+    // A real nonce starts it.
+    let restart = Event::Restart {
+        record: Some(FaultRecord::Clear),
+        nonce: 41,
+    };
+    let (started, out) = step(State::POWER_ON, boot, Some(restart));
+    assert!(started.heartbeat.started() && out.challenge.is_some());
 }

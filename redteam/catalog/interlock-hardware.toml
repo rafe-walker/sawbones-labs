@@ -101,10 +101,10 @@ how = "State::default and POWER_ON are AwaitArmOff. The crate says a restart doe
 expected = "After any reset a latched fault is still latched and needs ClearFault with e-stop released, heartbeat healthy and arm off."
 severity = "high"
 sources = ["https://www.analog.com/en/resources/technical-articles/how-glitchfree-supervisors-aid-in-highreliability-applications.html", "https://interrupt.memfault.com/blog/firmware-watchdog-best-practices"]
-status = "gap"
-test = "software: model a restart as State::POWER_ON in a test and show that a fault then silently disappears (this documents the gap); add a persisted-latch API and a test that reboot from Faulted restarts in Faulted. bench: press e-stop, pull the trust root 5 V, restore it, and cycle the arm switch."
-issue = 197
-note = "Interlock::step keeps a fault across Event::Restart, but state is in RAM: a real reset loses it. Tracked by #197."
+status = "partial"
+test = "bench: press e-stop, pull the trust root 5 V, restore it, and cycle the arm switch; the fault must still be latched. firmware: persist State::fault_record before any output turns on, with a check value, and feed it to Event::Restart."
+issue = 144
+note = "Software side landed in #197: Event::Restart reads the persisted FaultRecord and comes up no cleaner than the worse of RAM and record; a missing, torn or armed record latches FaultStateUnknown, and POWER_ON is itself faulted (sawbones-interlock::regression_197_a_power_loss_keeps_a_recorded_fault, regression_197_a_power_loss_while_armed_is_unknown). Open: the firmware that persists the record, and the bench test."
 
 [[attack]]
 id = "hw-009"
@@ -115,10 +115,10 @@ how = "Event::ClearFault is documented as a person's action, but nothing in the 
 expected = "Only a physical panel action clears a fault; a supervisor message gets a refusal and a log line."
 severity = "high"
 sources = ["https://industrialmonitordirect.com/blogs/knowledgebase/emergency-stop-switch-contact-configuration-ncno-rationale"]
-status = "gap"
-test = "software: add a source tag to Event (Panel or Supervisor) and a test that ClearFault from the supervisor is refused in every state. bench: send the clear command over USB from the Pi and confirm the panel button is the only way."
-issue = 197
-note = "ClearFault carries no source: nothing stops the supervisor from sending it. Tracked by #197."
+status = "partial"
+test = "bench: send the clear command over USB from the Pi and confirm it is refused and logged, and that the panel button is the only way."
+issue = 144
+note = "Software side landed in #197: ClearFault carries a ClearSource; only a PanelToken with the button sensed pressed clears, a supervisor clear is refused in every state, and a token never deserialises (sawbones-interlock::regression_197_a_supervisor_clear_is_refused_in_every_state, regression_197_a_panel_token_never_deserialises). Open: the firmware panel driver, the log line and the bench test; #172 backs the token with a key."
 
 [[attack]]
 id = "hw-010"
@@ -131,7 +131,8 @@ severity = "high"
 sources = ["https://www.EmbeddedRelated.com/showarticle/1276.php", "https://www.eevblog.com/forum/microcontrollers/securing-a-critical-logic-level-against-failure/", "https://interrupt.memfault.com/blog/firmware-watchdog-best-practices"]
 status = "partial"
 test = "software: in firmware, a test build that hangs the main loop but leaves interrupts running must drop the relay; host-side, assert the toggle function is called only from the step loop (grep-style lint). bench: halt the core with the debug probe while PWM runs and watch the relay."
-issue = 198
+issue = 144
+note = "The rule is stated in the sawbones-interlock crate docs (#198): the charge pump is fed only by main-loop software toggles after step returns a rail on, never by a timer, PWM, PIO or DMA. The pump itself is simulated under #123. Open: the firmware, its lint and the bench test."
 
 [[attack]]
 id = "hw-011"
@@ -142,9 +143,10 @@ how = "The crate takes heartbeat_healthy as a boolean decided outside it. If the
 expected = "Heartbeat is healthy only for a fresh response to the latest challenge within the window, and the window is derived from a stated stopping-time budget."
 severity = "high"
 sources = ["https://interrupt.memfault.com/blog/firmware-watchdog-best-practices", "https://www.EmbeddedRelated.com/showarticle/1276.php", "https://cwe.mitre.org/data/definitions/294.html"]
-status = "gap"
-test = "software: heartbeat module with a challenge-response (trust root sends a nonce, supervisor returns it signed or hashed with a counter); tests for replayed, late, duplicated and out-of-order frames. bench: freeze the supervisor with SIGSTOP and replay a captured heartbeat."
-issue = 198
+status = "partial"
+test = "bench: freeze the supervisor with SIGSTOP and replay a captured heartbeat; rails drop within the stated budget. supervisor: answer challenges from its main loop only."
+issue = 144
+note = "Software side landed in #198: the interlock issues a challenge each HEARTBEAT_PERIOD_TICKS from a boot nonce; a wrong, stale, early, repeated, missing or cross-boot reply, or a stalled step loop, latches HeartbeatLost, and rails drop within two periods of the last good reply (sawbones-interlock::regression_198_every_bad_reply_latches, regression_198_stopping_time_is_two_periods_at_most). The reply proves freshness, not identity, until #172 keys make it a MAC. Open: the supervisor side and the bench test."
 
 [[attack]]
 id = "hw-012"
@@ -157,7 +159,7 @@ severity = "medium"
 sources = ["https://www.eevblog.com/forum/microcontrollers/securing-a-critical-logic-level-against-failure/", "https://industrialmonitordirect.com/blogs/knowledgebase/safety-relay-welded-contact-detection-explained"]
 status = "partial"
 test = "ngspice: model the pump over a sweep of toggle frequency (including far above nominal), duty, supply voltage 4.5 to 5.5 V, and each single component fault (open, short, drift of 50 percent); record relay-on time after the toggle stops. bench: repeat on the built stage with a signal generator."
-issue = 198
+issue = 123
 
 [[attack]]
 id = "hw-013"
@@ -170,7 +172,7 @@ severity = "medium"
 sources = ["https://www.EmbeddedRelated.com/showarticle/1276.php"]
 status = "partial"
 test = "bench: induce a watchdog reset (infinite loop test build) with rail A and the lamp on and check that every output stage, LED driver and I2C device is dead or reinitialised, and that the relay drops without waiting on the CPU."
-issue = 198
+issue = 144
 
 [[attack]]
 id = "hw-014"
@@ -196,7 +198,8 @@ severity = "medium"
 sources = ["https://interrupt.memfault.com/blog/firmware-watchdog-best-practices"]
 status = "gap"
 test = "software: a test with a constant now across many steps, with a lease live (expected: fault or expiry by a separate stall counter), plus wraparound near u64 max and very large jumps. bench: pause the core on the debug probe and see that the relay path still drops."
-issue = 198
+issue = 144
+note = "Since #198 a sample two heartbeat periods after the outstanding challenge, or a tick before it, latches HeartbeatLost, so a large jump or a step back faults. A tick that stops moving still does not: open."
 
 [[attack]]
 id = "hw-016"

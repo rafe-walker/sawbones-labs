@@ -3,7 +3,7 @@
 
 use sawbones_busguard::{BlockReason, BusGuard, Port as GuardPort, Verdict};
 use sawbones_interlock::{
-    step, Event, HazardClass, Inputs, LeaseTarget, Port, State, RAIL_B_PORTS,
+    step, ClearSource, Event, HazardClass, Inputs, LeaseTarget, Port, State, RAIL_B_PORTS,
 };
 use sawbones_policy::{
     classify, BusFact, BusFacts, BusListen, BusRead, BusWrite, EffectRequest, Mastership, PortId,
@@ -351,7 +351,7 @@ fn redteam_inj_025_a_fully_compromised_agent_causes_no_effect_the_rails_forbid()
         estop_pressed: false,
         arm_switch_on: false,
         key_switch_on: false,
-        heartbeat_healthy: true,
+        heartbeat: None,
         panel_button_pressed: false,
         rail_a_sensed: false,
         rail_b_sensed: [false; RAIL_B_PORTS],
@@ -377,7 +377,9 @@ fn redteam_inj_025_a_fully_compromised_agent_causes_no_effect_the_rails_forbid()
         for event in [
             Event::RequestArm,
             Event::LeaseUsed { target },
-            Event::ClearFault,
+            Event::ClearFault {
+                source: ClearSource::Supervisor,
+            },
         ] {
             let (next, out) = step(state, Inputs { now, ..idle }, Some(event));
             assert!(!out.rail_a && out.rail_b.is_none());
