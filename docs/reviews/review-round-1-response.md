@@ -48,7 +48,7 @@ Accept = adopted as written. Change = adopted in a different form. Dispute = not
 | INA228 breakouts are 10 A parts; two 3 kW inverters draw far more | Accept | The DC meter module measures volts through an impedance-limited tap and amps through a rated external shunt or clamp. "Volts, amps, energy" on the bank was volts only as drawn. |
 | Isolating I2C data lines does not isolate the sensor | Accept | The isolated side gets its own isolated supply. |
 | A fused sense lead on a big bank may not interrupt a fault | Accept | A high-value resistor at the tap, so the lead cannot carry fault current. |
-| Site ports: permanent, identified, impedance-limited test connectors | Accept | The best new idea in the set. The dangerous step, attaching to live conductors, is done once and properly. Phase 2, after the comms pod exists. |
+| Site ports: permanent, identified, impedance-limited test connectors | Accept | The best new idea in the set. The dangerous step, attaching to live conductors, is done once and properly. First design from the checks: series resistors at the busbar on both poles, built as a divider so the lead carries about a volt, a keyed connector, and an ID chip holding the port's identity and calibration. About $20 to $25 in parts. Fitting it is work for a qualified person. Phase 2. |
 | An isolation map checked before any connection | Accept | Every terminal declares its ground domain. The supervisor refuses a connection plan that makes a loop or bridges a barrier. Software only, so it starts in P0. |
 | Heat: 45 C shade, a closed black case, LiFePO4 charge limits | Accept | Filtered forced air, charge refused above the cell limit. Deferred with the case and battery to a later phase. |
 | The PV procedure implies a low current reading makes a string safe | Accept | Rewritten. Stages 0 to 3 are no-contact and belong to the agent. Past that the agent does not direct the work. A current check is an arc check, never proof that voltage is absent. |
@@ -63,7 +63,7 @@ Accept = adopted as written. Change = adopted in a different form. Dispute = not
 | "Pi 5 chosen for USB 3" | Accept | The real reasons are the on-board clock, the NVMe slot and the processor. |
 | PiKVM V4 Mini cannot be the pack's hands | Accept | Checked. The Mini has no USB host port and no documented user GPIO header. KVM only, bench only, out of the pack. The document's "GPIO drivers for relays and servos" line was wrong for this model and is withdrawn. |
 | No audio path, no storage, no 5 A supply, no cooler, no clock battery in the parts list | Accept | All added. The Pi 5 has no analog audio at all. |
-| An analog capture module is the missing core instrument | Change | Agreed on the need. A single 4-channel, 24-bit, 192 kHz, DC-coupled, isolated part is unlikely at hobby cost. Proposed as two bands. See below. |
+| An analog capture module is the missing core instrument | Change | Agreed on the need. Checked: one part can do it for about $35 to $39, but an RP2350 has only full-speed USB and cannot move that much data. Split into two bands. See below. |
 | Pico is micro-USB and too long; RP2040 has no second firmware slot | Accept | USB-C RP2350 boards, whose boot ROM supports A/B slots, so rollback is real. |
 | One SDR, one ESP32-C6, one ESP32-C5, no CC1101 | Accept | The raw-sample firmware stays an experiment. The C6 earns its place with ordinary sniffer firmware. All radio moves out of the Bench Core. |
 | The recording light cannot be truthful as wired | Accept | Camera and microphone power go behind a load switch and the light hangs on the switched side. |
@@ -150,7 +150,7 @@ What the agent can do without asking is bounded by copper, not by policy. A clas
 
 **Tool names are hazard classes.** `read` and `invoke_safe` for classes 0 and 1, `invoke_armed` for class 2, `invoke_hazard` for class 3. Claude Code's permission rules work per tool name, so the client can allow the first two always and the prompts land only where the danger is.
 
-**Analog capture in two bands.** A DC-coupled simultaneous converter for DC to a few kilohertz (cranking, power quality, vibration), and an audio-class 192 kHz converter for the band above (inverter switching noise). Two cheap parts in place of one rare one. Part choices are being researched.
+**Analog capture in two bands.** Checked, and the split holds. The low band is a module we build: a DC-coupled, 4-channel simultaneous converter costing about $7, good from DC to a few kilohertz, covering cranking, vibration and power-quality harmonics, for roughly $55 to $70 in parts. The band above it, up to about 90 kHz for inverter switching noise, starts as a bought 192 kHz USB audio interface at about $87 and becomes a built module later. The "switchable AC/DC coupling" relay mostly disappears, because each band has its own module.
 
 **Store v0 is the chain.** An append-only hash-chained log and a content-addressed folder. No index until something needs to be found.
 

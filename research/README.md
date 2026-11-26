@@ -51,6 +51,7 @@ Run on 25 November 2026 alongside the [review response](../docs/reviews/review-r
 | Hardware fact check | [hardware_fact_check.md](round-4-review-checks/hardware_fact_check.md) | Sixteen hardware claims from the reviews checked against vendor documents. Most confirmed; the hub named in the first design is discontinued. |
 | Prior-art verification | [prior_art_verification.md](round-4-review-checks/prior_art_verification.md) | Every source the reviewers cited exists. Three were stretched. No built prior art found for the trust layer. |
 | Evidence viewer options | [evidence_viewer_options.md](round-4-review-checks/evidence_viewer_options.md) | Rerun as the borrowed viewer, Lichtblick as fallback, MCAP stays the recording format. |
+| Analog capture and site port | [analog_capture_and_site_port.md](round-4-review-checks/analog_capture_and_site_port.md) | Analog capture splits into two bands because an RP2350 has only full-speed USB. A first site-port design with the protective resistors at the busbar. |
 
 More lanes from this round are added as they finish.
 
