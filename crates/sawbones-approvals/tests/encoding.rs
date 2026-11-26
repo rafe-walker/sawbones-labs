@@ -1,14 +1,19 @@
 //! The one byte encoding, pinned. If a golden here changes, every signature
 //! ever made changes meaning: bump `FORMAT_VERSION` instead.
+//!
+//! The one exception so far is #203: the lease moved to a new kind (7)
+//! carrying the typed action, and the old kind (2) is refused, so no old
+//! signature can be read in the new layout. The lease goldens changed with
+//! it.
 
 mod common;
 
 use common::every_approval;
 use sawbones_approvals::test_keys::{sign, TRUST_ROOT_SEED};
 use sawbones_approvals::{
-    signed_bytes, Approval, DecodeError, DeviceId, Digest, GrantLease, Message, ModuleId,
-    OperatorAttestation, PluginId, PluginPermissionGrowth, Role, DOMAIN, FORMAT_VERSION,
-    MESSAGE_LEN, SIGNED_LEN,
+    signed_bytes, ActionError, Approval, BusWriteAction, DecodeError, DeviceId, Digest, GrantLease,
+    Message, ModuleId, OperatorAttestation, PluginId, PluginPermissionGrowth, Role, WriteFunction,
+    DOMAIN, FORMAT_VERSION, MESSAGE_LEN, SIGNED_LEN,
 };
 
 fn hex(bytes: &[u8]) -> String {
@@ -23,7 +28,9 @@ fn unhex(text: &str) -> Vec<u8> {
 }
 
 /// A trust-root lease on port 3 for device 0x01020304, counter
-/// 0x1122334455667788, expiring at tick 0x0A0B0C0D0E0F1011.
+/// 0x1122334455667788, expiring at tick 0x0A0B0C0D0E0F1011: write 0x0003 to
+/// register 0x0010 of unit 1. The digest bytes are a pattern, not the
+/// action's digest: the verifier carries them, the bus guard checks them.
 fn golden_lease() -> Message {
     let mut action = [0; 32];
     for (i, byte) in action.iter_mut().enumerate() {
@@ -35,8 +42,9 @@ fn golden_lease() -> Message {
         counter: 0x1122_3344_5566_7788,
         expires_at: 0x0A0B_0C0D_0E0F_1011,
         approval: Approval::GrantLease(GrantLease {
-            port: 3,
-            action: Digest(action),
+            action: BusWriteAction::new(3, 1, WriteFunction::WriteSingleRegister, 0x0010, &[3])
+                .unwrap(),
+            action_digest: Digest(action),
         }),
     }
 }
@@ -48,10 +56,15 @@ const GOLDEN_LEASE_HEX: &str = concat!(
     "00000000",                                                         // module id
     "1122334455667788",                                                 // counter
     "0a0b0c0d0e0f1011",                                                 // expiry
-    "02",                                                               // kind: lease
-    "03",                                                               // port
-    "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", // frame digest
-    "00000000000000000000000000000000000000000000000000000000000000",   // padding (31)
+    "07",                                                               // kind: lease
+    "03",                                                               // action: port
+    "01",                                                               // unit
+    "06",                                                               // function
+    "0010",                                                             // register
+    "01",                                                               // value count
+    "0003000000000000",                                                 // values (4 slots)
+    "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f", // action digest
+    "000000000000000000000000000000000000",                             // padding (18)
 );
 
 #[test]
@@ -114,7 +127,7 @@ fn the_kind_tags_are_pinned() {
         .iter()
         .map(|&approval| common::message(Role::TrustRoot, 1, approval).encode()[26])
         .collect();
-    assert_eq!(tags, [1, 2, 3, 4, 5, 6]);
+    assert_eq!(tags, [1, 7, 3, 4, 5, 6]);
 }
 
 #[test]
@@ -137,8 +150,8 @@ fn the_golden_signature_is_pinned() {
 }
 
 const GOLDEN_SIGNATURE_HEX: &str = concat!(
-    "618a9a16cc75cbc6b7f06e585033c8174c54f1a8d3282fde5c115c80b20020d8",
-    "2a85bcc3cd0eccd33a198e6a947856e1bfad5820d9c9ceec46fbf55b94789b0b",
+    "b661a4800a3b1a54d8f7bd08bae4f08c144fade4cc8897a15d278f4d9e57b14e",
+    "76e480102e5034bca1fbca3a2b40878c7fa503d623757aa504583409f9316104",
 );
 
 #[test]
@@ -181,8 +194,27 @@ fn decode_refuses_every_non_canonical_form() {
     assert_eq!(with(5, 4), Err(DecodeError::UnknownRole));
     assert_eq!(with(9, 1), Err(DecodeError::StrayModuleId));
     assert_eq!(with(26, 0), Err(DecodeError::UnknownKind));
-    assert_eq!(with(26, 7), Err(DecodeError::UnknownKind));
-    for at in 27 + 33..MESSAGE_LEN {
+    assert_eq!(with(26, 8), Err(DecodeError::UnknownKind));
+    // Kind 2, the frame-digest-only lease from before #203, is retired.
+    assert_eq!(with(26, 2), Err(DecodeError::UnknownKind));
+    // A lease whose action bytes are not an action.
+    assert_eq!(
+        with(27 + 1, 0),
+        Err(DecodeError::Action(ActionError::BroadcastUnit))
+    );
+    assert_eq!(
+        with(27 + 2, 0x05),
+        Err(DecodeError::Action(ActionError::UnknownFunction(0x05)))
+    );
+    assert_eq!(
+        with(27 + 5, 2),
+        Err(DecodeError::Action(ActionError::SingleNeedsOneValue))
+    );
+    assert_eq!(
+        with(27 + 9, 1),
+        Err(DecodeError::Action(ActionError::NonZeroPadding))
+    );
+    for at in 27 + 46..MESSAGE_LEN {
         assert_eq!(with(at, 1), Err(DecodeError::NonZeroPadding), "byte {at}");
     }
     assert_eq!(Message::decode(&good[..90]), Err(DecodeError::Length));
@@ -191,7 +223,7 @@ fn decode_refuses_every_non_canonical_form() {
 
 #[test]
 fn padding_starts_right_after_each_kinds_payload() {
-    let used = [32, 33, 32, 64, 32, 32];
+    let used = [32, 46, 32, 64, 32, 32];
     for (approval, used) in every_approval().into_iter().zip(used) {
         let good = common::message(Role::TrustRoot, 1, approval).encode();
         for at in 27 + used..MESSAGE_LEN {

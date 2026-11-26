@@ -5,9 +5,9 @@ use sawbones_approvals::test_keys::{
     sign, verifier, MODULE_SEED, OWNER_PHONE_SEED, TEST_MODULE, TRUST_ROOT_SEED,
 };
 use sawbones_approvals::{
-    Approval, BusGuardAllowList, DeviceId, Digest, GrantLease, InstallCoreRelease, Message,
-    NativeInstall, OperatorAttestation, PluginId, PluginPermissionGrowth, Role, Signature,
-    Verifier, MESSAGE_LEN,
+    Approval, BusGuardAllowList, BusWriteAction, DeviceId, Digest, GrantLease, InstallCoreRelease,
+    Message, NativeInstall, OperatorAttestation, PluginId, PluginPermissionGrowth, Role, Signature,
+    Verifier, WriteFunction, MESSAGE_LEN,
 };
 
 /// The device the tests' verifier is for.
@@ -35,8 +35,9 @@ pub fn every_approval() -> [Approval; 6] {
             release: Digest([0x11; 32]),
         }),
         Approval::GrantLease(GrantLease {
-            port: 2,
-            action: Digest([0x22; 32]),
+            action: BusWriteAction::new(2, 1, WriteFunction::WriteMultipleRegisters, 0x22, &[1, 2])
+                .unwrap(),
+            action_digest: Digest([0x22; 32]),
         }),
         Approval::BusGuardAllowList(BusGuardAllowList {
             allow_list: Digest([0x33; 32]),
@@ -54,12 +55,26 @@ pub fn every_approval() -> [Approval; 6] {
     ]
 }
 
-/// A lease approval for `port` and frame digest `action`.
+/// A lease approval on `port` for a single write of `action` to register
+/// `action` of unit 1, with digest bytes `[action; 32]`. The verifier does
+/// not check the digest against the action; the bus guard does.
 pub fn lease(port: u8, action: u8) -> Approval {
-    Approval::GrantLease(GrantLease {
-        port,
-        action: Digest([action; 32]),
-    })
+    Approval::GrantLease(lease_grant(port, action))
+}
+
+/// The grant inside [`lease`].
+pub fn lease_grant(port: u8, action: u8) -> GrantLease {
+    GrantLease {
+        action: BusWriteAction::new(
+            port,
+            1,
+            WriteFunction::WriteSingleRegister,
+            u16::from(action),
+            &[u16::from(action)],
+        )
+        .unwrap(),
+        action_digest: Digest([action; 32]),
+    }
 }
 
 /// A message to [`DEVICE`] expiring at tick 1000.

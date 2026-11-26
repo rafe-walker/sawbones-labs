@@ -9,8 +9,10 @@
 
 mod common;
 
-use common::{grant, read, replace, rule, with_crc, write_multiple, write_single};
-use sawbones_busguard::{BusGuard, Decision, Function::*, Port, Rule, Tick, LEASE_TTL_TICKS};
+use common::{
+    action_for, grant, read, replace, rule, try_grant, with_crc, write_multiple, write_single,
+};
+use sawbones_busguard::{BusGuard, Function::*, Port, Rule, Tick, Verdict, LEASE_TTL_TICKS};
 
 /// A small xorshift generator, so the sequences are the same on every run.
 struct Rng(u64);
@@ -264,7 +266,14 @@ fn random_sequences_pass_only_what_was_approved() {
                 3..=6 => {
                     let bytes = rng.pick(&pool).0.clone();
                     let port = if rng.one_in(4) { 2 } else { rng.below(2) as u8 };
-                    let result = guard.apply(grant(port, &bytes), now);
+                    // No lease can name a write the encoder cannot express,
+                    // such as a broadcast: the trust root has nothing to
+                    // grant.
+                    let Some(event) = try_grant(port, &bytes) else {
+                        assert!(action_for(port, &bytes).is_none(), "{context}");
+                        continue;
+                    };
+                    let result = guard.apply(event, now);
                     let backwards = model.observe(now);
                     assert_eq!(result.is_err(), backwards, "{context}");
                     if !backwards {
@@ -280,7 +289,7 @@ fn random_sequences_pass_only_what_was_approved() {
                 }
                 _ => {
                     let (port, bytes) = next_frame(&mut rng, &model, &all_reads, &pool);
-                    let decision = guard.decide(Port(port), &bytes, now);
+                    let decision = guard.decide(Port(port), &bytes, now).verdict();
                     model.observe(now);
 
                     let is_permitted_read = model
@@ -297,8 +306,8 @@ fn random_sequences_pass_only_what_was_approved() {
                     let context = format!("{context} port {port} frame {bytes:02X?}");
 
                     match decision {
-                        Decision::Pass if is_permitted_read => read_passes += 1,
-                        Decision::Pass => {
+                        Verdict::Pass if is_permitted_read => read_passes += 1,
+                        Verdict::Pass => {
                             let lease = leased
                                 .unwrap_or_else(|| panic!("passed without approval: {context}"));
                             let spent = &mut model.passes_per_lease[lease.id as usize];
@@ -307,7 +316,7 @@ fn random_sequences_pass_only_what_was_approved() {
                             model.lease = None;
                             leased_passes += 1;
                         }
-                        Decision::Block(reason) => {
+                        Verdict::Block(reason) => {
                             // Nothing approved is refused.
                             assert!(
                                 !is_permitted_read,

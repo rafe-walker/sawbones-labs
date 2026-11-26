@@ -12,10 +12,11 @@ mod common;
 use common::{seed_for, DEVICE};
 use sawbones_approvals::test_keys::{sign, verifier, NOT_ENROLLED_SEED, TEST_MODULE};
 use sawbones_approvals::{
-    may_approve, Approval, BusGuardAllowList, DeviceId, Digest, GrantLease, InstallCoreRelease,
-    Message, ModuleId, NativeInstall, OperatorAttestation, PluginId, PluginPermissionGrowth,
-    Refusal, Role, Signature, MESSAGE_LEN,
+    may_approve, Approval, BusGuardAllowList, BusWriteAction, DeviceId, Digest, GrantLease,
+    InstallCoreRelease, Message, ModuleId, NativeInstall, OperatorAttestation, PluginId,
+    PluginPermissionGrowth, Refusal, Role, Signature, WriteFunction, MESSAGE_LEN,
 };
+use sawbones_modbus_encode::MAX_ACTION_WORDS;
 
 /// A small xorshift generator, so the sequences are the same on every run.
 struct Rng(u64);
@@ -47,10 +48,22 @@ fn random_approval(rng: &mut Rng) -> Approval {
     let digest = Digest(rng.bytes32());
     match rng.below(6) {
         0 => Approval::InstallCoreRelease(InstallCoreRelease { release: digest }),
-        1 => Approval::GrantLease(GrantLease {
-            port: rng.next() as u8,
-            action: digest,
-        }),
+        1 => {
+            let count = 1 + rng.below(MAX_ACTION_WORDS as u64) as usize;
+            let values: Vec<u16> = (0..count).map(|_| rng.next() as u16).collect();
+            let function = if count == 1 && rng.below(2) == 0 {
+                WriteFunction::WriteSingleRegister
+            } else {
+                WriteFunction::WriteMultipleRegisters
+            };
+            let unit = 1 + rng.below(247) as u8;
+            let register = rng.next() as u16 % (0xFFFF - 8);
+            Approval::GrantLease(GrantLease {
+                action: BusWriteAction::new(rng.next() as u8, unit, function, register, &values)
+                    .unwrap(),
+                action_digest: digest,
+            })
+        }
         2 => Approval::BusGuardAllowList(BusGuardAllowList { allow_list: digest }),
         3 => Approval::PluginPermissionGrowth(PluginPermissionGrowth {
             plugin: PluginId(rng.bytes32()),

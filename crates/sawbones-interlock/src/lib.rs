@@ -163,8 +163,10 @@ impl Port {
 }
 
 /// The digest of the exact action a class 3 lease approves: the 32 bytes of
-/// the policy engine's `ActionDigest`. The interlock only compares it; it
-/// never computes one.
+/// the policy engine's `ActionDigest`, which is the shared encoder's digest
+/// of one bus write action, the same bytes the trust root's approval and the
+/// bus guard's lease carry (#203). The interlock only compares it; it never
+/// computes one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ActionDigest(pub [u8; 32]);

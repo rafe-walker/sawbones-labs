@@ -1,7 +1,7 @@
 //! Attacks on the policy engine and on world text (lanes `bus` and
 //! `agent-injection`), plus the compromised-agent drill across crates.
 
-use sawbones_busguard::{BlockReason, BusGuard, Decision, Port as GuardPort};
+use sawbones_busguard::{BlockReason, BusGuard, Port as GuardPort, Verdict};
 use sawbones_interlock::{
     step, Event, HazardClass, Inputs, LeaseTarget, Port, State, RAIL_B_PORTS,
 };
@@ -23,7 +23,13 @@ fn signal(s: &str) -> SignalId {
 fn entry(name: &str, class: HazardClass, kind: SettingKind, trust: Trust) -> WriteEntry {
     WriteEntry {
         port: port("rs485-1"),
+        unit: 1,
         signal: signal(name),
+        // A register per name, kept clear of the last register.
+        register: name
+            .bytes()
+            .fold(0u16, |a, b| a.wrapping_mul(31).wrapping_add(u16::from(b)))
+            % 0xFF00,
         class,
         kind,
         energy_relevant: true,
@@ -35,6 +41,8 @@ fn entry(name: &str, class: HazardClass, kind: SettingKind, trust: Trust) -> Wri
 fn fact(p: &str, mastership: Mastership, trust: Trust) -> BusFact {
     BusFact {
         port: port(p),
+        // A bench port per name, so the few names here never share one.
+        bench_port: p.bytes().fold(0u8, u8::wrapping_add),
         mastership,
         trust,
     }
@@ -43,6 +51,7 @@ fn fact(p: &str, mastership: Mastership, trust: Trust) -> BusFact {
 fn read(p: &str, s: &str) -> EffectRequest {
     EffectRequest::BusRead(BusRead {
         port: port(p),
+        unit: 1,
         signal: signal(s),
     })
 }
@@ -50,6 +59,7 @@ fn read(p: &str, s: &str) -> EffectRequest {
 fn write(p: &str, s: &str, value: WriteValue) -> EffectRequest {
     EffectRequest::BusWrite(BusWrite {
         port: port(p),
+        unit: 1,
         signal: signal(s),
         value,
     })
@@ -381,7 +391,7 @@ fn redteam_inj_025_a_fully_compromised_agent_causes_no_effect_the_rails_forbid()
     let mut empty = BusGuard::new();
     assert_eq!(
         empty.decide(GuardPort(0), &frame, 1),
-        Decision::Block(BlockReason::NotAllowListed)
+        Verdict::Block(BlockReason::NotAllowListed)
     );
     let mut ruled = support::guard(&[support::rule(
         1,
@@ -392,6 +402,6 @@ fn redteam_inj_025_a_fully_compromised_agent_causes_no_effect_the_rails_forbid()
     )]);
     assert_eq!(
         ruled.decide(GuardPort(0), &frame, 1),
-        Decision::Block(BlockReason::NoLease)
+        Verdict::Block(BlockReason::NoLease)
     );
 }

@@ -15,7 +15,7 @@ default = ["serde", "approvals"]
 # Serialize and Deserialize on the plain data types (frames' reasons, rules,
 # the allow-list). Never on the trust-root event or the guard itself. The
 # crate is `no_std` either way; turn this off for the firmware build.
-serde = ["dep:serde"]
+serde = ["dep:serde", "sawbones-modbus-encode/serde"]
 # The verified path (#172): build a trust-root event only from an approval
 # whose signature, role, counter and expiry sawbones-approvals has checked.
 # On by default. The firmware build is
@@ -27,6 +27,9 @@ test-unverified = []
 
 [dependencies]
 sawbones-approvals = { path = "../sawbones-approvals", optional = true }
+# The one encoder from a typed bus-write action to its frame and digest,
+# shared with the policy engine and the approvals (#203).
+sawbones-modbus-encode = { path = "../sawbones-modbus-encode", default-features = false }
 serde = { workspace = true, optional = true }
 sha2 = { version = "0.11", default-features = false }
 

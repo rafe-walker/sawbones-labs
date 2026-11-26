@@ -2,7 +2,7 @@
 
 mod support;
 
-use sawbones_busguard::{BlockReason, Decision, FrameError, Function, Port};
+use sawbones_busguard::{BlockReason, FrameError, Function, Port, Verdict};
 use support::*;
 
 const P: Port = Port(0);
@@ -36,7 +36,7 @@ fn redteam_bus_001_broadcast_and_reserved_units_never_pass() {
             };
             assert_eq!(
                 g.decide(P, &frame, 2),
-                Decision::Block(BlockReason::Frame(want)),
+                Verdict::Block(BlockReason::Frame(want)),
                 "unit {unit}"
             );
             assert_eq!(
@@ -62,7 +62,7 @@ fn redteam_bus_002_unsupported_function_codes_never_pass() {
             lease(&mut g, &frame, 1);
             assert_eq!(
                 g.decide(P, &frame, 2),
-                Decision::Block(BlockReason::Frame(FrameError::UnsupportedFunction(code))),
+                Verdict::Block(BlockReason::Frame(FrameError::UnsupportedFunction(code))),
                 "function {code:#04x}, length {len}"
             );
         }
@@ -83,7 +83,7 @@ fn redteam_bus_003_a_write_multiple_reaching_a_protected_register_is_blocked() {
         lease(&mut g, frame, 1);
         assert_eq!(
             g.decide(P, frame, 2),
-            Decision::Block(BlockReason::NotAllowListed)
+            Verdict::Block(BlockReason::NotAllowListed)
         );
     }
     // Degenerate counts and ranges: each is refused for its own reason, even
@@ -105,14 +105,14 @@ fn redteam_bus_003_a_write_multiple_reaching_a_protected_register_is_blocked() {
         lease(&mut g, &frame, 1);
         assert_eq!(
             g.decide(P, &frame, 2),
-            Decision::Block(BlockReason::Frame(want))
+            Verdict::Block(BlockReason::Frame(want))
         );
     }
     // Control: the frame that stays inside the rule passes once, with its lease.
     let ok = write_multiple(1, 100, &[1, 2]);
     let mut g = guard(&rules);
     lease(&mut g, &ok, 1);
-    assert_eq!(g.decide(P, &ok, 2), Decision::Pass);
+    assert_eq!(g.decide(P, &ok, 2), Verdict::Pass);
 }
 
 #[test]
@@ -127,13 +127,13 @@ fn redteam_bus_004_concatenated_trailing_and_split_frames_never_pass() {
     joined.extend_from_slice(&w);
     assert_eq!(
         g.decide(P, &joined, 2),
-        Decision::Block(BlockReason::Frame(FrameError::LengthMismatch))
+        Verdict::Block(BlockReason::Frame(FrameError::LengthMismatch))
     );
     let mut trailing = w.clone();
     trailing.push(0);
     assert_eq!(
         g.decide(P, &trailing, 2),
-        Decision::Block(BlockReason::Frame(FrameError::LengthMismatch))
+        Verdict::Block(BlockReason::Frame(FrameError::LengthMismatch))
     );
     for split in 1..w.len() {
         assert!(!g.decide(P, &w[..split], 2).is_pass(), "first part {split}");
@@ -143,8 +143,8 @@ fn redteam_bus_004_concatenated_trailing_and_split_frames_never_pass() {
         );
     }
     assert!(g.lease().is_some(), "the lease survives every refusal");
-    assert_eq!(g.decide(P, &w, 2), Decision::Pass);
-    assert_eq!(g.decide(P, &w, 2), Decision::Block(BlockReason::NoLease));
+    assert_eq!(g.decide(P, &w, 2), Verdict::Pass);
+    assert_eq!(g.decide(P, &w, 2), Verdict::Block(BlockReason::NoLease));
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn redteam_bus_006_a_recomputed_crc_does_not_authenticate() {
             if (4..6).contains(&byte) {
                 // Only the value changed: the frame is well formed and
                 // permitted, so the lease digest is what refuses it.
-                assert_eq!(got, Decision::Block(BlockReason::DigestMismatch));
+                assert_eq!(got, Verdict::Block(BlockReason::DigestMismatch));
             }
         }
     }
@@ -179,7 +179,7 @@ fn redteam_bus_006_a_recomputed_crc_does_not_authenticate() {
         swapped.swap(body_len, body_len + 1);
         assert_eq!(
             g.decide(P, &swapped, 2),
-            Decision::Block(BlockReason::Frame(FrameError::BadCrc))
+            Verdict::Block(BlockReason::Frame(FrameError::BadCrc))
         );
     }
     // Other frames whose CRC equals the approved frame's CRC: a CRC is 16
@@ -195,13 +195,13 @@ fn redteam_bus_006_a_recomputed_crc_does_not_authenticate() {
             collisions += 1;
             assert_eq!(
                 g.decide(P, &candidate, 2),
-                Decision::Block(BlockReason::DigestMismatch)
+                Verdict::Block(BlockReason::DigestMismatch)
             );
         }
     }
     assert!(collisions > 0, "the search found no colliding frame");
     assert!(g.lease().is_some());
-    assert_eq!(g.decide(P, &w, 2), Decision::Pass);
+    assert_eq!(g.decide(P, &w, 2), Verdict::Pass);
 }
 
 #[test]

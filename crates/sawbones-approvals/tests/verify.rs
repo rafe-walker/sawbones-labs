@@ -3,7 +3,9 @@
 
 mod common;
 
-use common::{every_approval, lease, message, seed_for, signed, test_verifier, DEVICE};
+use common::{
+    every_approval, lease, lease_grant, message, seed_for, signed, test_verifier, DEVICE,
+};
 use sawbones_approvals::test_keys::{
     public_key, sign, MODULE_SEED, NOT_ENROLLED_SEED, OWNER_PHONE_SEED, TEST_MODULE,
     TRUST_ROOT_SEED,
@@ -22,13 +24,7 @@ fn a_valid_trust_root_lease_passes_and_carries_what_was_signed() {
     let approved = verifier
         .verify::<GrantLease>(&bytes, &signature, 999)
         .unwrap();
-    assert_eq!(
-        *approved.approval(),
-        GrantLease {
-            port: 3,
-            action: Digest([0xAB; 32])
-        }
-    );
+    assert_eq!(*approved.approval(), lease_grant(3, 0xAB));
     assert_eq!(approved.signer(), Role::TrustRoot);
     assert_eq!(approved.counter(), 1);
     assert_eq!(approved.expires_at(), 1000);

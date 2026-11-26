@@ -2,10 +2,10 @@
 
 mod common;
 
-use common::{grant, read, replace, rule, with_crc, write_multiple, write_single};
+use common::{action_for, grant, read, replace, rule, with_crc, write_multiple, write_single};
 use sawbones_busguard::{
-    crc16_modbus, parse, AllowList, AllowListError, BlockReason, BusGuard, Decision, FrameDigest,
-    FrameError, Function, Lease, Port, Rule, Tick, UpdateRefusal, LEASE_TTL_TICKS, MAX_RULES,
+    crc16_modbus, parse, AllowList, AllowListError, BlockReason, BusGuard, FrameDigest, FrameError,
+    Function, Lease, Port, Rule, Tick, UpdateRefusal, Verdict, LEASE_TTL_TICKS, MAX_RULES,
 };
 
 use BlockReason::*;
@@ -40,12 +40,12 @@ fn bench_guard() -> BusGuard {
     guard
 }
 
-fn block(reason: BlockReason) -> Decision {
-    Decision::Block(reason)
+fn block(reason: BlockReason) -> Verdict {
+    Verdict::Block(reason)
 }
 
-fn frame_error(error: FrameError) -> Decision {
-    Decision::Block(Frame(error))
+fn frame_error(error: FrameError) -> Verdict {
+    Verdict::Block(Frame(error))
 }
 
 // --- CRC and parsing -------------------------------------------------------
@@ -202,9 +202,14 @@ fn malformed_frames_are_refused_with_their_reason() {
     ];
     for (name, bytes, error) in cases {
         assert_eq!(parse(&bytes), Err(error), "{name}");
-        // And the guard blocks it with that reason, lease or no lease.
+        // And the guard blocks it with that reason, lease or no lease. No
+        // lease can name a malformed frame (the encoder makes only
+        // well-formed ones), so the lease is for the harmless setting.
+        assert!(action_for(0, &bytes).is_none(), "{name}");
         let mut guard = bench_guard();
-        guard.apply(grant(0, &bytes), 1).unwrap();
+        guard
+            .apply(grant(0, &write_single(1, SETTING, 1)), 1)
+            .unwrap();
         assert_eq!(guard.decide(P0, &bytes, 1), frame_error(error), "{name}");
     }
 }
@@ -226,15 +231,15 @@ fn an_allowed_read_passes_every_time() {
     for now in [1, 1, 2, 500, 10_000] {
         assert_eq!(
             guard.decide(P0, &read(1, 0x03, 0x0000, 32), now),
-            Decision::Pass
+            Verdict::Pass
         );
         assert_eq!(
             guard.decide(P0, &read(1, 0x04, 0x010F, 1), now),
-            Decision::Pass
+            Verdict::Pass
         );
         assert_eq!(
             guard.decide(P1, &read(2, 0x03, 0x0000, 10), now),
-            Decision::Pass
+            Verdict::Pass
         );
     }
 }
@@ -286,12 +291,13 @@ fn a_leased_write_passes_once_then_blocks() {
         assert_eq!(
             guard.lease(),
             Some(Lease {
-                port: P0,
+                action: action_for(0, &frame).unwrap(),
+                action_digest: action_for(0, &frame).unwrap().digest(),
                 digest: FrameDigest::of(&frame),
                 expires_at: 2 + LEASE_TTL_TICKS,
             })
         );
-        assert_eq!(guard.decide(P0, &frame, 3), Decision::Pass);
+        assert_eq!(guard.decide(P0, &frame, 3), Verdict::Pass);
         assert_eq!(guard.lease(), None);
         assert_eq!(guard.decide(P0, &frame, 3), block(NoLease));
         assert_eq!(guard.decide(P0, &frame, 4), block(NoLease));
@@ -314,7 +320,7 @@ fn a_write_with_any_byte_changed_is_blocked() {
         // The lease is still there for the approved frame.
         assert_eq!(
             guard.decide(P0, &approved, 1),
-            Decision::Pass,
+            Verdict::Pass,
             "byte {index}"
         );
     }
@@ -344,7 +350,7 @@ fn regression_169_same_function_other_register_blocks() {
         .unwrap();
     guard.apply(grant(0, &approved), 1).unwrap();
     assert_eq!(guard.decide(P0, &limit, 1), block(DigestMismatch));
-    assert_eq!(guard.decide(P0, &approved, 1), Decision::Pass);
+    assert_eq!(guard.decide(P0, &approved, 1), Verdict::Pass);
 }
 
 #[test]
@@ -365,7 +371,7 @@ fn an_expired_lease_blocks() {
     let mut guard = bench_guard();
     guard.apply(grant(0, &frame), granted_at).unwrap();
     let last_live = granted_at + LEASE_TTL_TICKS - 1;
-    assert_eq!(guard.decide(P0, &frame, last_live), Decision::Pass);
+    assert_eq!(guard.decide(P0, &frame, last_live), Verdict::Pass);
 
     let mut guard = bench_guard();
     guard.apply(grant(0, &frame), granted_at).unwrap();
@@ -383,7 +389,7 @@ fn expiry_is_noticed_by_any_call() {
     // A read after expiry ends the lease, and a later write finds none.
     assert_eq!(
         guard.decide(P0, &read(1, 0x03, 0, 1), LEASE_TTL_TICKS),
-        Decision::Pass
+        Verdict::Pass
     );
     assert_eq!(guard.lease(), None);
     assert_eq!(guard.decide(P0, &frame, LEASE_TTL_TICKS), block(NoLease));
@@ -405,12 +411,12 @@ fn a_lease_on_another_port_blocks_and_stays() {
     guard.apply(grant(0, &frame), 1).unwrap();
     // A rule permits this frame on port 1 too; the lease does not.
     assert_eq!(guard.decide(P1, &frame, 1), block(LeaseOnOtherPort));
-    assert_eq!(guard.decide(P0, &frame, 1), Decision::Pass);
+    assert_eq!(guard.decide(P0, &frame, 1), Verdict::Pass);
 
     let mut guard = bench_guard();
     guard.apply(grant(1, &frame), 1).unwrap();
     assert_eq!(guard.decide(P0, &frame, 1), block(LeaseOnOtherPort));
-    assert_eq!(guard.decide(P1, &frame, 1), Decision::Pass);
+    assert_eq!(guard.decide(P1, &frame, 1), Verdict::Pass);
 }
 
 #[test]
@@ -421,7 +427,7 @@ fn a_new_grant_replaces_the_old_lease() {
     guard.apply(grant(0, &first), 1).unwrap();
     guard.apply(grant(0, &second), 2).unwrap();
     assert_eq!(guard.decide(P0, &first, 2), block(DigestMismatch));
-    assert_eq!(guard.decide(P0, &second, 2), Decision::Pass);
+    assert_eq!(guard.decide(P0, &second, 2), Verdict::Pass);
     assert_eq!(guard.decide(P0, &first, 2), block(NoLease));
 }
 
@@ -451,7 +457,7 @@ fn regression_169_a_clock_that_goes_backwards_ends_the_lease() {
     // A read is not time-bound and still passes on a backward step.
     let mut guard = bench_guard();
     guard.apply(grant(0, &frame), 50).unwrap();
-    assert_eq!(guard.decide(P0, &read(1, 0x03, 0, 1), 10), Decision::Pass);
+    assert_eq!(guard.decide(P0, &read(1, 0x03, 0, 1), 10), Verdict::Pass);
     assert_eq!(guard.lease(), None);
 }
 
@@ -459,7 +465,7 @@ fn regression_169_a_clock_that_goes_backwards_ends_the_lease() {
 fn a_grant_on_a_backward_clock_is_refused() {
     let frame = write_single(1, SETTING, 5);
     let mut guard = bench_guard();
-    assert_eq!(guard.decide(P0, &read(1, 0x03, 0, 1), 100), Decision::Pass);
+    assert_eq!(guard.decide(P0, &read(1, 0x03, 0, 1), 100), Verdict::Pass);
     assert_eq!(
         guard.apply(grant(0, &frame), 99),
         Err(UpdateRefusal::ClockWentBackwards)
@@ -468,7 +474,7 @@ fn a_grant_on_a_backward_clock_is_refused() {
     // The backward tick is the new baseline, so the trust root can grant
     // again.
     guard.apply(grant(0, &frame), 99).unwrap();
-    assert_eq!(guard.decide(P0, &frame, 99), Decision::Pass);
+    assert_eq!(guard.decide(P0, &frame, 99), Verdict::Pass);
 }
 
 #[test]
@@ -483,9 +489,9 @@ fn a_restart_ends_the_lease_and_keeps_the_allow_list() {
     assert_eq!(guard.decide(P0, &frame, 0), block(NoLease));
     // The clock restarts with the guard: tick 0 after a restart is not a
     // backward step.
-    assert_eq!(guard.decide(P0, &read(1, 0x03, 0, 1), 0), Decision::Pass);
+    assert_eq!(guard.decide(P0, &read(1, 0x03, 0, 1), 0), Verdict::Pass);
     guard.apply(grant(0, &frame), 0).unwrap();
-    assert_eq!(guard.decide(P0, &frame, 0), Decision::Pass);
+    assert_eq!(guard.decide(P0, &frame, 0), Verdict::Pass);
 }
 
 // --- The allow-list --------------------------------------------------------

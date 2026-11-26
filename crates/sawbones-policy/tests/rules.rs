@@ -4,8 +4,8 @@ mod common;
 
 use common::*;
 use sawbones_policy::{
-    classify, ActionDigest, BusFacts, Decision, EffectRequest, FactError, HazardClass, Mastership,
-    RefusalReason, Requirement, SettingKind, WriteMap, WriteValue,
+    classify, BusFacts, Decision, EffectRequest, FactError, HazardClass, Mastership, RefusalReason,
+    Requirement, SettingKind, WriteMap, WriteValue,
 };
 use sawbones_reading::Trust;
 
@@ -178,13 +178,7 @@ fn check(name: &str, request: EffectRequest, expect: Expect) {
     let (class, requirement) = match expect {
         Expect::Nothing(class) => (class, Requirement::Nothing),
         Expect::RailA => (Class2, Requirement::RailA { port }),
-        Expect::Lease => (
-            Class3,
-            Requirement::RailBLease {
-                port,
-                action_digest: ActionDigest::of(&request),
-            },
-        ),
+        Expect::Lease => (Class3, lease_for(&request)),
         Expect::Refused(reason) => (Class4, Requirement::Refused { reason }),
     };
     assert_eq!(decision.class(), class, "{name}: class");
@@ -335,13 +329,7 @@ fn regression_171_battery_limit_is_class_3_not_4() {
     let request = write(BENCH, "battery_low_cutoff", WriteValue::U16(4600));
     let decision = classify(&request, &writes(), &buses());
     assert_eq!(decision.class(), Class3);
-    assert_eq!(
-        decision.requirement(),
-        &Requirement::RailBLease {
-            port: port(BENCH),
-            action_digest: ActionDigest::of(&request),
-        }
-    );
+    assert_eq!(decision.requirement(), &lease_for(&request));
 }
 
 /// A battery limit or charge voltage entry stated at class 0, 1 or 2 is
@@ -422,6 +410,7 @@ fn duplicate_facts_are_rejected() {
         dup,
         Err(FactError::DuplicateWriteEntry {
             port: port(BENCH),
+            unit: UNIT,
             signal: signal("s"),
         })
     );
