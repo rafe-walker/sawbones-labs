@@ -1,8 +1,9 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
-# The cargo-fuzz project needs nightly and its own lock file (#220).
-exclude = ["fuzz"]
+# The cargo-fuzz project needs nightly and its own lock file (#220). The sample
+# plugins are their own workspaces, built for wasm32 in CI only (#173).
+exclude = ["fuzz", "plugins"]
 
 [workspace.package]
 version = "0.0.0"

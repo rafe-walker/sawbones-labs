@@ -1,3 +1,7 @@
 # Reviewed "looks like another crate" pairs that are fine [#201, sup-014].
 # One crate name per line (the added crate). Add only after checking crates.io
 # that the crate is the one you meant and has history. See CONTRIBUTING.md.
+# #173: rustix (bytecodealliance), rustversion (dtolnay), wast (bytecodealliance).
+rustix
+rustversion
+wast

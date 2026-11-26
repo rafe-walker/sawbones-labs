@@ -12,6 +12,7 @@ sources = ["https://bytecodealliance.org/articles/wasmtime-security-advisories",
 status = "partial"
 test = "Add a CI test that parses Cargo.lock and fails if the resolved wasmtime (and cranelift-codegen) version is below a committed floor file ci/min-wasmtime.txt, with the floor covering every advisory in sup-001/002. Also run a conformance suite of heap-access edge cases (max-offset loads/stores, sign-extension patterns) on an aarch64 runner and compare outputs with the x86-64 run."
 issue = 201
+note = "#173: sawbones-plugin-host::wasmtime_and_cranelift_are_at_or_above_the_advisory_floor fails the build when Cargo.lock resolves wasmtime or cranelift-codegen below ci/min-wasmtime.txt (51.0.0 / 0.138.0), and cargo-deny checks advisories. The plugin host's tests run on the ubuntu-24.04-arm runner too. Still open: comparing outputs and fuel counts between aarch64 and x86-64 on a heap-access corpus (#176)."
 
 [[attack]]
 id = "sup-002"
@@ -22,9 +23,10 @@ how = "Reported Oct 2026: Cranelift packed value numbers into 24-bit fields and 
 expected = "Over-limit modules are rejected at validation with a fault; no panic, no compile; Winch not in the dependency tree."
 severity = "high"
 sources = ["https://thehackernews.com/2026/10/two-critical-wasmtime-flaws-could-let.html", "https://rustsec.org/advisories/RUSTSEC-2026-0380", "https://bytecodealliance.org/articles/wasmtime-security-advisories"]
-status = "gap"
+status = "partial"
 test = "Host-side admission test: engine config must pin Cranelift (assert wasmtime Cargo features exclude winch via cargo tree), and the loader must reject modules above committed limits (function body bytes, locals, br_table targets, total module size) before compile. Generate over-limit modules in the test with wasm-encoder and assert a clean typed rejection, never a compile attempt. Re-run the same corpus on aarch64."
-issue = 201
+issue = 176
+note = "#173: the host scan refuses components over committed limits (bytes, core modules, functions, body bytes, locals, br_table targets) before any compile (sawbones-plugin-host::admission_limits_are_checked_before_compile), wasmtime is built with Cranelift only and no Winch (sawbones-plugin-host::wasmtime_features_are_pinned_to_the_smallest_set, ...advisory_floor checks winch-codegen is absent). Still open: the generated over-limit corpus re-run on aarch64 (#176)."
 
 [[attack]]
 id = "sup-003"
@@ -35,9 +37,9 @@ how = "Apr 2026 advisories include heap out-of-bounds read/write and host panics
 expected = "WIT lint fails on a string in a plugin world; malformed lifts yield a fault."
 severity = "high"
 sources = ["https://bytecodealliance.org/articles/wasmtime-security-advisories", "https://github.com/rafe-walker/sawbones-labs/issues/173"]
-status = "gap"
-test = "Lint every .wit file in the repo: fail if any import/export function or exported type in a plugin world contains `string`, `flags`, or `list<char>` outside an allowlisted manifest interface. Plus a host test that calls every export with maximal and malformed canonical-ABI values and asserts a fault, not a panic (run under panic=abort supervisor test)."
-issue = 173
+status = "blocked"
+test = "sawbones-plugin-host::wit_worlds_have_no_text + sawbones-plugin-host::garbage_output_is_refused"
+note = "#173: every .wit file is linted for string, char and flags; malformed return values (bad discriminants, out-of-bounds or misaligned lists, a bad return area, a bad enum) end in a BadOutput fault, never a panic in the host."
 
 [[attack]]
 id = "sup-004"
@@ -48,9 +50,9 @@ how = "A 2026 advisory covers data leakage between instances when the pooling al
 expected = "No canary bytes observable in B; test fails if pool configuration changes without zeroing."
 severity = "medium"
 sources = ["https://bytecodealliance.org/articles/wasmtime-security-advisories", "https://docs.wasmtime.dev/security.html"]
-status = "gap"
-test = "Integration test: run plugin A that fills its memory and tables with a canary pattern, drop it, instantiate plugin B on the same engine/pool, and assert B's fresh memory, tables and globals are all zero. Also assert the host spawns one process per plugin trust class, or disables pooling."
-issue = 173
+status = "blocked"
+test = "sawbones-plugin-host::each_frame_gets_a_fresh_instance + sawbones-plugin-host::wasmtime_features_are_pinned_to_the_smallest_set"
+note = "#173: no pooling allocator is compiled in; each batch runs in a new child process and each frame in a new store and instance, and a canary written by one frame is not seen by the next."
 
 [[attack]]
 id = "sup-005"
@@ -61,9 +63,10 @@ how = "Wasmtime counts execution-time DoS (uninterruptible loops, memory exhaust
 expected = "Each hostile module ends in a typed fault within a bounded time and memory; the host RSS plateaus."
 severity = "high"
 sources = ["https://docs.wasmtime.dev/security-what-is-considered-a-security-vulnerability.html", "https://github.com/rafe-walker/sawbones-labs/issues/176"]
-status = "gap"
+status = "partial"
 test = "Conformance tests per plugin kind: infinite loop exhausts fuel and traps; memory.grow beyond cap returns failure; output quota exceeded yields a fault; table.grow and deep recursion limited; and a compile-time budget test (watchdog kills the compile child at N seconds, tested with a pathological module). Assert the host process stays alive and capture programs keep their deadline."
-issue = 173
+issue = 176
+note = "#173: proven for loops (fuel, and the wall-clock kill), memory.grow past the cap, too much initial memory, output over the quota, deep recursion, and a hung child, with the host carrying on (sawbones-plugin-host::looping_plugin_is_stopped_by_fuel, looping_plugin_is_killed_at_the_wall_clock_deadline, plugin_that_allocates_too_much_is_stopped_at_the_memory_cap, oversized_output_is_refused, deep_recursion_is_a_stack_fault, a_runner_that_never_answers_is_killed). Still open: table.grow, a pathological compile-time module and the RSS plateau (#176)."
 
 [[attack]]
 id = "sup-006"
@@ -74,9 +77,9 @@ how = "Loading a precompiled module bypasses validation and compilation and trus
 expected = "Lint fails if an unsafe deserialize call or a .cwasm file appears."
 severity = "high"
 sources = ["https://github.com/rafe-walker/sawbones-labs/issues/173"]
-status = "gap"
-test = "CI grep/clippy `disallowed-methods` rule that fails on any call to Module::deserialize, deserialize_file, Component::deserialize or similar in host crates, plus a repo check that no *.cwasm or other precompiled artifact is tracked or listed in any manifest."
-issue = 173
+status = "blocked"
+test = "sawbones-plugin-host::no_precompiled_code_is_loaded_or_committed"
+note = "#173: the test fails on any call to Module::deserialize, Component::deserialize, deserialize_file, deserialize_raw or deserialize_open_file in the repository's Rust, and on any committed .wasm or .cwasm file. The runner compiles from .wasm bytes only."
 
 [[attack]]
 id = "sup-007"
@@ -87,9 +90,10 @@ how = "Wasmtime states embedders must not trust guest values, even from trusted 
 expected = "Only allowlisted effects reach drivers; all other outputs become faults."
 severity = "high"
 sources = ["https://docs.wasmtime.dev/security-what-is-considered-a-security-vulnerability.html", "https://github.com/rafe-walker/sawbones-labs/issues/176"]
-status = "gap"
+status = "partial"
 test = "Property/fuzz test: random and adversarial plugin outputs fed to the host's output handler; assert (a) every effect request resolves to a write-map entry or is rejected, (b) class above the plugin ceiling is rejected, (c) snapshot/restore blobs with wrong schema version are rejected, (d) no output type has a string field (type-level test)."
 issue = 173
+note = "#173: proven for decoder output: values are checked against the host's manifest (unknown quantity, exponent range, decimal shape), a frame is all or nothing, the runner's reply is parsed as hostile bytes with exact lengths, and the output types have no string and no tier (sawbones-plugin-host::garbage_output_is_refused, garbage_reply_from_the_runner_is_refused, plugin_cannot_claim_a_trust_tier). Effect requests, class ceilings and snapshot blobs do not exist yet and are still open."
 
 [[attack]]
 id = "sup-008"
@@ -100,9 +104,10 @@ how = "Kernel documentation lists the classic pitfalls: filtering syscall number
 expected = "Probe is denied everything outside the committed allowlist; diff to the allowlist fails CI without owner approval."
 severity = "high"
 sources = ["https://www.kernel.org/doc/html/latest/userspace-api/seccomp_filter.html"]
-status = "gap"
+status = "partial"
 test = "Launcher test, run on an aarch64 runner: spawn a probe child under the exact production filter and have it attempt a table of denied syscalls (ptrace, bpf, io_uring_setup, userfaultfd, perf_event_open, keyctl, mount, unshare, socket) and assert each is killed or returns EPERM. Pin the allowlist in a committed file; any addition requires a CODEOWNER and an updated test row. Unit test asserts the filter begins with an arch check and that no_new_privs is set."
 issue = 173
+note = "#173: the runner installs a seccomp allow-list (kill on anything else) after the engine is built and before the component is parsed; the filter starts with the architecture check; the list is pinned by a test; probes under the real filter show socket, process spawn, thread creation and signalling the parent kill the child, and open fails with EPERM (sawbones-plugin-host::the_filter_checks_the_architecture_first, the_allow_list_is_pinned_and_has_nothing_dangerous, network_process_thread_and_signal_calls_kill_the_child). These run on the arm64 runner too. Still open: probes for ptrace, bpf, io_uring, userfaultfd and the rest by raw syscall number, and an owner gate on allow-list changes."
 
 [[attack]]
 id = "sup-009"
@@ -113,9 +118,10 @@ how = "The plugin process must not hold the store key, but keys leak through inh
 expected = "No key material, fd, env value or parent resource reachable from the probe."
 severity = "high"
 sources = ["https://www.kernel.org/doc/html/latest/admin-guide/LSM/landlock.html", "https://www.kernel.org/doc/html/latest/userspace-api/seccomp_filter.html", "https://github.com/rafe-walker/sawbones-labs/issues/173"]
-status = "gap"
+status = "partial"
 test = "Probe-child test under the production sandbox: enumerate /proc/self/fd (only 0,1,2 and the expected pipe), dump the environment (empty allowlist), try to open the store key path and parent's /proc/PID/mem and environ, try ptrace of the parent, try connect() to loopback and the capture programs' sockets, try signalling the parent. All must fail. Test fails if Landlock restriction is not enforced (ruleset status check) on the CI kernel, with a documented skip only on kernels without the needed ABI."
-issue = 173
+issue = 177
+note = "#173: the runner starts with an empty environment, refuses to run with any descriptor beyond 0, 1 and 2, is not dumpable, dies with its parent, and under its filter cannot open a file, connect a socket or signal its parent (sawbones-plugin-host::opening_a_file_fails_with_eperm, network_process_thread_and_signal_calls_kill_the_child). It runs as the host's own user. Still open: a separate unprivileged user, namespaces and Landlock with a ruleset status check (#177)."
 
 [[attack]]
 id = "sup-010"

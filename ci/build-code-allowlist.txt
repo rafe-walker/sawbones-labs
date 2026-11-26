@@ -2,18 +2,43 @@
 # One name per line. Add a crate only after reviewing its build script or macro
 # source. `ci/check_build_code.py` fails when the tree has a crate not listed here.
 # Build-script crates are also listed in deny.toml `[bans.build]`.
+# #173 (plugin host): wasmtime, Cranelift and their dependencies. cpp_demangle,
+# wasmtime-internal-fiber and wasmtime-internal-jit-debug are in Cargo.lock as
+# optional dependencies of wasmtime but are not built with its features.
 anyhow
+async-trait
 clap_derive
+cpp_demangle
+cranelift-assembler-x64
+cranelift-codegen
+cranelift-isle
+crc32fast
 curve25519-dalek
 curve25519-dalek-derive
+encoding_rs
+generic-array
 libc
+libm
+multiversion_no_op
 proc-macro2
+pulley-macros
 quote
+rustix
+rustversion
 serde
 serde_core
 serde_derive
 serde_json
+target-lexicon
 thiserror
 thiserror-impl
 tokio-macros
+wasmtime
+wasmtime-internal-component-macro
+wasmtime-internal-core
+wasmtime-internal-cranelift
+wasmtime-internal-fiber
+wasmtime-internal-jit-debug
+wasmtime-internal-unwinder
+wasmtime-internal-versioned-export-macros
 zmij
