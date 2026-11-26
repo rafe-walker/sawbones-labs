@@ -15,9 +15,13 @@ sawbones-interlock = { path = "../sawbones-interlock" }
 sawbones-reading = { path = "../sawbones-reading" }
 serde.workspace = true
 thiserror.workspace = true
-# SHA-256 for the action digest a class 3 lease is bound to. No default
-# features: no allocation, no OID tables; the hash itself is no_std.
-sha2 = { version = "0.11", default-features = false }
+# The one encoder from a typed bus write to its frame and action digest,
+# shared with the approvals and the bus guard (#203).
+sawbones-modbus-encode = { path = "../sawbones-modbus-encode" }
 
 [dev-dependencies]
+# #203: one action from the policy engine through the interlock, a signed
+# approval and the bus guard, end to end. Test builds only.
+sawbones-approvals = { path = "../sawbones-approvals", features = ["test-keys"] }
+sawbones-busguard = { path = "../sawbones-busguard" }
 serde_json.workspace = true

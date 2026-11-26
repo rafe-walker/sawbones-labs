@@ -6,15 +6,15 @@ mod common;
 use std::fs;
 use std::path::Path;
 
-use common::{allow_list, read, rule, write_single};
+use common::{action_for, allow_list, read, rule, write_single};
 use sawbones_approvals::test_keys::{sign, verifier, OWNER_PHONE_SEED, TRUST_ROOT_SEED};
 use sawbones_approvals::{
     Approval, BusGuardAllowList, DeviceId, Digest, GrantLease, Message, Refusal, Role, Verifier,
     MESSAGE_LEN,
 };
 use sawbones_busguard::{
-    AllowList, AllowListMismatch, BlockReason, BusGuard, Decision, FrameDigest, Function::*, Port,
-    TrustRootEvent, ALLOW_LIST_DOMAIN, ALLOW_LIST_ENCODED_LEN,
+    AllowList, AllowListMismatch, BlockReason, BusGuard, Function::*, Port, TrustRootEvent,
+    Verdict, ALLOW_LIST_DOMAIN, ALLOW_LIST_ENCODED_LEN,
 };
 
 const GUARD: DeviceId = DeviceId(3);
@@ -41,10 +41,7 @@ fn signed(
 }
 
 fn lease_for(frame: &[u8], port: u8) -> Approval {
-    Approval::GrantLease(GrantLease {
-        port,
-        action: Digest(FrameDigest::of(frame).0),
-    })
+    Approval::GrantLease(GrantLease::new(action_for(port, frame).unwrap()))
 }
 
 fn list_approval(list: &AllowList) -> Approval {
@@ -73,18 +70,18 @@ fn a_signed_allow_list_and_lease_let_exactly_the_approved_write_through_once() {
     let (bytes, signature) = signed(&TRUST_ROOT_SEED, 2, lease_for(&frame, 0));
     let approved = verifier.verify(&bytes, &signature, 1).unwrap();
     guard
-        .apply(TrustRootEvent::from_approved_lease(approved), 1)
+        .apply(TrustRootEvent::from_approved_lease(approved).unwrap(), 1)
         .unwrap();
 
     let other = write_single(1, 105, 43);
     assert_eq!(
         guard.decide(Port(0), &other, 2),
-        Decision::Block(BlockReason::DigestMismatch)
+        Verdict::Block(BlockReason::DigestMismatch)
     );
-    assert_eq!(guard.decide(Port(0), &frame, 2), Decision::Pass);
+    assert_eq!(guard.decide(Port(0), &frame, 2), Verdict::Pass);
     assert_eq!(
         guard.decide(Port(0), &frame, 3),
-        Decision::Block(BlockReason::NoLease)
+        Verdict::Block(BlockReason::NoLease)
     );
 
     // Sending the same signed grant again is a replay: no second lease.
@@ -148,13 +145,13 @@ fn the_lease_carries_the_approved_port() {
     let (bytes, signature) = signed(&TRUST_ROOT_SEED, 2, lease_for(&frame, 1));
     let approved = verifier.verify(&bytes, &signature, 0).unwrap();
     guard
-        .apply(TrustRootEvent::from_approved_lease(approved), 0)
+        .apply(TrustRootEvent::from_approved_lease(approved).unwrap(), 0)
         .unwrap();
     assert_eq!(
         guard.decide(Port(0), &frame, 1),
-        Decision::Block(BlockReason::LeaseOnOtherPort)
+        Verdict::Block(BlockReason::LeaseOnOtherPort)
     );
-    assert_eq!(guard.decide(Port(1), &frame, 1), Decision::Pass);
+    assert_eq!(guard.decide(Port(1), &frame, 1), Verdict::Pass);
 }
 
 #[test]
@@ -210,7 +207,7 @@ fn the_digest_depends_on_every_rule_field_and_the_order() {
     install(&mut guard, &mut verifier, 1, allow_list(&[other]));
     assert_eq!(
         guard.decide(Port(1), &read(2, 0x04, 0, 9), 0),
-        Decision::Pass
+        Verdict::Pass
     );
 }
 

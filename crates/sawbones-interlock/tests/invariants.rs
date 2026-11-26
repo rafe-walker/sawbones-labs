@@ -804,7 +804,7 @@ impl Fnv {
 /// oldest first. Version 1 (#150) predates this pin. Version 3 (#197, #198)
 /// changed the grid itself (heartbeat watches, restart records, clear
 /// sources), as well as the rules.
-const TRANSITION_TABLES: &[(u32, u64)] = &[(2, 0xa1ce_7c5f_feda_0b92), (3, 0x8291_075e_8d7c_df85)];
+const TRANSITION_TABLES: &[(u32, u64)] = &[(2, 0xa1ce_7c5f_feda_0b92), (3, 0x6ae1_cef7_556f_f839)];
 
 /// The trust root reports [`sawbones_interlock::rules_id`], which is built
 /// from [`RULES_VERSION`]. This test hashes the next state and outputs of

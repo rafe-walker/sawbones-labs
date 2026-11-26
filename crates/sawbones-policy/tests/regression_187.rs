@@ -150,7 +150,7 @@ fn regression_187_entry_range_roundtrips_and_defaults_to_none() {
     };
     let json = serde_json::to_string(&e).unwrap();
     assert_eq!(serde_json::from_str::<WriteEntry>(&json).unwrap(), e);
-    let no_range = r#"{"port":"p","signal":"s","class":"class2","kind":"config","energy_relevant":false,"trust":"measured"}"#;
+    let no_range = r#"{"port":"p","unit":1,"signal":"s","register":7,"class":"class2","kind":"config","energy_relevant":false,"trust":"measured"}"#;
     assert_eq!(
         serde_json::from_str::<WriteEntry>(no_range).unwrap().range,
         None
@@ -202,6 +202,7 @@ fn regression_187_shape_valid_text_is_still_unknown_to_the_write_map() {
     let writes = ranged(Trust::OperatorAttested, None);
     let req = sawbones_policy::EffectRequest::BusWrite(sawbones_policy::BusWrite {
         port: port("p"),
+        unit: UNIT,
         signal: sig,
         value: WriteValue::U16(1),
     });

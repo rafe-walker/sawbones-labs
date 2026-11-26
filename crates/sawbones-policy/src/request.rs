@@ -8,8 +8,8 @@ use thiserror::Error;
 
 /// Domain label at the start of every [`EffectRequest::canonical_bytes`]
 /// encoding. It says "provisional" on purpose: a change to the encoding
-/// changes every digest, so it must bump this label.
-pub const ACTION_ENCODING: &str = "sawbones.policy.action/0-provisional";
+/// must bump this label. Version 1 added the unit address (#203).
+pub const REQUEST_ENCODING: &str = "sawbones.policy.request/1-provisional";
 
 /// Why a string was rejected as a policy identifier ([`PortId`] or
 /// [`SignalId`]).
@@ -195,12 +195,16 @@ pub enum WriteValue {
     I32(i32),
 }
 
-/// Write one value to one named signal on one port.
+/// Write one value to one named signal of one unit on one port.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct BusWrite {
     /// The port the signal is on.
     pub port: PortId,
+    /// The Modbus unit (slave) address of the device, so two paralleled
+    /// devices on one bus are never confused (#203). Only a write-map entry
+    /// for this unit can authorise the write.
+    pub unit: u8,
     /// The signal, as the write map names it.
     pub signal: SignalId,
     /// The value to write.
@@ -214,6 +218,8 @@ pub struct BusWrite {
 pub struct BusRead {
     /// The port to send the read on.
     pub port: PortId,
+    /// The Modbus unit (slave) address of the device read.
+    pub unit: u8,
     /// The signal to read.
     pub signal: SignalId,
 }
@@ -252,35 +258,42 @@ impl EffectRequest {
         }
     }
 
-    /// The stable binary encoding of this exact request, which
-    /// [`crate::ActionDigest`] hashes.
+    /// The stable binary encoding of this exact request, for records of
+    /// what a plugin asked for.
+    ///
+    /// A lease is not bound to this: it is bound to the
+    /// [`crate::ActionDigest`] of the bus action the request resolves to
+    /// through the write map, which the bus guard can check against the wire
+    /// (#203).
     ///
     /// The layout, with every integer big-endian:
     ///
-    /// - [`ACTION_ENCODING`] as a length-prefixed string;
+    /// - [`REQUEST_ENCODING`] as a length-prefixed string;
     /// - one tag byte: `1` bus write, `2` bus read, `3` bus listen;
     /// - each field in declaration order. A string is a `u32` byte length and
-    ///   then its bytes. A [`WriteValue`] is one tag byte (`1` bool, `2` u16,
-    ///   `3` i16, `4` u32, `5` i32) and then its fixed-width bytes (a bool is
-    ///   one byte, `0` or `1`).
+    ///   then its bytes; a unit is one byte. A [`WriteValue`] is one tag byte
+    ///   (`1` bool, `2` u16, `3` i16, `4` u32, `5` i32) and then its
+    ///   fixed-width bytes (a bool is one byte, `0` or `1`).
     ///
     /// The length prefixes make the encoding injective: two different
     /// requests never encode to the same bytes. The golden test in this crate
     /// pins the exact bytes; changing them is a schema change and must bump
-    /// [`ACTION_ENCODING`].
+    /// [`REQUEST_ENCODING`].
     pub fn canonical_bytes(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(96);
-        put_str(&mut out, ACTION_ENCODING);
+        put_str(&mut out, REQUEST_ENCODING);
         match self {
             EffectRequest::BusWrite(w) => {
                 out.push(1);
                 put_str(&mut out, w.port.as_str());
+                out.push(w.unit);
                 put_str(&mut out, w.signal.as_str());
                 put_value(&mut out, w.value);
             }
             EffectRequest::BusRead(r) => {
                 out.push(2);
                 put_str(&mut out, r.port.as_str());
+                out.push(r.unit);
                 put_str(&mut out, r.signal.as_str());
             }
             EffectRequest::BusListen(l) => {

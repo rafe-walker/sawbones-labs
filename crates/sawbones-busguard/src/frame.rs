@@ -13,31 +13,8 @@ pub const MAX_READ_QUANTITY: u16 = 125;
 /// The most registers one write multiple registers (0x10) may carry.
 pub const MAX_WRITE_QUANTITY: u16 = 123;
 
-/// The highest individual unit address. 0 is broadcast and 248 to 255 are
-/// reserved.
-pub const MAX_UNIT_ADDRESS: u8 = 247;
-
-/// CRC-16/MODBUS over `bytes`: reflected polynomial 0xA001, initial value
-/// 0xFFFF. On the wire the low byte goes first.
-#[must_use]
-pub const fn crc16_modbus(bytes: &[u8]) -> u16 {
-    let mut crc: u16 = 0xFFFF;
-    let mut i = 0;
-    while i < bytes.len() {
-        crc ^= bytes[i] as u16;
-        let mut bit = 0;
-        while bit < 8 {
-            crc = if crc & 1 != 0 {
-                (crc >> 1) ^ 0xA001
-            } else {
-                crc >> 1
-            };
-            bit += 1;
-        }
-        i += 1;
-    }
-    crc
-}
+use sawbones_modbus_encode::WriteFunction;
+pub use sawbones_modbus_encode::{crc16_modbus, MAX_UNIT_ADDRESS};
 
 /// The function codes the guard understands. Every other code is blocked.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -87,6 +64,16 @@ impl Function {
             self,
             Function::WriteSingleRegister | Function::WriteMultipleRegisters
         )
+    }
+}
+
+/// The guard's function for each of the shared encoder's write functions.
+impl From<WriteFunction> for Function {
+    fn from(function: WriteFunction) -> Function {
+        match function {
+            WriteFunction::WriteSingleRegister => Function::WriteSingleRegister,
+            WriteFunction::WriteMultipleRegisters => Function::WriteMultipleRegisters,
+        }
     }
 }
 

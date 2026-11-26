@@ -2,8 +2,8 @@
 #![allow(dead_code)]
 
 use sawbones_busguard::{
-    crc16_modbus, AllowList, BusGuard, FrameDigest, Function, LeaseGrant, Port, Rule,
-    TrustRootEvent, Update,
+    crc16_modbus, parse, AllowList, BusGuard, BusWriteAction, Function, LeaseGrant, Port, Rule,
+    TrustRootEvent, Update, WriteFunction,
 };
 
 pub fn with_crc(body: &[u8]) -> Vec<u8> {
@@ -65,13 +65,37 @@ pub fn guard(rules: &[Rule]) -> BusGuard {
     g
 }
 
-/// Grants a lease for exactly `frame` on port 0 at tick `now`.
+/// The action `frame` is the write of on port 0, if the shared encoder can
+/// express it (#203).
+pub fn action_for(frame: &[u8]) -> Option<BusWriteAction> {
+    let parsed = parse(frame).ok()?;
+    let function = match parsed.function() {
+        Function::WriteSingleRegister => WriteFunction::WriteSingleRegister,
+        Function::WriteMultipleRegisters => WriteFunction::WriteMultipleRegisters,
+        _ => return None,
+    };
+    let values: Vec<u16> = parsed
+        .payload()
+        .chunks_exact(2)
+        .map(|p| u16::from_be_bytes([p[0], p[1]]))
+        .collect();
+    let action = BusWriteAction::new(0, parsed.unit(), function, parsed.start(), &values).ok()?;
+    (action.frame().as_bytes() == frame).then_some(action)
+}
+
+/// Grants a lease on port 0 at tick `now` for the action `frame` encodes.
+/// No lease can name a frame the encoder cannot produce (a broadcast, a
+/// malformed or oversized frame, a read), so for those the guard gets a live
+/// lease for an unrelated write instead: the attack then runs against a
+/// guard holding a lease, as before #203.
 pub fn lease(g: &mut BusGuard, frame: &[u8], now: u64) {
+    let action = action_for(frame).unwrap_or_else(|| {
+        BusWriteAction::new(0, 1, WriteFunction::WriteSingleRegister, 0xFFF0, &[0xBEEF]).unwrap()
+    });
     g.apply(
-        TrustRootEvent::unverified_from_trust_root(Update::GrantLease(LeaseGrant {
-            port: Port(0),
-            digest: FrameDigest::of(frame),
-        })),
+        TrustRootEvent::unverified_from_trust_root(Update::GrantLease(LeaseGrant::for_action(
+            action,
+        ))),
         now,
     )
     .unwrap();

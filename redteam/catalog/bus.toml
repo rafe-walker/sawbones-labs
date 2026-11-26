@@ -111,9 +111,9 @@ how = "decide() takes a borrowed slice. If the firmware decides on a buffer that
 expected = "Wire bytes equal decided bytes; today nothing enforces it."
 severity = "high"
 sources = ["https://attack.mitre.org/techniques/T1692/001", "https://i.blackhat.com/USA-20/Wednesday/us-20-Balduzzi-Industrial-Protocol-Gateways-Under-Analysis-wp.pdf"]
-status = "gap"
-test = "Host-side harness with a mutation hook that rewrites the shared buffer between decide() returning Pass and the transmit call. The firmware wrapper must send the decided copy: assert bytes on the simulated line equal the bytes passed to decide(). Better: change the API so decide() returns an Approved token that owns a copy, and transmit only accepts that token (compile_fail test for transmitting a raw slice)."
-issue = 114
+status = "blocked"
+test = "sawbones-busguard::regression_203_the_pass_owns_the_checked_bytes + sawbones-busguard::regression_203_a_pass_goes_out_only_on_its_own_port"
+note = "Closed by #203: decide() copies the frame and judges only the copy; Decision::Pass owns it; GuardedLine sends only a Pass for its port (compile_fail doctests refuse a raw slice and a second send)."
 
 [[attack]]
 id = "bus-010"
@@ -175,9 +175,9 @@ how = "A class 3 lease approves an ActionDigest of port, signal and value. The g
 expected = "Lease only for the host-encoded frame; currently unenforced."
 severity = "high"
 sources = ["https://attack.mitre.org/techniques/T1692/001", "https://attack.mitre.org/techniques/T0836/"]
-status = "gap"
-test = "Future trusted encoder: encode(write_map_with_addresses, BusWrite) -> frame bytes, deterministic. Trust root grants a lease only for digest(encode(action)). Test: a plugin-supplied frame that differs from encode(action) in unit, address, width or value is refused before any lease is granted. Golden test: for every entry in a sample write map, encoded address range equals the entry's declared span. Today the test cannot be written; add a failing placeholder."
-issue = 203
+status = "blocked"
+test = "sawbones-busguard::regression_203_exactly_the_approved_actions_frame_passes + sawbones-busguard::regression_203_a_grant_whose_digest_is_not_its_actions_is_refused + sawbones-policy::regression_203_policy_interlock_approval_and_guard_agree_on_one_action"
+note = "Closed by #203: one shared encoder (sawbones-modbus-encode) from a typed bus action to its frame and digest; the policy decision, interlock lease, signed approval and guard lease carry one digest, and the guard passes only the byte-identical frame."
 
 [[attack]]
 id = "bus-015"
@@ -201,9 +201,9 @@ how = "Paralleled inverters sit on one RS-485 line with different unit addresses
 expected = "Distinct digests and per-unit entries; today they collide."
 severity = "high"
 sources = ["https://millenia.cars.aps.anl.gov/software/epics/Modbus_over_serial_line_V1_02.pdf", "https://i.blackhat.com/USA-20/Wednesday/us-20-Balduzzi-Industrial-Protocol-Gateways-Under-Analysis-wp.pdf"]
-status = "gap"
-test = "Add unit to BusWrite and WriteEntry. Test: two units, same signal; ActionDigest differs by unit. A write-map entry for unit 1 must not authorise unit 2 (UnknownSignal). Today: assert that ActionDigest::of is equal for requests that differ only in target unit and mark the test as a known failing gap."
-issue = 203
+status = "blocked"
+test = "sawbones-policy::regression_203_the_unit_is_part_of_the_entry_the_request_and_the_digest + sawbones-busguard::regression_203_a_lease_for_one_unit_never_passes_another"
+note = "Closed by #203: write-map entries, requests and action digests carry the unit; an entry for one unit never authorises another (UnknownSignal)."
 
 [[attack]]
 id = "bus-017"
@@ -253,9 +253,10 @@ how = "BenchOnly is a declaration. If the inverter's own monitor, a Solar Assist
 expected = "Fact downgraded and requests refused; no such function exists."
 severity = "high"
 sources = ["https://millenia.cars.aps.anl.gov/software/epics/Modbus_over_serial_line_V1_02.pdf", "https://seqred-website.pages.dev/en/blog/modbus-rtu/"]
-status = "gap"
-test = "Add observe_traffic(port, captured_frames, own_tx_log) that downgrades the port's fact to OtherMasterActive when a valid request frame appears that is not in the own transmit log. Test with a capture containing a foreign 0x03 request: classify(BusRead) flips from RailA to refused(OtherMasterActive). Echo test: capture equals own tx log only: fact unchanged. Downgrade must persist until re-attested by the operator."
+status = "partial"
+test = "sawbones-busguard::regression_203_a_foreign_request_blocks_writes_until_a_new_allow_list + sawbones-busguard::regression_203_the_guards_own_echo_is_not_another_master"
 issue = 147
+note = "Partly closed by #203: BusGuard::observe_line counts requests the guard did not send (own echo excluded) and blocks writes and grants until the trust root sends a new allow-list. Still open: reads are not blocked, the policy mastership fact is not downgraded, and a master using only unparsed function codes is not seen."
 
 [[attack]]
 id = "bus-021"
