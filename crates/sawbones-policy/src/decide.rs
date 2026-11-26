@@ -88,6 +88,14 @@ impl Serialize for ActionDigest {
     }
 }
 
+/// The same 32 bytes as the interlock's digest, for the lease request the
+/// supervisor sends the trust root.
+impl From<ActionDigest> for sawbones_interlock::ActionDigest {
+    fn from(digest: ActionDigest) -> Self {
+        sawbones_interlock::ActionDigest(digest.0)
+    }
+}
+
 /// Why a request was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(tag = "reason", rename_all = "snake_case")]

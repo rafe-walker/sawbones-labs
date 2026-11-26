@@ -40,6 +40,15 @@ fn canonical_bytes_and_digest_are_pinned() {
     );
 }
 
+/// The digest the interlock binds a lease to is the same 32 bytes.
+#[test]
+fn the_interlock_digest_is_the_same_bytes() {
+    let request = write("rs485-1", "battery_low_cutoff", WriteValue::U16(4600));
+    let digest = ActionDigest::of(&request);
+    let for_interlock = sawbones_interlock::ActionDigest::from(digest);
+    assert_eq!(&for_interlock.0, digest.as_bytes());
+}
+
 #[test]
 fn requests_round_trip_through_json() {
     let requests = [
