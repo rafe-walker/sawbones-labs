@@ -11,15 +11,29 @@ publish.workspace = true
 workspace = true
 
 [features]
-default = ["serde"]
+default = ["serde", "approvals"]
 # Serialize and Deserialize on the plain data types (frames' reasons, rules,
 # the allow-list). Never on the trust-root event or the guard itself. The
 # crate is `no_std` either way; turn this off for the firmware build.
 serde = ["dep:serde"]
+# The verified path (#172): build a trust-root event only from an approval
+# whose signature, role, counter and expiry sawbones-approvals has checked.
+# On by default. The firmware build is
+# `--no-default-features --features approvals`.
+approvals = ["dep:sawbones-approvals"]
+# TESTS AND SIMULATION ONLY. Exposes `TrustRootEvent::unverified_from_trust_root`,
+# which wraps an update with no check at all. Never in firmware.
+test-unverified = []
 
 [dependencies]
+sawbones-approvals = { path = "../sawbones-approvals", optional = true }
 serde = { workspace = true, optional = true }
 sha2 = { version = "0.11", default-features = false }
 
 [dev-dependencies]
+# The tests use the unverified constructor for speed, and sign real
+# approvals with the fixed test keys for the verified path. Both features
+# are on for test builds only.
+sawbones-approvals = { path = "../sawbones-approvals", features = ["test-keys"] }
+sawbones-busguard = { path = ".", features = ["test-unverified"] }
 serde_json.workspace = true

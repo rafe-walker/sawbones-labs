@@ -1,0 +1,28 @@
+[package]
+name = "sawbones-approvals"
+description = "PROVISIONAL signed, replay-proof approvals for the Sawbones test bench: Ed25519 over one fixed byte layout, checked per signer role, counter and expiry. no_std, no allocation. The design is under review."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# Fixed, publicly known keypairs for tests and simulation. NEVER for real
+# hardware: anyone can sign with them. Off by default; a build without this
+# feature contains no private key and refuses the test public keys.
+test-keys = []
+
+[dependencies]
+# Default features off: no precomputed tables, no zeroize, no alloc. The
+# verify path needs none of them.
+ed25519-dalek = { version = "3.0.0", default-features = false }
+
+[dev-dependencies]
+# The tests sign with the fixed test keys. A dev-dependency on this crate
+# itself turns the feature on for test builds only.
+sawbones-approvals = { path = ".", features = ["test-keys"] }

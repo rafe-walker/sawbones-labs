@@ -17,3 +17,11 @@ missing_docs = "warn"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+
+# Ed25519 in an unoptimised build is slow enough to drag the tests out.
+# Optimise only the curve and hash crates, also in debug and test builds.
+[profile.dev.package.curve25519-dalek]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
