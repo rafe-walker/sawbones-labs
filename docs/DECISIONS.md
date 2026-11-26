@@ -81,6 +81,7 @@ Tracked in #166. The plugin and store index design itself is written up after th
 | --- | --- |
 | Approval scale | Approvals scale with risk. Repo work (code, docs, tests, simulation, CI, merges) needs no panel or phone approval; agent-written plugin changes still get the clean-room reviewer. Signed approvals (panel press, or a phone passkey for anything not involving energy) start when testing on the real Pi starts, and cover what runs on the device: installing core releases, plugin permission growth, native installs, and operator attestations. Nothing here may slow early development. |
 | Battery protection limits | Class 3, not class 4: the agent may propose a change, and it happens only after the owner confirms it with a physical panel press for that one action. Charge voltages are also class 3. The review document said class 4; the repo's design document (class 3) was right. Class 4 stays: mains work and string switching. |
+| Round 2 capture | No separate response document. Review round 2 changes are work items #167 to #180 in their roadmap stages, plus comments on the affected items; summary in #166. |
 
 ## Reversals and corrections
 

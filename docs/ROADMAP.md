@@ -68,9 +68,9 @@ Read it as: an arrow means "has to be done first". Three things follow from the 
 | --- | --- | --- | --- |
 | **P0.1 Foundations** | The repo builds and tests itself, real inverter data flows in read-only, and the parts list is checked part against part. | #151 | Nothing |
 | **P0.2 Safety core** | The rules that decide whether anything may be energised, written and tested before any hardware exists. | #152 | P0.1 |
-| **P0.3 Simulated bench** | A whole bench that runs with no hardware: the supervisor, the module protocol, pretend modules, and firmware logic tested on an ordinary computer. | #153 | P0.2 |
+| **P0.3 Simulated bench** | A whole bench that runs with no hardware: the supervisor, the module protocol, the plugin host with sandboxed plugins, pretend modules, and firmware logic tested on an ordinary computer. | #153 | P0.2 |
 | **P0.4 Agent surface** | Claude drives the simulated bench the same way it will drive the real one. | #154 | P0.3 |
-| **P0.5 Evidence and memory** | Everything the bench does is recorded, checkable afterwards, and remembered. | #155 | P0.3 |
+| **P0.5 Evidence and memory** | Everything the bench does is recorded, checkable afterwards and remembered, with trust tiers the store computes itself and a first look that carries meaning. | #155 | P0.3 |
 | **P0.6 Blueprint: electrical** | The wiring, designed and tested in software before any is laid out. | #156 | P0.1 |
 | **P0.7 Blueprint: physical and radio** | The case, the cooling and the radio side, designed and tested in software. | #157 | P0.6 |
 | **P0.8 P0 exit** | One pack of blueprints, and the design document rewritten to match it. | #158 | P0.2, P0.3, P0.4, P0.5, P0.6, P0.7 |
@@ -88,7 +88,7 @@ Read it as: an arrow means "has to be done first". Three things follow from the 
 
 The repo builds and tests itself, real inverter data flows in read-only, and the parts list is checked part against part.
 
-**Work:** #94, #95, #96, #97, #118
+**Work:** #94, #95, #96, #97, #118, #167, #168
 
 **Check-in (#151). You will see:**
 
@@ -104,7 +104,7 @@ The repo builds and tests itself, real inverter data flows in read-only, and the
 
 The rules that decide whether anything may be energised, written and tested before any hardware exists.
 
-**Work:** #101, #102, #105, #110, #111, #117
+**Work:** #101, #102, #105, #110, #111, #117, #169, #171, #172
 
 **Check-in (#152). You will see:**
 
@@ -112,6 +112,8 @@ The rules that decide whether anything may be energised, written and tested befo
 - Random runs that never find a rail on in a forbidden state.
 - The ground map of the Bench Core, with what it found.
 - The threat model, and the checklist the real hardware has to pass.
+- A bus guard in simulation that passes only the exact frame you approved.
+- The approval scale written down, with test keys for the trust root and your phone.
 
 **You decide:**
 
@@ -119,15 +121,17 @@ The rules that decide whether anything may be energised, written and tested befo
 
 ### P0.3 Simulated bench
 
-A whole bench that runs with no hardware: the supervisor, the module protocol, pretend modules, and firmware logic tested on an ordinary computer.
+A whole bench that runs with no hardware: the supervisor, the module protocol, the plugin host with sandboxed plugins, pretend modules, and firmware logic tested on an ordinary computer.
 
-**Work:** #98, #99, #100, #114, #132
+**Work:** #98, #99, #100, #114, #132, #173, #174, #175, #176, #177
 
 **Check-in (#153). You will see:**
 
 - One command starts the supervisor with simulated modules.
 - A simulated module that lies, stalls or disappears is caught.
 - The firmware core builds for the RP2350 in the checks.
+- A decoder that is a register map, with no code.
+- A plugin that crashes or misbehaves, caught by the host and reported by the agent.
 
 **You decide:**
 
@@ -152,15 +156,17 @@ Claude drives the simulated bench the same way it will drive the real one.
 
 ### P0.5 Evidence and memory
 
-Everything the bench does is recorded, checkable afterwards, and remembered.
+Everything the bench does is recorded, checkable afterwards and remembered, with trust tiers the store computes itself and a first look that carries meaning.
 
-**Work:** #106, #107, #108, #109, #113
+**Work:** #106, #107, #108, #109, #113, #178, #179, #180
 
 **Check-in (#155). You will see:**
 
 - A recorded session opened in the viewer.
 - An evidence bundle that verifies, and a tampered copy that fails.
 - The score on the diagnosis benchmark with planted faults.
+- The first-look card: status, health with definitions, blind spots, recently resolved.
+- A decoder fix that rebuilds its readings and marks every fact built on the old ones stale.
 
 **You decide:**
 
