@@ -1,0 +1,40 @@
+# Spell-check config. Words below are project terms, part names, quoted
+# third-party text or deliberate test strings, not typos.
+
+[default]
+# A deliberately misspelled field name in a test (crates/sawbones-isolation).
+extend-ignore-re = ["must_flaot"]
+
+[default.extend-words]
+Sawbones = "Sawbones"
+sawbones = "sawbones"
+RP2350 = "RP2350"
+EG4 = "EG4"
+Modbus = "Modbus"
+MCAP = "MCAP"
+# Vendors, products and abbreviations
+Plugable = "Plugable"      # Plugable Technologies (USB hub vendor)
+Mosquitto = "Mosquitto"    # MQTT broker
+mosquitto = "mosquitto"
+kronicle = "kronicle"      # kronicle-lite, the owner's tool
+AFE = "AFE"                # analog front end
+Rin = "Rin"                # input resistance
+Pn = "Pn"                  # pin names
+PN = "PN"
+AGS = "AGS"
+GTI = "GTI"                # global tilted irradiance
+PAHT = "PAHT"              # PAHT-CF filament
+DOUT = "DOUT"              # data out pin
+AAS = "AAS"
+FRPM = "FRPM"
+ser = "ser"
+mis = "mis"
+Fo = "Fo"
+# Quoted third-party text in research notes
+publically = "publically"
+managment = "managment"
+suh = "suh"                # pronunciation of saguaro
+leafs = "leafs"
+
+[files]
+extend-exclude = ["Cargo.lock", "target/", "*.svg"]
