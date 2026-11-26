@@ -1476,3 +1476,182 @@ pub fn confirm(
         decision: token.decision,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    //! The checks that every public path reaches only after an event has
+    //! already invalidated the fact. They are kept as a second line, and
+    //! tested here by changing the ledger's state directly.
+
+    use super::*;
+    use crate::{BusWrite, HazardClass, Mastership, SettingKind, WriteValue};
+
+    fn n(s: &str) -> ScopeName {
+        ScopeName::parse(s).unwrap()
+    }
+    fn l(s: &str) -> ScopeLabel {
+        ScopeLabel::parse(s).unwrap()
+    }
+
+    fn world() -> (WriteMap, BusFacts, FactLedger, EffectRequest) {
+        let port = PortId::parse("p").unwrap();
+        let signal = SignalId::parse("s").unwrap();
+        let entry = WriteEntry {
+            port: port.clone(),
+            unit: 1,
+            signal: signal.clone(),
+            register: 1,
+            class: HazardClass::Class2,
+            kind: SettingKind::Config,
+            energy_relevant: false,
+            trust: Trust::OperatorAttested,
+            range: None,
+        };
+        let bus = BusFact {
+            port: port.clone(),
+            bench_port: 0,
+            mastership: Mastership::BenchOnly,
+            trust: Trust::OperatorAttested,
+        };
+        let identity = DeviceIdentity {
+            model: n("m"),
+            serial: l("S1"),
+            firmware: l("F1"),
+        };
+        let mut ledger = FactLedger::new(LedgerId(0));
+        ledger
+            .apply(
+                FactEvent::DeviceIdentified {
+                    port: port.clone(),
+                    unit: 1,
+                    identity: identity.clone(),
+                },
+                1,
+            )
+            .unwrap();
+        let scope = |unit, device| FactScope {
+            device,
+            interface: Interface {
+                port: port.clone(),
+                bench_port: 0,
+                unit,
+            },
+            conditions: BTreeSet::new(),
+            method: Method::OperatorAttested,
+        };
+        ledger
+            .record(
+                FactRecord {
+                    content: FactContent::WriteEntry(entry.clone()),
+                    scope: scope(Some(1), Some(identity)),
+                    earned_at: 1,
+                    validity: Validity::UntilInvalidated,
+                },
+                1,
+            )
+            .unwrap();
+        ledger
+            .record(
+                FactRecord {
+                    content: FactContent::Mastership(bus.clone()),
+                    scope: scope(None, None),
+                    earned_at: 1,
+                    validity: Validity::For { ticks: 100 },
+                },
+                1,
+            )
+            .unwrap();
+        let request = EffectRequest::BusWrite(BusWrite {
+            port,
+            unit: 1,
+            signal,
+            value: WriteValue::U16(1),
+        });
+        (
+            WriteMap::new([entry]).unwrap(),
+            BusFacts::new([bus]).unwrap(),
+            ledger,
+            request,
+        )
+    }
+
+    fn problem(r: Result<PreflightToken, PreflightRefusal>) -> FactProblem {
+        match r {
+            Err(PreflightRefusal::Fact { problem, .. }) => problem,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_device_known_now_must_be_the_device_in_scope() {
+        let head = ChainHead([0; 32]);
+        let (writes, buses, mut ledger, request) = world();
+        assert!(preflight(&request, &writes, &buses, &ledger, head, 2).is_ok());
+        let place = (request.port().clone(), 1);
+        for (field, edit) in [
+            (ScopeField::DeviceFirmware, 0),
+            (ScopeField::DeviceSerial, 1),
+            (ScopeField::DeviceModel, 2),
+        ] {
+            let d = ledger.devices.get_mut(&place).unwrap();
+            let saved = d.clone();
+            match edit {
+                0 => d.firmware = l("F2"),
+                1 => d.serial = l("S2"),
+                _ => d.model = n("other"),
+            }
+            let r = preflight(&request, &writes, &buses, &ledger, head, 2);
+            assert_eq!(problem(r), FactProblem::OutOfScope { field });
+            *ledger.devices.get_mut(&place).unwrap() = saved;
+        }
+        ledger.devices.clear();
+        let r = preflight(&request, &writes, &buses, &ledger, head, 2);
+        assert_eq!(
+            problem(r),
+            FactProblem::OutOfScope {
+                field: ScopeField::DeviceUnknown
+            }
+        );
+    }
+
+    #[test]
+    fn a_stored_record_out_of_shape_is_refused() {
+        let head = ChainHead([0; 32]);
+        let (writes, buses, mut ledger, request) = world();
+        let key = relied_facts(&request).remove(0);
+        let stored = ledger.facts.get_mut(&key).unwrap();
+        stored.record.scope.device = None;
+        assert_eq!(
+            problem(preflight(&request, &writes, &buses, &ledger, head, 2)),
+            FactProblem::OutOfScope {
+                field: ScopeField::DeviceNotStated
+            }
+        );
+        let stored = ledger.facts.get_mut(&key).unwrap();
+        stored.record.scope.interface.unit = None;
+        assert_eq!(
+            problem(preflight(&request, &writes, &buses, &ledger, head, 2)),
+            FactProblem::OutOfScope {
+                field: ScopeField::Unit
+            }
+        );
+        let stored = ledger.facts.get_mut(&key).unwrap();
+        stored.record.scope.interface.port = PortId::parse("q").unwrap();
+        assert_eq!(
+            problem(preflight(&request, &writes, &buses, &ledger, head, 2)),
+            FactProblem::OutOfScope {
+                field: ScopeField::Port
+            }
+        );
+        // A mastership record that does not expire.
+        let (writes, buses, mut ledger, request) = world();
+        let key = FactKey::Mastership {
+            port: request.port().clone(),
+        };
+        ledger.facts.get_mut(&key).unwrap().record.validity = Validity::UntilInvalidated;
+        assert_eq!(
+            problem(preflight(&request, &writes, &buses, &ledger, head, 2)),
+            FactProblem::MastershipNeedsExpiry
+        );
+    }
+}
