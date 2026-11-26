@@ -8,7 +8,7 @@ use sawbones_reading::Trust;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{PortId, SignalId};
+use crate::{PortId, SignalId, WriteValue};
 
 /// What kind of setting a signal is. Some kinds carry a minimum class of
 /// their own, which no write-map entry can go below.
@@ -41,6 +41,96 @@ impl SettingKind {
     }
 }
 
+/// Why a [`ValueRange`] was rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum RangeError {
+    /// The minimum and maximum are different value types, so they share no
+    /// value space.
+    #[error("range bounds are different value types")]
+    MixedTypes,
+    /// The minimum is above the maximum.
+    #[error("range minimum is above its maximum")]
+    MinAboveMax,
+}
+
+/// An allowed range for a written value: inclusive `min` and `max`, both the
+/// same [`WriteValue`] type. Only a value of that type and between the
+/// bounds is inside it; a value of another type is outside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "RawRange", into = "RawRange")]
+pub struct ValueRange {
+    min: WriteValue,
+    max: WriteValue,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawRange {
+    min: WriteValue,
+    max: WriteValue,
+}
+
+impl ValueRange {
+    /// Builds a range. Fails if the bounds are different value types or the
+    /// minimum is above the maximum.
+    pub fn new(min: WriteValue, max: WriteValue) -> Result<Self, RangeError> {
+        use WriteValue::{Bool, I16, I32, U16, U32};
+        let ok = match (min, max) {
+            (Bool(a), Bool(b)) => a <= b,
+            (U16(a), U16(b)) => a <= b,
+            (I16(a), I16(b)) => a <= b,
+            (U32(a), U32(b)) => a <= b,
+            (I32(a), I32(b)) => a <= b,
+            _ => return Err(RangeError::MixedTypes),
+        };
+        if ok {
+            Ok(Self { min, max })
+        } else {
+            Err(RangeError::MinAboveMax)
+        }
+    }
+
+    /// The inclusive minimum.
+    pub const fn min(&self) -> WriteValue {
+        self.min
+    }
+
+    /// The inclusive maximum.
+    pub const fn max(&self) -> WriteValue {
+        self.max
+    }
+
+    /// Whether a value is inside the range. A value of a different type than
+    /// the bounds is not. The one check the engine and any bus guard share.
+    pub fn contains(&self, value: WriteValue) -> bool {
+        use WriteValue::{Bool, I16, I32, U16, U32};
+        match (self.min, self.max, value) {
+            (Bool(a), Bool(b), Bool(v)) => a <= v && v <= b,
+            (U16(a), U16(b), U16(v)) => a <= v && v <= b,
+            (I16(a), I16(b), I16(v)) => a <= v && v <= b,
+            (U32(a), U32(b), U32(v)) => a <= v && v <= b,
+            (I32(a), I32(b), I32(v)) => a <= v && v <= b,
+            _ => false,
+        }
+    }
+}
+
+impl TryFrom<RawRange> for ValueRange {
+    type Error = RangeError;
+    fn try_from(r: RawRange) -> Result<Self, Self::Error> {
+        Self::new(r.min, r.max)
+    }
+}
+
+impl From<ValueRange> for RawRange {
+    fn from(r: ValueRange) -> Self {
+        Self {
+            min: r.min,
+            max: r.max,
+        }
+    }
+}
+
 /// One writable signal, as a fact: where it is, what class writing it is,
 /// what kind of setting it is, and how much the entry itself has earned.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -62,6 +152,12 @@ pub struct WriteEntry {
     /// [`Trust::OperatorAttested`] entries are acted on; any other tier is
     /// treated as no entry at all.
     pub trust: Trust,
+    /// The allowed range of the written value, if the entry limits it. It is
+    /// part of the entry, so it has the entry's tier: a range on an entry
+    /// below [`Trust::OperatorAttested`] is never acted on, because the
+    /// entry is not. `None` means no limit, as before.
+    #[serde(default)]
+    pub range: Option<ValueRange>,
 }
 
 /// Why a set of facts was rejected.

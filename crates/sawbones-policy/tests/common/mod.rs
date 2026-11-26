@@ -6,7 +6,7 @@ use sawbones_policy::{
     BusFact, BusListen, BusRead, BusWrite, EffectRequest, HazardClass, Mastership, PortId,
     SettingKind, SignalId, WriteEntry, WriteValue,
 };
-use sawbones_reading::{Ident, Trust};
+use sawbones_reading::Trust;
 
 pub const CLASSES: [HazardClass; 5] = [
     HazardClass::Class0,
@@ -35,11 +35,11 @@ pub const TIERS: [Trust; 5] = [
 pub const MASTERSHIPS: [Mastership; 2] = [Mastership::BenchOnly, Mastership::OtherMasterActive];
 
 pub fn port(s: &str) -> PortId {
-    PortId::new(Ident::new(s).unwrap())
+    PortId::parse(s).unwrap()
 }
 
 pub fn signal(s: &str) -> SignalId {
-    SignalId::new(Ident::new(s).unwrap())
+    SignalId::parse(s).unwrap()
 }
 
 pub fn entry(
@@ -57,6 +57,7 @@ pub fn entry(
         kind,
         energy_relevant,
         trust,
+        range: None,
     }
 }
 

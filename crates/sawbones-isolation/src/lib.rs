@@ -17,8 +17,11 @@
 //!
 //! [`IsolationMap::check`] returns a [`Report`] of typed [`Finding`]s: a declared
 //! isolation that a bonded path defeats, a ground loop, a barrier rated below
-//! the voltage declared across it, what is bonded to mains earth, and a
-//! measuring module that must float but is bonded to the brain. A map
+//! the voltage declared across it, what is bonded to mains earth, a
+//! measuring module that must float but is bonded to the brain, and a bus
+//! with two masters. Each finding has a [`Severity`]: `Stop` for a broken
+//! rule, `Warn` for a loop that stays inside a harmless domain, `Info` for
+//! what is earthed. A map
 //! is written as JSON ([`IsolationMap::from_json`]) or assembled in code:
 //!
 //! ```
@@ -52,8 +55,8 @@
 mod check;
 mod map;
 
-pub use check::{Finding, Path, Report, Step};
+pub use check::{Finding, Path, Report, Severity, Step};
 pub use map::{
-    Edge, EdgeId, IsolationMap, IsolationRule, Link, MapError, MapSpec, Node, NodeId, Role,
-    SwitchId, MAP_SCHEMA,
+    BusMaster, Edge, EdgeId, IsolationMap, IsolationRule, Link, MapError, MapSpec, Node, NodeId,
+    Role, SwitchId, MAP_SCHEMA,
 };
