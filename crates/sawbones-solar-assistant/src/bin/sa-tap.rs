@@ -31,7 +31,7 @@ use sawbones_solar_assistant::raw::{
     jsonl_content, parse_raw_line, read_bounded_line, LineRead, RawMessage,
 };
 use sawbones_solar_assistant::summary::SummaryBuilder;
-use sawbones_solar_assistant::{DEFAULT_DISCOVERY_PREFIX, DEFAULT_TOPIC_PREFIX};
+use sawbones_solar_assistant::{host_reading, DEFAULT_DISCOVERY_PREFIX, DEFAULT_TOPIC_PREFIX};
 
 /// Environment variable holding the broker username, if the broker needs one.
 const ENV_USERNAME: &str = "SA_TAP_MQTT_USERNAME";
@@ -307,8 +307,8 @@ async fn record(args: RecordArgs) -> Result<()> {
                         write_json_line(raw, &RawMessage::capture(&topic, &payload, received_at, retained))?;
                     }
                     let message = Message { topic: &topic, payload: &payload, received_at, retained };
-                    if let Outcome::Reading(reading) = parser.handle(&message) {
-                        write_json_line(&mut out, &*reading)?;
+                    if let Outcome::Observation(observation) = parser.handle(&message) {
+                        write_json_line(&mut out, &host_reading(*observation))?;
                     }
                 }
                 Err(error) => {
@@ -384,8 +384,8 @@ fn for_each_reading(input: &InputArgs, mut each: impl FnMut(&Reading)) -> Result
                 }
                 Some(Ok(raw)) => {
                     stats.lines += 1;
-                    if let Outcome::Reading(reading) = parser.handle(&raw.as_message()) {
-                        each(&reading);
+                    if let Outcome::Observation(observation) = parser.handle(&raw.as_message()) {
+                        each(&host_reading(*observation));
                     }
                 }
             },

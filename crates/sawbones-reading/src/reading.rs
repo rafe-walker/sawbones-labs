@@ -8,7 +8,62 @@ use crate::{DecimalValue, Ident, Unit, UtcNanos, WorldText};
 /// purpose: files recorded now may need converting once the design settles.
 pub const READING_SCHEMA: &str = "sawbones.reading/0-provisional";
 
-/// One numeric value from one source, with where it came from.
+/// One numeric value from one source, as a decoder or plugin saw it. It has
+/// no trust tier.
+///
+/// This is what decoders and plugins build. It carries everything a source
+/// can honestly say about a value and nothing about how much that value has
+/// earned: only the host decides that, by turning an `Observation` into a
+/// [`Reading`] with [`Reading::from_observation_host_only`].
+///
+/// **Provisional.** Field names and the JSON shape are subject to the design
+/// review.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Observation {
+    /// Which source produced the value, for example
+    /// `solar_assistant/inverter_1`.
+    pub source_id: Ident,
+    /// What was measured, as the source names it, for example `pv_power`.
+    pub quantity: Ident,
+    /// The value, as the exact decimal text the source sent.
+    pub value: DecimalValue,
+    /// The unit, if one is known. `None` means "not known", never "none".
+    pub unit: Option<Unit>,
+    /// How the unit was arrived at.
+    pub unit_basis: UnitBasis,
+    /// When this host received the value (UTC, nanoseconds).
+    pub received_at: UtcNanos,
+    /// When the source says it took the value, if the source says.
+    pub source_timestamp: Option<UtcNanos>,
+    /// How far `received_at` can be trusted as the time of measurement.
+    pub timestamp_quality: TimestampQuality,
+    /// The exact transport, endpoint, address and raw bytes behind the value.
+    pub provenance: Provenance,
+}
+
+/// One numeric value from one source, with where it came from and how much
+/// it has earned.
+///
+/// A `Reading` is made by the host, from an [`Observation`] and a [`Trust`]
+/// tier, through [`Reading::from_observation_host_only`]. Its fields are
+/// private and there are no setters, so no other code can build one with a
+/// struct literal or change its tier afterwards. Read it through the
+/// getters.
+///
+/// The one other way to get a `Reading` is to deserialise one, which is how
+/// the host reloads records it wrote earlier. Plugin output must never be
+/// deserialised as a `Reading`; it is an [`Observation`]. (Real enforcement
+/// belongs at the plugin process and interface boundary; this type split is
+/// the groundwork for it.)
+///
+/// The tier cannot be assigned after the fact either:
+///
+/// ```compile_fail
+/// use sawbones_reading::{Reading, Trust};
+/// fn promote(reading: &mut Reading) {
+///     reading.trust = Trust::Measured; // error: field `trust` is private
+/// }
+/// ```
 ///
 /// **Provisional.** Field names, tiers and the JSON shape are all subject to
 /// the design review.
@@ -27,32 +82,109 @@ pub const READING_SCHEMA: &str = "sawbones.reading/0-provisional";
 /// bytes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Reading {
-    /// Schema label; [`READING_SCHEMA`] for readings made by this version.
-    pub schema: String,
-    /// Which source produced the value, for example
-    /// `solar_assistant/inverter_1`.
-    pub source_id: Ident,
-    /// What was measured, as the source names it, for example `pv_power`.
-    pub quantity: Ident,
-    /// The value, as the exact decimal text the source sent.
-    pub value: DecimalValue,
-    /// The unit, if one is known. `None` means "not known", never "none".
-    pub unit: Option<Unit>,
-    /// How the unit was arrived at.
-    pub unit_basis: UnitBasis,
-    /// When this host received the value (UTC, nanoseconds).
-    pub received_at: UtcNanos,
-    /// When the source says it took the value, if the source says.
-    pub source_timestamp: Option<UtcNanos>,
-    /// How far `received_at` can be trusted as the time of measurement.
-    pub timestamp_quality: TimestampQuality,
-    /// How much this value has earned.
-    pub trust: Trust,
-    /// The exact transport, endpoint, address and raw bytes behind the value.
-    pub provenance: Provenance,
+    schema: String,
+    source_id: Ident,
+    quantity: Ident,
+    value: DecimalValue,
+    unit: Option<Unit>,
+    unit_basis: UnitBasis,
+    received_at: UtcNanos,
+    source_timestamp: Option<UtcNanos>,
+    timestamp_quality: TimestampQuality,
+    trust: Trust,
+    provenance: Provenance,
 }
 
 impl Reading {
+    /// **Host only.** Builds a reading from an observation and the trust tier
+    /// the host has decided it has earned.
+    ///
+    /// This is the single place a trust tier is attached. Call it only from
+    /// host code, never from a decoder or plugin, and never with a tier taken
+    /// from plugin output. The schema label is set to [`READING_SCHEMA`].
+    pub fn from_observation_host_only(observation: Observation, trust: Trust) -> Self {
+        let Observation {
+            source_id,
+            quantity,
+            value,
+            unit,
+            unit_basis,
+            received_at,
+            source_timestamp,
+            timestamp_quality,
+            provenance,
+        } = observation;
+        Self {
+            schema: READING_SCHEMA.to_owned(),
+            source_id,
+            quantity,
+            value,
+            unit,
+            unit_basis,
+            received_at,
+            source_timestamp,
+            timestamp_quality,
+            trust,
+            provenance,
+        }
+    }
+
+    /// Schema label; [`READING_SCHEMA`] for readings made by this version.
+    pub fn schema(&self) -> &str {
+        &self.schema
+    }
+
+    /// Which source produced the value, for example
+    /// `solar_assistant/inverter_1`.
+    pub fn source_id(&self) -> &Ident {
+        &self.source_id
+    }
+
+    /// What was measured, as the source names it, for example `pv_power`.
+    pub fn quantity(&self) -> &Ident {
+        &self.quantity
+    }
+
+    /// The value, as the exact decimal text the source sent.
+    pub fn value(&self) -> &DecimalValue {
+        &self.value
+    }
+
+    /// The unit, if one is known. `None` means "not known", never "none".
+    pub fn unit(&self) -> Option<&Unit> {
+        self.unit.as_ref()
+    }
+
+    /// How the unit was arrived at.
+    pub fn unit_basis(&self) -> UnitBasis {
+        self.unit_basis
+    }
+
+    /// When this host received the value (UTC, nanoseconds).
+    pub fn received_at(&self) -> UtcNanos {
+        self.received_at
+    }
+
+    /// When the source says it took the value, if the source says.
+    pub fn source_timestamp(&self) -> Option<UtcNanos> {
+        self.source_timestamp
+    }
+
+    /// How far `received_at` can be trusted as the time of measurement.
+    pub fn timestamp_quality(&self) -> TimestampQuality {
+        self.timestamp_quality
+    }
+
+    /// How much this value has earned. Set by the host, never by the source.
+    pub fn trust(&self) -> Trust {
+        self.trust
+    }
+
+    /// The exact transport, endpoint, address and raw bytes behind the value.
+    pub fn provenance(&self) -> &Provenance {
+        &self.provenance
+    }
+
     /// The canonical encoding of this reading, for hashing. See the type
     /// documentation for exactly what that means.
     pub fn canonical_json(&self) -> String {
@@ -150,9 +282,8 @@ pub struct Provenance {
 mod tests {
     use super::*;
 
-    fn sample() -> Reading {
-        Reading {
-            schema: READING_SCHEMA.to_owned(),
+    fn sample_observation() -> Observation {
+        Observation {
             source_id: Ident::new("solar_assistant/inverter_1").unwrap(),
             quantity: Ident::new("pv_power").unwrap(),
             value: DecimalValue::parse("1823").unwrap(),
@@ -163,7 +294,6 @@ mod tests {
             timestamp_quality: TimestampQuality::HostReceive {
                 uncertainty_ns: 5_000_000_000,
             },
-            trust: Trust::Unverified,
             provenance: Provenance {
                 transport: Transport::Mqtt,
                 broker: "solar-assistant.local:1883".to_owned(),
@@ -172,6 +302,10 @@ mod tests {
                 retained: false,
             },
         }
+    }
+
+    fn sample() -> Reading {
+        Reading::from_observation_host_only(sample_observation(), Trust::Unverified)
     }
 
     #[test]
@@ -235,9 +369,28 @@ mod tests {
         assert_eq!(v["provenance"]["transport"], "mqtt");
         assert_eq!(
             v["provenance"]["topic"]["untrusted"],
-            sample().provenance.topic.as_untrusted_str()
+            sample().provenance().topic.as_untrusted_str()
         );
         assert_eq!(v["received_at"], 1_795_631_400_000_000_000i64);
+    }
+
+    #[test]
+    fn the_host_sets_the_tier_and_the_observation_has_none() {
+        let obs = sample_observation();
+        let v: serde_json::Value = serde_json::to_value(&obs).unwrap();
+        assert!(v.get("trust").is_none(), "an observation carries no tier");
+        assert!(v.get("schema").is_none());
+
+        let r = Reading::from_observation_host_only(obs.clone(), Trust::Measured);
+        assert_eq!(r.trust(), Trust::Measured);
+        assert_eq!(r.schema(), READING_SCHEMA);
+        assert_eq!(r.source_id(), &obs.source_id);
+        assert_eq!(r.value(), &obs.value);
+        assert_eq!(r.provenance(), &obs.provenance);
+        // The same observation under another tier is a different reading.
+        let u = Reading::from_observation_host_only(obs, Trust::Unverified);
+        assert_ne!(r, u);
+        assert_ne!(r.canonical_json(), u.canonical_json());
     }
 
     #[test]

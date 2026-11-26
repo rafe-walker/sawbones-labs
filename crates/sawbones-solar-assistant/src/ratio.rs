@@ -332,7 +332,7 @@ impl StreamKey {
 
     /// Whether a reading belongs to this series.
     pub fn matches(&self, r: &Reading) -> bool {
-        r.source_id == self.source_id && r.quantity == self.quantity
+        *r.source_id() == self.source_id && *r.quantity() == self.quantity
     }
 
     /// The key in its written form.
@@ -380,17 +380,17 @@ impl SampleCollector {
         } else {
             return;
         };
-        if r.timestamp_quality == TimestampQuality::HostReceiveRetained {
+        if r.timestamp_quality() == TimestampQuality::HostReceiveRetained {
             self.skipped_retained += 1;
             return;
         }
-        if r.unit.as_ref().map(|u| u.as_str()) != Some("W") {
+        if r.unit().map(|u| u.as_str()) != Some("W") {
             self.skipped_not_watts += 1;
             return;
         }
         target.push(PowerSample {
-            at: r.received_at,
-            watts: r.value.as_f64(),
+            at: r.received_at(),
+            watts: r.value().as_f64(),
         });
     }
 }

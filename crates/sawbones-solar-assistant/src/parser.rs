@@ -12,15 +12,15 @@
 use std::collections::{BTreeMap, HashMap};
 
 use sawbones_reading::{
-    DecimalValue, Ident, Provenance, Reading, TimestampQuality, Transport, Unit, UnitBasis,
-    UtcNanos, WorldText, READING_SCHEMA,
+    DecimalValue, Ident, Observation, Provenance, TimestampQuality, Transport, Unit, UnitBasis,
+    UtcNanos, WorldText,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::discovery::{self, DeclaredUnit, SensorDeclaration};
 use crate::topic::{classify, TopicClass};
-use crate::{units, SOLAR_ASSISTANT_DEFAULT_TRUST};
+use crate::units;
 
 /// Longest topic the parser will look at, in bytes.
 pub const MAX_TOPIC_BYTES: usize = 512;
@@ -163,8 +163,9 @@ pub enum DiscoveryChange {
 /// The result of handing one message to the parser.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Outcome {
-    /// A numeric value on a state topic.
-    Reading(Box<Reading>),
+    /// A numeric value on a state topic. It carries no trust tier; the host
+    /// attaches one (see [`crate::host_reading`]).
+    Observation(Box<Observation>),
     /// A discovery config was taken in. It will shape later readings.
     Discovery(DiscoveryChange),
     /// Nothing usable, with the reason.
@@ -245,7 +246,7 @@ impl Parser {
         self.stats.messages += 1;
         let outcome = self.handle_inner(msg);
         match &outcome {
-            Outcome::Reading(_) => self.stats.readings += 1,
+            Outcome::Observation(_) => self.stats.readings += 1,
             Outcome::Discovery(_) => self.stats.discovery_changes += 1,
             Outcome::Ignored(i) => *self.stats.ignored.entry(i.reason).or_insert(0) += 1,
         }
@@ -278,7 +279,7 @@ impl Parser {
                 Err(reason) => ignored(reason),
             },
             TopicClass::State { device, name } => match self.read_state(msg, device, name) {
-                Ok(reading) => Outcome::Reading(Box::new(reading)),
+                Ok(observation) => Outcome::Observation(Box::new(observation)),
                 Err(reason) => ignored(reason),
             },
         }
@@ -327,7 +328,7 @@ impl Parser {
         msg: &Message<'_>,
         device: &str,
         name: &str,
-    ) -> Result<Reading, IgnoreReason> {
+    ) -> Result<Observation, IgnoreReason> {
         let source_id = Ident::new(&format!("{}/{device}", self.config.topic_prefix))
             .map_err(|_| IgnoreReason::UnusableName)?;
         let quantity = Ident::new(name).map_err(|_| IgnoreReason::UnusableName)?;
@@ -348,8 +349,7 @@ impl Parser {
             }
         };
 
-        Ok(Reading {
-            schema: READING_SCHEMA.to_owned(),
+        Ok(Observation {
             source_id,
             quantity,
             value,
@@ -360,7 +360,6 @@ impl Parser {
             // are bare numbers, so there is no source time to record.
             source_timestamp: None,
             timestamp_quality,
-            trust: SOLAR_ASSISTANT_DEFAULT_TRUST,
             provenance: Provenance {
                 transport: Transport::Mqtt,
                 broker: self.config.broker.clone(),
@@ -394,6 +393,7 @@ impl Parser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{host_reading, SOLAR_ASSISTANT_DEFAULT_TRUST};
     use sawbones_reading::Trust;
 
     const T0: UtcNanos = UtcNanos::from_unix_nanos(1_795_631_400_000_000_000);
@@ -411,9 +411,9 @@ mod tests {
         }
     }
 
-    fn reading(p: &mut Parser, topic: &str, payload: &[u8]) -> Reading {
+    fn reading(p: &mut Parser, topic: &str, payload: &[u8]) -> Observation {
         match p.handle(&msg(topic, payload)) {
-            Outcome::Reading(r) => *r,
+            Outcome::Observation(r) => *r,
             other => panic!("expected a reading for {topic}, got {other:?}"),
         }
     }
@@ -456,7 +456,7 @@ mod tests {
     fn solar_assistant_readings_are_unverified_by_default() {
         let mut p = parser();
         let r = reading(&mut p, "solar_assistant/total/battery_power/state", b"-420");
-        assert_eq!(r.trust, Trust::Unverified);
+        assert_eq!(host_reading(r).trust(), Trust::Unverified);
         assert_eq!(SOLAR_ASSISTANT_DEFAULT_TRUST, Trust::Unverified);
     }
 
@@ -480,7 +480,7 @@ mod tests {
             ..msg("solar_assistant/inverter_1/pv_power/state", b"5")
         };
         match p.handle(&m) {
-            Outcome::Reading(r) => {
+            Outcome::Observation(r) => {
                 assert_eq!(r.timestamp_quality, TimestampQuality::HostReceiveRetained);
                 assert!(r.provenance.retained);
             }

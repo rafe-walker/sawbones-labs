@@ -10,6 +10,7 @@ use std::process::Command;
 use sawbones_reading::{
     Reading, TimestampQuality, Transport, Trust, UnitBasis, FENCE_CLOSE, FENCE_OPEN, READING_SCHEMA,
 };
+use sawbones_solar_assistant::host_reading;
 use sawbones_solar_assistant::parser::{IgnoreReason, Outcome, ParseStats, Parser, ParserConfig};
 use sawbones_solar_assistant::ratio::{twin_input_ratio, RatioConfig, SampleCollector, StreamKey};
 use sawbones_solar_assistant::raw::{parse_raw_line, RawMessage};
@@ -44,7 +45,7 @@ fn parse_all() -> (Vec<Reading>, Vec<(RawMessage, IgnoreReason)>, ParseStats) {
     let mut ignored = Vec::new();
     for raw in raw_messages() {
         match p.handle(&raw.as_message()) {
-            Outcome::Reading(r) => readings.push(*r),
+            Outcome::Observation(o) => readings.push(host_reading(*o)),
             Outcome::Discovery(_) => {}
             Outcome::Ignored(i) => ignored.push((raw, i.reason)),
         }
@@ -55,7 +56,7 @@ fn parse_all() -> (Vec<Reading>, Vec<(RawMessage, IgnoreReason)>, ParseStats) {
 fn series<'a>(readings: &'a [Reading], source: &str, quantity: &str) -> Vec<&'a Reading> {
     readings
         .iter()
-        .filter(|r| r.source_id.as_str() == source && r.quantity.as_str() == quantity)
+        .filter(|r| r.source_id().as_str() == source && r.quantity().as_str() == quantity)
         .collect()
 }
 
@@ -97,24 +98,24 @@ fn every_message_is_accounted_for() {
 fn every_reading_carries_provenance_and_is_unverified() {
     let (readings, _, _) = parse_all();
     for r in &readings {
-        assert_eq!(r.schema, READING_SCHEMA);
-        assert_eq!(r.trust, Trust::Unverified);
-        assert_eq!(r.provenance.transport, Transport::Mqtt);
-        assert_eq!(r.provenance.broker, "solar-assistant.local:1883");
-        assert_eq!(r.source_timestamp, None);
-        let topic = r.provenance.topic.as_untrusted_str();
-        assert_eq!(topic, format!("{}/{}/state", r.source_id, r.quantity));
-        assert!(r.value.as_f64().is_finite());
+        assert_eq!(r.schema(), READING_SCHEMA);
+        assert_eq!(r.trust(), Trust::Unverified);
+        assert_eq!(r.provenance().transport, Transport::Mqtt);
+        assert_eq!(r.provenance().broker, "solar-assistant.local:1883");
+        assert_eq!(r.source_timestamp(), None);
+        let topic = r.provenance().topic.as_untrusted_str();
+        assert_eq!(topic, format!("{}/{}/state", r.source_id(), r.quantity()));
+        assert!(r.value().as_f64().is_finite());
         assert_eq!(
-            r.provenance.raw_payload.as_untrusted_str().trim(),
-            r.value.text()
+            r.provenance().raw_payload.as_untrusted_str().trim(),
+            r.value().text()
         );
-        match r.timestamp_quality {
+        match r.timestamp_quality() {
             TimestampQuality::HostReceive { uncertainty_ns } => {
-                assert!(!r.provenance.retained);
+                assert!(!r.provenance().retained);
                 assert_eq!(uncertainty_ns, 5 * NANOS_PER_SEC);
             }
-            TimestampQuality::HostReceiveRetained => assert!(r.provenance.retained),
+            TimestampQuality::HostReceiveRetained => assert!(r.provenance().retained),
             TimestampQuality::SourceClock { .. } => panic!("MQTT gives no source clock"),
         }
     }
@@ -140,10 +141,10 @@ fn units_come_from_discovery_when_declared_and_from_the_name_otherwise() {
         let first = s[0];
         assert!(s
             .iter()
-            .all(|r| r.unit == first.unit && r.unit_basis == first.unit_basis));
+            .all(|r| r.unit() == first.unit() && r.unit_basis() == first.unit_basis()));
         (
-            first.unit.as_ref().map(|u| u.as_str().to_owned()),
-            first.unit_basis,
+            first.unit().map(|u| u.as_str().to_owned()),
+            first.unit_basis(),
         )
     };
     let declared = |u: &str| (Some(u.to_owned()), UnitBasis::DeclaredBySource);
@@ -205,11 +206,11 @@ fn a_retained_reading_is_marked_as_unknown_age() {
     );
     assert_eq!(s.len(), 2);
     assert_eq!(
-        s[0].timestamp_quality,
+        s[0].timestamp_quality(),
         TimestampQuality::HostReceiveRetained
     );
     assert!(matches!(
-        s[1].timestamp_quality,
+        s[1].timestamp_quality(),
         TimestampQuality::HostReceive { .. }
     ));
 }
@@ -229,7 +230,7 @@ fn command_topics_never_become_readings() {
     }
     assert!(readings
         .iter()
-        .all(|r| !is_command_topic(r.provenance.topic.as_untrusted_str())));
+        .all(|r| !is_command_topic(r.provenance().topic.as_untrusted_str())));
 }
 
 fn raw_messages_static() -> &'static [RawMessage] {

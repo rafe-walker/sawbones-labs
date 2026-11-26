@@ -7,9 +7,12 @@
 //!
 //! What is here:
 //!
-//! - [`Reading`]: one numeric value from one source, with its unit, when it
-//!   arrived, how good that timestamp is, a [`Trust`] tier and a
-//!   [`Provenance`] record saying exactly where it came from.
+//! - [`Observation`]: what a decoder or plugin builds: one numeric value from
+//!   one source, with its unit, when it arrived, how good that timestamp is
+//!   and a [`Provenance`] record saying exactly where it came from. It has
+//!   no trust tier, and a plugin cannot give it one.
+//! - [`Reading`]: an observation plus a [`Trust`] tier, made only by the host
+//!   (`Reading::from_observation_host_only`). Its fields are private.
 //! - [`WorldText`]: a wrapper for any string that originated outside this
 //!   project's own code. It has no `Display` impl, so it cannot be dropped into
 //!   a prompt or a log line by accident. Use [`WorldText::fenced`] to render it
@@ -32,7 +35,7 @@ mod world_text;
 
 pub use ident::{Ident, IdentError, Unit, UnitError};
 pub use reading::{
-    Provenance, Reading, TimestampQuality, Transport, Trust, UnitBasis, READING_SCHEMA,
+    Observation, Provenance, Reading, TimestampQuality, Transport, Trust, UnitBasis, READING_SCHEMA,
 };
 pub use time::UtcNanos;
 pub use value::{DecimalValue, DecimalValueError};
