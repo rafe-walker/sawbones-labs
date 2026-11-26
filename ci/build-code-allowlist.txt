@@ -1,0 +1,19 @@
+# Crates allowed to run code at build time (build.rs or proc-macro) [#201, sup-013].
+# One name per line. Add a crate only after reviewing its build script or macro
+# source. `ci/check_build_code.py` fails when the tree has a crate not listed here.
+# Build-script crates are also listed in deny.toml `[bans.build]`.
+anyhow
+clap_derive
+curve25519-dalek
+curve25519-dalek-derive
+libc
+proc-macro2
+quote
+serde
+serde_core
+serde_derive
+serde_json
+thiserror
+thiserror-impl
+tokio-macros
+zmij

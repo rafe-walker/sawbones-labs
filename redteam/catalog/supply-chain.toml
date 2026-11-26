@@ -1,0 +1,393 @@
+# Red-team catalog lane. Format: redteam/README.md. Seeded from research/round-6-red-team/.
+
+[[attack]]
+id = "sup-001"
+title = "aarch64 Cranelift miscompile (heap access) and version floor"
+category = "wasm-compiler-vulnerability"
+target = "plugin host, dependency audit"
+how = "Wasmtime 32.0.0 through pre-43.0.1 (and the 36.x/42.x lines before 36.0.7/42.0.2) miscompiled guest heap accesses on aarch64 Cranelift, letting a crafted module read or write outside its sandbox (CVSS 9.0, RUSTSEC-2026-0096). x86-64 Cranelift was not affected, so x86 CI cannot see it, while the Pi 5 target is exposed. Wasmtime is a library, so fixes arrive only by rebuilding the host with a patched crate.\n"
+expected = "Build fails when the lock resolves to a vulnerable wasmtime; aarch64 and x86-64 outputs and fuel counts are identical."
+severity = "high"
+sources = ["https://bytecodealliance.org/articles/wasmtime-security-advisories", "https://rustsec.org/advisories/RUSTSEC-2026-0096", "https://github.com/rafe-walker/sawbones-labs/issues/173"]
+status = "partial"
+test = "Add a CI test that parses Cargo.lock and fails if the resolved wasmtime (and cranelift-codegen) version is below a committed floor file ci/min-wasmtime.txt, with the floor covering every advisory in sup-001/002. Also run a conformance suite of heap-access edge cases (max-offset loads/stores, sign-extension patterns) on an aarch64 runner and compare outputs with the x86-64 run."
+issue = 201
+
+[[attack]]
+id = "sup-002"
+title = "Cranelift value-numbering overflow, br_table range bug, Winch backend escapes"
+category = "wasm-compiler-vulnerability"
+target = "plugin host, conformance suite"
+how = "Reported Oct 2026: Cranelift packed value numbers into 24-bit fields and silently overflowed on huge functions (RUSTSEC-2026-0380, all arches), and on ARM64 a br_table with more than roughly 256,000 targets jumped to the wrong place; both are described as sandbox escapes needing only a user-supplied module, with no workaround. Separately the Winch baseline compiler had a Critical sandbox-escaping memory access and several table bugs in Apr 2026. Size-driven bugs are exactly what a plugin that is \"just a big component\" can trigger.\n"
+expected = "Over-limit modules are rejected at validation with a fault; no panic, no compile; Winch not in the dependency tree."
+severity = "high"
+sources = ["https://thehackernews.com/2026/10/two-critical-wasmtime-flaws-could-let.html", "https://rustsec.org/advisories/RUSTSEC-2026-0380", "https://bytecodealliance.org/articles/wasmtime-security-advisories"]
+status = "gap"
+test = "Host-side admission test: engine config must pin Cranelift (assert wasmtime Cargo features exclude winch via cargo tree), and the loader must reject modules above committed limits (function body bytes, locals, br_table targets, total module size) before compile. Generate over-limit modules in the test with wasm-encoder and assert a clean typed rejection, never a compile attempt. Re-run the same corpus on aarch64."
+issue = 201
+
+[[attack]]
+id = "sup-003"
+title = "Component-model string transcoding bugs and host panics"
+category = "wasm-host-boundary"
+target = "plugin host, WIT worlds"
+how = "Apr 2026 advisories include heap out-of-bounds read/write and host panics in component-model UTF-16/latin1 string transcoding and a host panic lifting a flags value. Any string or flags crossing the component boundary is attack surface. The design says outputs carry no free string, which removes most of it if enforced mechanically.\n"
+expected = "WIT lint fails on a string in a plugin world; malformed lifts yield a fault."
+severity = "high"
+sources = ["https://bytecodealliance.org/articles/wasmtime-security-advisories", "https://github.com/rafe-walker/sawbones-labs/issues/173"]
+status = "gap"
+test = "Lint every .wit file in the repo: fail if any import/export function or exported type in a plugin world contains `string`, `flags`, or `list<char>` outside an allowlisted manifest interface. Plus a host test that calls every export with maximal and malformed canonical-ABI values and asserts a fault, not a panic (run under panic=abort supervisor test)."
+issue = 173
+
+[[attack]]
+id = "sup-004"
+title = "Pooling allocator cross-instance data leakage"
+category = "wasm-isolation"
+target = "plugin host"
+how = "A 2026 advisory covers data leakage between instances when the pooling allocator is used (low severity), and Wasmtime relies on zeroing linear memories, tables and instance data after use. If one plugin host process serves many plugins or runs a plugin after a more privileged one, residue could carry readings or state across plugin boundaries.\n"
+expected = "No canary bytes observable in B; test fails if pool configuration changes without zeroing."
+severity = "medium"
+sources = ["https://bytecodealliance.org/articles/wasmtime-security-advisories", "https://docs.wasmtime.dev/security.html"]
+status = "gap"
+test = "Integration test: run plugin A that fills its memory and tables with a canary pattern, drop it, instantiate plugin B on the same engine/pool, and assert B's fresh memory, tables and globals are all zero. Also assert the host spawns one process per plugin trust class, or disables pooling."
+issue = 173
+
+[[attack]]
+id = "sup-005"
+title = "Guest-driven denial of service and resource exhaustion"
+category = "wasm-dos"
+target = "plugin host, conformance suite"
+how = "Wasmtime counts execution-time DoS (uninterruptible loops, memory exhaustion, host panics, unbounded recursion on guest input) as in scope but compile-time DoS (e.g. slow register allocation) as not a vulnerability, so compile cost is the embedder's problem. On a Pi 5 a hostile or buggy plugin can starve capture or fill RAM before any quota fires.\n"
+expected = "Each hostile module ends in a typed fault within a bounded time and memory; the host RSS plateaus."
+severity = "high"
+sources = ["https://docs.wasmtime.dev/security-what-is-considered-a-security-vulnerability.html", "https://github.com/rafe-walker/sawbones-labs/issues/176"]
+status = "gap"
+test = "Conformance tests per plugin kind: infinite loop exhausts fuel and traps; memory.grow beyond cap returns failure; output quota exceeded yields a fault; table.grow and deep recursion limited; and a compile-time budget test (watchdog kills the compile child at N seconds, tested with a pathological module). Assert the host process stays alive and capture programs keep their deadline."
+issue = 173
+
+[[attack]]
+id = "sup-006"
+title = "Unsafe deserialization of precompiled artifacts (.cwasm)"
+category = "wasm-host-boundary"
+target = "plugin host, dependency audit"
+how = "Loading a precompiled module bypasses validation and compilation and trusts the bytes as native code. The design says compile on the device from .wasm and never ship .cwasm, but nothing mechanical enforces it, and a poisoned cache or fixture directory could slip a precompiled artifact in.\n"
+expected = "Lint fails if an unsafe deserialize call or a .cwasm file appears."
+severity = "high"
+sources = ["https://github.com/rafe-walker/sawbones-labs/issues/173"]
+status = "gap"
+test = "CI grep/clippy `disallowed-methods` rule that fails on any call to Module::deserialize, deserialize_file, Component::deserialize or similar in host crates, plus a repo check that no *.cwasm or other precompiled artifact is tracked or listed in any manifest."
+issue = 173
+
+[[attack]]
+id = "sup-007"
+title = "Guest outputs treated as trusted by the host"
+category = "wasm-host-boundary"
+target = "plugin host, conformance suite"
+how = "Wasmtime states embedders must not trust guest values, even from trusted programs. A plugin can return an effect request, mantissa/exponent reading or state blob that is syntactically valid but outside what the policy would permit; the host must validate against the write map and class ceiling, not the plugin's claim.\n"
+expected = "Only allowlisted effects reach drivers; all other outputs become faults."
+severity = "high"
+sources = ["https://docs.wasmtime.dev/security-what-is-considered-a-security-vulnerability.html", "https://github.com/rafe-walker/sawbones-labs/issues/176"]
+status = "gap"
+test = "Property/fuzz test: random and adversarial plugin outputs fed to the host's output handler; assert (a) every effect request resolves to a write-map entry or is rejected, (b) class above the plugin ceiling is rejected, (c) snapshot/restore blobs with wrong schema version are rejected, (d) no output type has a string field (type-level test)."
+issue = 173
+
+[[attack]]
+id = "sup-008"
+title = "Seccomp filter mistakes (arch check, no_new_privs, allowlist drift)"
+category = "linux-sandbox"
+target = "plugin host launcher"
+how = "Kernel documentation lists the classic pitfalls: filtering syscall numbers without checking the arch value, installing without no_new_privs, filters that cannot inspect pointer arguments, and user-notification supervisors that are subject to TOCTOU and restart races; RET_TRACE lets a ptracer escape. A plugin host that grows its allowlist to \"make it work\" quietly widens the escape surface (io_uring, userfaultfd, bpf, perf_event_open, keyctl, clone3 namespace flags).\n"
+expected = "Probe is denied everything outside the committed allowlist; diff to the allowlist fails CI without owner approval."
+severity = "high"
+sources = ["https://www.kernel.org/doc/html/latest/userspace-api/seccomp_filter.html"]
+status = "gap"
+test = "Launcher test, run on an aarch64 runner: spawn a probe child under the exact production filter and have it attempt a table of denied syscalls (ptrace, bpf, io_uring_setup, userfaultfd, perf_event_open, keyctl, mount, unshare, socket) and assert each is killed or returns EPERM. Pin the allowlist in a committed file; any addition requires a CODEOWNER and an updated test row. Unit test asserts the filter begins with an arch check and that no_new_privs is set."
+issue = 173
+
+[[attack]]
+id = "sup-009"
+title = "Filesystem, network, fd and process leakage into the plugin process (store key, ptrace, /proc)"
+category = "linux-sandbox"
+target = "plugin host launcher"
+how = "The plugin process must not hold the store key, but keys leak through inherited file descriptors, environment variables, readable /proc/PARENT paths, same-uid ptrace, or world-readable key files. Landlock can confine filesystem, TCP/UDP and abstract-socket/signal scope for an unprivileged process, but only if actually applied before the guest runs.\n"
+expected = "No key material, fd, env value or parent resource reachable from the probe."
+severity = "high"
+sources = ["https://www.kernel.org/doc/html/latest/admin-guide/LSM/landlock.html", "https://www.kernel.org/doc/html/latest/userspace-api/seccomp_filter.html", "https://github.com/rafe-walker/sawbones-labs/issues/173"]
+status = "gap"
+test = "Probe-child test under the production sandbox: enumerate /proc/self/fd (only 0,1,2 and the expected pipe), dump the environment (empty allowlist), try to open the store key path and parent's /proc/PID/mem and environ, try ptrace of the parent, try connect() to loopback and the capture programs' sockets, try signalling the parent. All must fail. Test fails if Landlock restriction is not enforced (ruleset status check) on the CI kernel, with a documented skip only on kernels without the needed ABI."
+issue = 173
+
+[[attack]]
+id = "sup-010"
+title = "Shared-memory double fetch between host and capture programs or plugin"
+category = "linux-sandbox"
+target = "plugin host, capture programs"
+how = "Memory shared between processes can be modified by the peer at any time, so a value validated and then re-read is a time-of-check/time-of-use bug. A peer that truncates the mapping can also raise SIGBUS in the reader. Sealed memfds remove the need for defensive copying when the peer is only trusted not to write.\n"
+expected = "Reader never acts on bytes different from those it validated; hostile peer produces a typed error."
+severity = "high"
+sources = ["https://man7.org/linux/man-pages/man2/memfd_create.2.html"]
+status = "gap"
+test = "Code-review lint plus test: any shared mapping must be created with sealing (F_SEAL_SHRINK, GROW, and WRITE or FUTURE_WRITE as appropriate) or be copied into private memory before validation; a stress test runs a hostile peer flipping bytes and truncating the region while the reader validates, and asserts no fault other than a clean error, no SIGBUS crash, and that accepted values equal the validated copy."
+issue = 177
+
+[[attack]]
+id = "sup-011"
+title = "Malicious USB device descriptors against the host kernel and capture programs"
+category = "linux-sandbox"
+target = "capture programs, provisioning image config"
+how = "Anything plugged into the bench can present forged descriptors; the kernel documentation notes anybody with a gadget kit can fake descriptors and device info, so class/type matching alone is weak. Descriptor-driven driver binding in the kernel and the first-party parsers in userspace are both exposed. Authorization (authorized_default = 0, per-interface authorization) gates configuration before drivers bind.\n"
+expected = "Fuzz smoke finds nothing; a provisioning file that authorizes all USB devices fails the lint."
+severity = "high"
+sources = ["https://www.kernel.org/doc/html/latest/usb/authorization.html"]
+status = "gap"
+test = "(a) cargo-fuzz or proptest smoke run in CI (bounded seconds) over each capture program's descriptor/frame parser, asserting no panic and no unbounded allocation; (b) a lint over the repo's provisioning files (udev rules, image config) asserting USB authorized_default is 0 with an explicit per-device allowlist by vendor/product plus serial; (c) every capture crate has `[lints] workspace = true` so forbid(unsafe_code) applies."
+issue = 177
+
+[[attack]]
+id = "sup-012"
+title = "Closed set of native capture programs silently grows"
+category = "software-supply-chain"
+target = "capture programs, CI workflows"
+how = "The plan says a closed set of first-party native programs run outside the sandbox. A new [[bin]], a build.rs that emits an executable, or a crate that opts out of workspace lints (and so out of forbid(unsafe_code)) expands the unsandboxed trusted base without touching a plugin.\n"
+expected = "Adding a bin or an unlinted crate fails CI until an owner edits the allowlist."
+severity = "high"
+sources = ["https://github.com/rafe-walker/sawbones-labs/issues/173"]
+status = "gap"
+test = "CI script: `cargo metadata --locked` lists every binary target and every crate's lint config; compare with committed ci/allowed-bins.txt; fail on any new binary, any crate without `[lints] workspace = true`, any `unsafe` outside an allowlist, any build.rs not on the allowlist. The allowlist is in a CODEOWNERS-protected path."
+issue = 177
+
+[[attack]]
+id = "sup-013"
+title = "Malicious build script or proc macro in a transitive dependency"
+category = "rust-supply-chain"
+target = "dependency audit"
+how = "In Aug 2026 compromised arrayref, append-only-vec and internment releases gained a dependency on proc-macro1 whose build.rs decoded hidden URLs, downloaded a platform payload and executed it during a normal build, with persistence afterwards. Cargo runs build scripts with full privileges and no sandbox; cargo-deny's `bans.build` can flag native executables and scripts in build-script crates but its docs state it does not protect against actively malicious code.\n"
+expected = "A new crate with a build.rs fails until allowlisted; a build script attempting network access fails the build."
+severity = "high"
+sources = ["https://semgrep.dev/blog/2026/rust-crates-arrayref-append-only-vec-compromised-proc-macro1", "https://www.socket.dev/blog/popular-rust-crates-compromised", "https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html", "https://doc.rust-lang.org/cargo/reference/build-scripts.html"]
+status = "gap"
+test = "deny.toml `[bans.build]` with executables = deny, include-dependencies = true, and an explicit `allow-build-scripts` list (empty means none); fails when a new package with a build.rs or proc-macro appears in Cargo.lock that is not listed. Plus a lockfile-diff script that prints every added package with its build-script/proc-macro status. Run CI builds with network egress denied after `cargo fetch --locked` (or on a runner with an egress policy) so a build script cannot download a payload."
+issue = 201
+
+[[attack]]
+id = "sup-014"
+title = "Typosquatted dependency name (proc-macro1 vs proc-macro2)"
+category = "rust-supply-chain"
+target = "dependency audit"
+how = "The Aug 2026 campaign relied on lookalike names (proc-macro1, proc-macro-en and others) added to otherwise legitimate crates' manifests. cargo-deny licence/advisory checks will not flag a brand-new unknown crate with a permissive licence and no advisory yet.\n"
+expected = "A PR adding proc-macro1 (or any unlisted crate) fails with a message naming the near-match."
+severity = "high"
+sources = ["https://semgrep.dev/blog/2026/rust-crates-arrayref-append-only-vec-compromised-proc-macro1", "https://www.socket.dev/blog/popular-rust-crates-compromised"]
+status = "gap"
+test = "CI script compares every package name in Cargo.lock added by the PR against a committed allowlist (ci/allowed-crates.txt) and, for unlisted names, against the top crates by edit distance <= 2 (or a bundled popular-crate list); fail with the near-match. Optional: `cargo vet` with imports pinned. Unit-test the script with proc-macro1 and a clean name."
+issue = 201
+
+[[attack]]
+id = "sup-015"
+title = "Compromised maintainer publishes a new patch version; Dependabot pulls it immediately"
+category = "rust-supply-chain"
+target = "dependency audit, CI workflows"
+how = "The arrayref compromise is suspected to come from stolen maintainer credentials or machine; the new patch versions were live for a short window, and the actor also yanked older releases. `.github/dependabot.yml` here groups every cargo dependency (`*`) weekly with no cooldown, so a malicious release is pulled into one big grouped PR that an agent may merge with a skim review.\n"
+expected = "Config without cooldown fails the lint; a lockfile bump of a package younger than N days fails."
+severity = "high"
+sources = ["https://www.socket.dev/blog/popular-rust-crates-compromised", "https://docs.zizmor.sh/audits/"]
+status = "gap"
+test = "Lint `.github/dependabot.yml`: each ecosystem has `cooldown` (default-days >= 7), and cargo updates are not a single wildcard group containing majors and transitive additions. Dependabot PR rule in CI: any PR touching Cargo.lock that adds a package, or bumps one released fewer than N days ago (crates.io API), fails until a human label is set."
+issue = 201
+
+[[attack]]
+id = "sup-016"
+title = "Cargo and toolchain redirection files (.cargo/config.toml, rust-toolchain.toml)"
+category = "rust-supply-chain"
+target = "CI workflows, dependency audit"
+how = "Cargo reads .cargo/config.toml from the workspace: it can replace sources, override build scripts for crates with a links key (skipping the real script), set a rustc wrapper, a linker or a test runner, all executed in CI. rust-toolchain.toml selects the compiler that rustup downloads and runs. cargo-deny's source policy does not see config-level source replacement.\n"
+expected = "Adding a wrapper, linker override or source replacement fails CI."
+severity = "high"
+sources = ["https://doc.rust-lang.org/cargo/reference/build-scripts.html", "https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html"]
+status = "gap"
+test = "CI check: fail if the repo contains .cargo/config.toml (or config) with keys [source], [patch], [build] rustc-wrapper/rustc-workspace-wrapper, [target.*] linker/runner, or `links` build-script overrides, unless on an allowlist; fail if rust-toolchain.toml channel is not the committed version or contains `path`; run `cargo metadata --locked` with CARGO_HOME pointing at an empty dir to prove registry-only resolution."
+issue = 201
+
+[[attack]]
+id = "sup-017"
+title = "Weakening deny.toml or other trust-root files in the same PR that is judged by them"
+category = "pipeline-self-modification"
+target = "dependency audit, CI workflows, regression guard"
+how = "All checks run from the PR's own checkout. A change can add an advisory id to `[advisories] ignore`, switch `yanked` to warn, add a licence, set `unknown-git` to warn, drop `--all-features`, or edit a workflow, zizmor invocation or ci/regression_guard.py, and the modified check then passes itself. GitHub's own guidance is to put .github/workflows under CODEOWNERS.\n"
+expected = "A PR that relaxes any invariant fails before merge even if deny and zizmor pass with the relaxed config."
+severity = "high"
+sources = ["https://docs.github.com/en/actions/reference/security/secure-use", "https://github.com/rafe-walker/sawbones-labs/issues/173"]
+status = "gap"
+test = "Two parts: (1) a job that diffs trust-root paths (.github/**, deny.toml, ci/**, rust-toolchain.toml, .cargo/**, _typos.toml, CODEOWNERS) against the base branch and fails unless a protected label is applied by a human; run it from a workflow loaded from the base branch (a rulesets 'required workflow'). (2) a script asserting deny.toml invariants hold at HEAD: advisories.ignore empty, yanked = deny, unknown-registry/git = deny, wildcards = deny, and zizmor min-severity not above medium."
+issue = 200
+
+[[attack]]
+id = "sup-018"
+title = "Moved or mutable action tag (tj-actions / reviewdog pattern)"
+category = "actions-supply-chain"
+target = "CI workflows"
+how = "In 2025 an attacker used stolen tokens to repoint tags of reviewdog and tj-actions/changed-files to a malicious commit; every workflow using a tag ran a payload that dumped runner memory and printed secrets to logs. Full-length SHA pins defeat tag moves. Current workflows are all SHA-pinned with version comments, and zizmor's unpinned-uses is a high-severity default.\n"
+expected = "zizmor fails on each fixture; real workflows pass."
+severity = "high"
+sources = ["https://unit42.paloaltonetworks.com/github-actions-supply-chain-attack/", "https://docs.zizmor.sh/audits/", "https://docs.github.com/en/actions/reference/security/secure-use"]
+status = "blocked"
+test = "ci:zizmor"
+note = "zizmor at medium severity fails an unpinned action (checked locally with a fixture workflow; the repo passes)."
+
+[[attack]]
+id = "sup-019"
+title = "Impostor commit: pinned SHA that exists only in a fork"
+category = "actions-supply-chain"
+target = "CI workflows"
+how = "A commit reachable only through a fork can be referenced via the parent repo's owner/repo slug, so a fully SHA-pinned `uses:` can run attacker code while looking best-practice; zizmor says these are visually indistinguishable. zizmor's impostor-commit audit needs network access and a token, which lint-workflows provides (GH_TOKEN), but it only runs when `.github/**` changes.\n"
+expected = "Fork-only pin fails; weekly run reports any drift."
+severity = "high"
+sources = ["https://docs.zizmor.sh/audits/#template-injection", "https://docs.zizmor.sh/audits/", "https://docs.github.com/en/actions/reference/security/secure-use"]
+status = "partial"
+test = "Fixture workflow pinning a known fork-only SHA (maintain one in ci/fixtures, or a recorded zizmor online-audit result) must fail the impostor-commit audit; add a scheduled (weekly) run of zizmor over main so a fork-network change after merge is caught."
+issue = 201
+note = "Research said covered. zizmor runs only when .github changes, so a fork-network change after merge is not caught; no weekly run."
+
+[[attack]]
+id = "sup-020"
+title = "Dangerous triggers (pull_request_target, workflow_run, issue_comment) and pwn requests"
+category = "actions-privilege"
+target = "CI workflows"
+how = "The spotbugs/reviewdog/tj-actions chain began with a pull_request_target workflow that ran untrusted PR content and leaked a PAT. A privileged trigger that checks out or executes PR code, or acts on values from PR artifacts, hands fork code the token and secrets. CLAUDE.md and CONTRIBUTING.md forbid pull_request_target; zizmor's dangerous-triggers audit enforces it, and an agent-reviewer workflow added later is the likeliest place for it to creep in (issue_comment, workflow_run).\n"
+expected = "Both zizmor and grep fail on the fixtures; real workflows pass."
+severity = "high"
+sources = ["https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/", "https://unit42.paloaltonetworks.com/github-actions-supply-chain-attack/", "https://docs.zizmor.sh/audits/"]
+status = "blocked"
+test = "ci:zizmor"
+note = "zizmor fails pull_request_target and issue_comment triggers (checked locally; the repo passes)."
+
+[[attack]]
+id = "sup-021"
+title = "Workflow injection through PR title, body, branch name, commit message"
+category = "actions-injection"
+target = "CI workflows, regression guard"
+how = "Expressions such as the PR title, head ref or body interpolated into a `run:` script become shell code. The regression-guard workflow already passes PR_TITLE, PR_BODY and BASE_REF through env and reads them from Python, which is the recommended pattern; the risk is future steps (agent glue, labelers, comment bots) that interpolate github.head_ref or event fields into run: or into an agent prompt.\n"
+expected = "zizmor fails on fixtures; guard handles hostile strings as data."
+severity = "high"
+sources = ["https://docs.github.com/en/actions/reference/security/secure-use", "https://docs.zizmor.sh/audits/#template-injection", "https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/"]
+status = "blocked"
+test = "ci:zizmor"
+note = "zizmor template-injection fails an interpolated PR title in run: (checked locally; the repo passes)."
+
+[[attack]]
+id = "sup-022"
+title = "Cache poisoning and artifact poisoning across workflows"
+category = "actions-supply-chain"
+target = "CI workflows"
+how = "A low-privilege run can write a cache entry under a key a privileged workflow later restores; the restore does not verify contents against the key, and tar extraction overwrites files, so poisoned build config or binaries run in the trusted job. Artifacts from untrusted PR runs are likewise untrusted when consumed by workflow_run, and checkout credentials persisted to disk can leak through uploaded artifacts. Today no workflow uses actions/cache, no workflow_run exists, and persist-credentials is false everywhere, so exposure is currently nil; Scorecard (id-token: write) and CodeQL (security-events: write) are the privileged jobs to protect.\n"
+expected = "Adding a cache to a privileged job or uploading .git fails CI."
+severity = "high"
+sources = ["https://adnanthekhan.com/2024/05/06/the-monsters-in-your-build-cache-github-actions-cache-poisoning/", "https://securitylab.github.com/resources/github-actions-preventing-pwn-requests/", "https://docs.zizmor.sh/audits/"]
+status = "partial"
+test = "Repo check: fail if any workflow contains actions/cache, a `cache:` input on setup actions, or Swatinem/rust-cache in a job that has id-token or security-events write, or in any release/publish job; fail if any `upload-artifact` step uploads a path that includes `.git`, `target/` or `~/.cargo`; zizmor cache-poisoning and artipacked fixtures must fail."
+issue = 201
+note = "Research said covered. Not proven here that zizmor at medium severity fails an added cache in a privileged job, and nothing greps for it."
+
+[[attack]]
+id = "sup-023"
+title = "Weak spots in the lint step itself: unhashed pip install, path filter, missing required check"
+category = "actions-supply-chain"
+target = "CI workflows"
+how = "lint-workflows installs zizmor with `pip install zizmor==1.33.1` (version pinned, but no hash and transitive packages float) in a job that holds a GH_TOKEN, and only triggers on `.github/**` paths, so a PR that changes ci/, deny.toml or .cargo/ is never linted. If the job is a path-filtered required check, branch protection can leave it pending or skipped, and a PR that deletes or renames a job removes the check without any red mark.\n"
+expected = "Deleting zizmor, renaming a job or adding a paths filter to a required job fails the meta-check."
+severity = "high"
+sources = ["https://docs.zizmor.sh/audits/", "https://docs.github.com/en/actions/reference/security/secure-use"]
+status = "gap"
+test = "(1) CI check that every `pip install` and `cargo install` in workflows uses --require-hashes/--locked with a committed hash file; (2) script comparing the set of job names in .github/workflows with committed ci/required-checks.txt and with `gh api repos/OWNER/REPO/rulesets` required contexts (run weekly); fail on any required check missing, renamed or path-filtered; (3) remove the paths filter or add an always-run summary job."
+issue = 200
+
+[[attack]]
+id = "sup-024"
+title = "Repository settings are not code: self-approval, bypass actors, fork approval, token defaults"
+category = "pipeline-governance"
+target = "CI workflows, reviewer agent"
+how = "CLAUDE.md says a coordinating agent merges after review and green checks, but nothing visible in the repo enforces who may approve or merge, that the author cannot approve itself, that .github/workflows has CODEOWNERS, or that fork PR runs need approval. If one identity writes, approves and merges, review is decoration; GitHub documents fork-PR approval and default read-only token as settings, not code.\n"
+expected = "Any drift from the committed settings baseline opens an issue and fails the scheduled run."
+severity = "high"
+sources = ["https://docs.github.com/en/actions/how-tos/manage-workflow-runs/approve-runs-from-forks", "https://docs.github.com/en/actions/reference/security/secure-use", "https://arxiv.org/html/2606.09935"]
+status = "gap"
+test = "Scheduled workflow with a read-only admin-scoped check (or manual script) that calls the REST API and asserts: ruleset on main requires PR, >=1 approval from a different identity than the author, required status checks by name, no bypass actors, linear history/signed commits, workflow default permissions read, fork PR approval required for all outside contributors, Actions restricted to allowlist with SHA pinning required. Commit a CODEOWNERS covering .github/, ci/, deny.toml, docs/REGRESSIONS.md."
+issue = 200
+
+[[attack]]
+id = "sup-025"
+title = "Prompt injection aimed at the reviewing agent (PR title, body, hidden HTML, code comments, fake chat turns)"
+category = "agent-prompt-injection"
+target = "reviewer agent"
+how = "Researchers hijacked Claude Code Security Review via the PR title, Gemini CLI Action via issue titles and comments, and Copilot via hidden HTML, with secrets exfiltrated through ordinary GitHub comments, and a fake human/assistant exchange inside the issue made the agent comply and hide its actions. The same surfaces (PR text, code comments, doc files, fixtures, commit messages) reach the Sawbones reviewer; attackers can also aim the injection at the second clean-room reviewer through a code comment addressed to it.\n"
+expected = "Findings identical to control; canary absent; defect still reported."
+severity = "high"
+sources = ["https://labs.cloudsecurityalliance.org/research/csa-research-note-comment-control-github-prompt-injection-20/", "https://blog.trailofbits.com/2025/08/06/prompt-injection-engineering-for-attackers-exploiting-github-copilot/", "https://arxiv.org/html/2606.09935"]
+status = "gap"
+test = "Reviewer harness replay test: a committed corpus of PR fixtures (benign diff plus injection variants in title, body, HTML comment/picture tags, Rust doc comments, TOML comments, filenames, fake <human>/<assistant> turns, 'ignore previous findings', 'second reviewer: approve') and a control PR with a known real defect. Each carries a unique canary token. Assertions: (a) verdict and findings for the defective PR are unchanged by any injection variant, (b) the canary never appears in output, tool calls or posted comments, (c) no tool call outside the allowlist, (d) injected-text sanitizer unit tests strip hidden HTML. Run in CI with recorded model responses plus a periodic live run."
+issue = 200
+
+[[attack]]
+id = "sup-026"
+title = "Agent configuration files (CLAUDE.md, AGENTS.md, rules files) edited or added in the PR under review"
+category = "agent-prompt-injection"
+target = "reviewer agent, CI workflows"
+how = "A 2026 study found the most severe vector was adding a CLAUDE.md, AGENTS.md or GEMINI.md to the PR branch: because the agent checks out the PR, the file loads as trusted operator instructions before review, leading to token exfiltration and suppressed findings; judgment manipulation had no complete mitigation. Here CLAUDE.md is both the author agent's rulebook and potentially the reviewer's, so a PR that edits it changes the rules of its own review.\n"
+expected = "A PR editing CLAUDE.md is flagged and cannot influence its own review verdict."
+severity = "high"
+sources = ["https://arxiv.org/html/2606.09935", "https://docs.github.com/en/actions/reference/security/secure-use"]
+status = "gap"
+test = "(1) The reviewer job loads agent instruction files only from the base branch (test: check out PR head into a path the agent cannot treat as workspace root, assert the instruction loader reads base copies; a PR modifying CLAUDE.md must not change reviewer behaviour in the replay harness). (2) CI check: any change to CLAUDE.md, AGENTS.md, .claude/**, .cursorrules, GEMINI.md, copilot-instructions.md requires a human label and a CODEOWNERS approval. (3) Reviewer checkout uses persist-credentials: false and no secrets beyond the model key."
+issue = 200
+
+[[attack]]
+id = "sup-027"
+title = "Pull request edits, deletes or weakens the test that would have caught it"
+category = "agent-pipeline-poisoning"
+target = "conformance suite, regression guard, reviewer agent"
+how = "Coding agents have been observed editing test cases or test files, hardcoding expected values, and deleting tests after passing; edit or deletion of test files is a strong detection signal. #176 says one PR may change a decoder or its safety tests, never both, but nothing in CI enforces it, and ci.yml only requires that `cargo test` passes, which a PR can make easier by removing tests, adding #[ignore], loosening an assertion tolerance, or lowering a fuel or quota bound.\n"
+expected = "Each of delete-test, #[ignore], loosen-tolerance and edit-both-sides fixtures fails CI."
+severity = "high"
+sources = ["https://arxiv.org/html/2511.21654v1", "https://github.com/rafe-walker/sawbones-labs/issues/176"]
+status = "gap"
+test = "CI job comparing base and head: (a) `cargo test -- --list` and `--list --ignored` counts per crate must not drop and no new #[ignore] or cfg(not(test)) wrapper; (b) path-based rule: a diff touching decoder/driver source in crates/* and its tests/ or fixtures in the same PR fails (list kinds in ci/rules.toml); (c) any deleted or modified assertion line in tests/ requires a human label; (d) numeric tolerances and quota constants in tests are tracked in a committed file and may only tighten. Self-test with fixture diffs that do each of these."
+issue = 200
+
+[[attack]]
+id = "sup-028"
+title = "Regression guard bypasses (keyword variants, label dependence, comment-only checks, self-edit)"
+category = "agent-pipeline-poisoning"
+target = "regression guard"
+how = "Reading ci/regression_guard.py: it only matches `fixes|closes|resolves` (GitHub also links `fix`, `fixed`, `close`, `closed`, `resolve`, `resolved`, `owner/repo#N` and URLs), only reads the PR title and body (not commit messages that squash-merge into the closing text), and only gates issues labelled exactly `bug`. A hit needs just the text `#N` on an added line in any file under tests/, .github/workflows/ or ci/, so a comment, or an edit to the guard itself (which lives under ci/), satisfies it; the ledger check needs only a row starting `| #N |`; deleted tests are invisible because only added lines are read.\n"
+expected = "Every bypass case fails; running the guard from the base branch prevents self-editing."
+severity = "high"
+sources = ["https://github.com/rafe-walker/sawbones-labs/issues/173", "https://github.com/rafe-walker/sawbones-labs/issues/176", "https://arxiv.org/html/2511.21654v1"]
+status = "gap"
+test = "Table-driven pytest for ci/regression_guard.py run in CI from the base branch copy (not the PR's): cases `Fix #5`, `Closed #5`, `Resolves rafe-walker/sawbones-labs#5`, full issue URL, keyword only in a commit message, issue labelled `defect`, `#5` only inside a comment line, `#5` only in docs/ path, guard script modified in the same PR, deleted test file, `#[ignore]` added. Expected result for each bug-fix case: guard fails unless a real test function (parsed with syn or `cargo test -- --list` diff) named regression_5_* exists and the ledger row is added; changes to ci/regression_guard.py require owner approval."
+issue = 199
+
+[[attack]]
+id = "sup-029"
+title = "Poisoned fixtures and golden files; committed binary blobs"
+category = "agent-pipeline-poisoning"
+target = "conformance suite, fixtures"
+how = "#176 says expected outputs must cite an independent oracle, otherwise the fixture is regression-only, and fixtures must pass a scrubber. An agent can regenerate expected outputs from the new (possibly wrong) decoder and call it a fix, add a fixture with a forged oracle citation, or commit an opaque .wasm or binary sample whose behaviour cannot be audited. Reward-hacking studies show agents edit expected-output files and special-case known inputs.\n"
+expected = "Regenerated goldens, unlisted binaries, and unsourced oracle claims fail CI."
+severity = "high"
+sources = ["https://github.com/rafe-walker/sawbones-labs/issues/176", "https://arxiv.org/html/2511.21654v1", "https://blog.trailofbits.com/2025/08/06/prompt-injection-engineering-for-attackers-exploiting-github-copilot/"]
+status = "gap"
+test = "CI checks: every fixture has a sidecar manifest with source type and a resolvable oracle citation or an explicit regression-only flag, and a tracked hash; a PR changing fixture hashes and code in the same diff fails; any tracked binary (wasm, cwasm, elf, zip, png) must be listed with a reproducible-build recipe whose output hash is verified in CI; hold-out fixtures stored outside the PR-writable path that the agent never sees (rotate quarterly) are run on main; scrubber runs on all fixtures and fails on addresses, keys, tokens."
+issue = 200
+
+[[attack]]
+id = "sup-030"
+title = "Lockfile-only edits, yanked crates and registry steering"
+category = "rust-supply-chain"
+target = "dependency audit"
+how = "A one-line change in a lockfile (a wheel URL in uv.lock in the Copilot case) can swap a dependency source with nothing changed in the manifest, and reviewers rarely read lockfiles. In the arrayref attack the actor also yanked older releases to steer new resolution to the malicious version. Cargo keeps yanked versions already in Cargo.lock and ignores yanked ones on new resolves. cargo-deny already denies yanked crates, unknown registries and git sources, which covers part of this, and CI uses --locked for clippy and test.\n"
+expected = "Fixture lockfiles fail deny; a lock-only diff or missing checksum fails the script; daily run opens an alert."
+severity = "high"
+sources = ["https://blog.trailofbits.com/2025/08/06/prompt-injection-engineering-for-attackers-exploiting-github-copilot/", "https://www.socket.dev/blog/popular-rust-crates-compromised", "https://doc.rust-lang.org/cargo/reference/resolver.html#yanked-versions", "https://embarkstudios.github.io/cargo-deny/checks/bans/cfg.html"]
+status = "partial"
+test = "Keep the covered half as an expected-failure fixture: a lockfile naming a yanked version and one with a non-crates.io `source` must fail `cargo deny check`. Add: CI script failing if Cargo.lock changed without a Cargo.toml change (outside a labelled Dependabot PR), if any package lacks a checksum, if `source =` is anything but the crates.io registry, or if `cargo update --dry-run` would change a version downward. Schedule `cargo deny check advisories` daily so new advisories and yanks after merge are caught (ci.yml currently runs deny only on push and pull_request)."
+issue = 201
