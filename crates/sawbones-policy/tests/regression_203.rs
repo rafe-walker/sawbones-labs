@@ -13,7 +13,9 @@ use sawbones_approvals::{
 use sawbones_busguard::{
     AllowList, BusGuard, Function, Port as GuardPort, Rule, TrustRootEvent, Verdict,
 };
-use sawbones_interlock::{step, Event, Inputs, Outputs, State, RAIL_B_PORTS};
+use sawbones_interlock::{
+    step, Event, FaultRecord, HeartbeatChallenge, Inputs, Outputs, State, RAIL_B_PORTS,
+};
 use sawbones_policy::{
     bus_action, classify, ActionDigest, BusFacts, BusWrite, BusWriteAction, EffectRequest,
     FactError, HazardClass, Mastership, RefusalReason, Requirement, SettingKind, WriteEntry,
@@ -193,13 +195,14 @@ fn regression_203_the_decision_names_the_entry_s_register_unit_and_bench_port() 
 
 // --- One digest end to end -------------------------------------------------
 
-/// Drives the interlock from power-on to a live rail B lease for `target`.
+/// Drives the interlock from a clean boot to a live rail B lease for
+/// `target`, with a supervisor that answers each heartbeat challenge once.
 fn interlock_lease(target: sawbones_interlock::LeaseTarget) -> (State, Outputs, u64) {
     let idle = Inputs {
         estop_pressed: false,
         arm_switch_on: false,
         key_switch_on: false,
-        heartbeat_healthy: true,
+        heartbeat: None,
         panel_button_pressed: false,
         rail_a_sensed: false,
         rail_b_sensed: [false; RAIL_B_PORTS],
@@ -230,8 +233,12 @@ fn interlock_lease(target: sawbones_interlock::LeaseTarget) -> (State, Outputs, 
         ),
         (pressed, None),
     ];
-    let mut state = State::POWER_ON;
-    let mut last = state.outputs();
+    let boot = Event::Restart {
+        record: Some(FaultRecord::Clear),
+        nonce: 0x203,
+    };
+    let (mut state, mut last) = step(State::POWER_ON, armed, Some(boot));
+    let mut answered: Option<HeartbeatChallenge> = None;
     let mut now = 0;
     for (inputs, event) in script {
         now += 1;
@@ -240,10 +247,17 @@ fn interlock_lease(target: sawbones_interlock::LeaseTarget) -> (State, Outputs, 
         if let Some(p) = last.rail_b {
             rail_b_sensed[usize::from(p.0)] = true;
         }
+        let heartbeat = if last.challenge == answered {
+            None
+        } else {
+            answered = last.challenge;
+            last.challenge.map(HeartbeatChallenge::reply)
+        };
         let inputs = Inputs {
             now,
             rail_a_sensed: last.rail_a,
             rail_b_sensed,
+            heartbeat,
             ..inputs
         };
         (state, last) = step(state, inputs, event);
@@ -378,7 +392,7 @@ fn regression_203_policy_interlock_approval_and_guard_agree_on_one_action() {
             estop_pressed: false,
             arm_switch_on: true,
             key_switch_on: true,
-            heartbeat_healthy: true,
+            heartbeat: None,
             panel_button_pressed: false,
             rail_a_sensed: true,
             rail_b_sensed,
