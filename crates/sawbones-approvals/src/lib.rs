@@ -941,3 +941,16 @@ impl Verifier {
         }
     }
 }
+
+#[cfg(test)]
+mod regression_224 {
+    use super::*;
+
+    #[test]
+    fn regression_224_payload_len_is_the_message_minus_its_header() {
+        // Kills `MESSAGE_LEN - OFFSET_PAYLOAD` -> `+`: the compile-time bound
+        // and the `debug_assert` only need an upper limit, so pin the value.
+        assert_eq!(PAYLOAD_LEN, 64);
+        assert_eq!(OFFSET_PAYLOAD + PAYLOAD_LEN, MESSAGE_LEN);
+    }
+}
