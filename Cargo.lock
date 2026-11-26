@@ -350,6 +350,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sawbones-policy"
+version = "0.0.0"
+dependencies = [
+ "sawbones-interlock",
+ "sawbones-reading",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "sawbones-reading"
 version = "0.0.0"
 dependencies = [
