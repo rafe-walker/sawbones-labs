@@ -230,3 +230,131 @@ fn redteam_bus_011_a_write_sweep_yields_only_the_leased_frame() {
     }
     assert_eq!(passes, [4242]);
 }
+
+// --- bus-015 and bus-017 (#214): the signal's width is the entry's ----------
+
+/// One write-map entry and one bench-only bus fact, for the width cards.
+fn width_facts(
+    width: u8,
+    range: Option<sawbones_policy::ValueRange>,
+) -> (sawbones_policy::WriteMap, sawbones_policy::BusFacts) {
+    use sawbones_policy::*;
+    use sawbones_reading::Trust;
+    let writes = WriteMap::new([WriteEntry {
+        port: PortId::parse("rs485-1").unwrap(),
+        unit: 1,
+        signal: SignalId::parse("battery_low_cutoff").unwrap(),
+        register: 0x0100,
+        width,
+        class: HazardClass::Class3,
+        kind: SettingKind::BatteryProtectionLimit,
+        energy_relevant: true,
+        trust: Trust::OperatorAttested,
+        range,
+    }])
+    .unwrap();
+    let buses = BusFacts::new([BusFact {
+        port: PortId::parse("rs485-1").unwrap(),
+        bench_port: 0,
+        mastership: Mastership::BenchOnly,
+        trust: Trust::OperatorAttested,
+    }])
+    .unwrap();
+    (writes, buses)
+}
+
+fn width_write(value: sawbones_policy::WriteValue) -> sawbones_policy::EffectRequest {
+    use sawbones_policy::*;
+    EffectRequest::BusWrite(BusWrite {
+        port: PortId::parse("rs485-1").unwrap(),
+        unit: 1,
+        signal: SignalId::parse("battery_low_cutoff").unwrap(),
+        value,
+    })
+}
+
+#[test]
+fn redteam_bus_015_a_signal_width_comes_from_its_entry_and_policy_encoder_and_guard_agree() {
+    use sawbones_policy::{classify, RefusalReason, Requirement, WriteValue};
+
+    // Policy: a 32-bit value for a one-register signal would overwrite the
+    // next register. It is refused, and so is the opposite.
+    let (one, buses) = width_facts(1, None);
+    for v in [WriteValue::U32(0x0001_0002), WriteValue::I32(-1)] {
+        let d = classify(&width_write(v), &one, &buses);
+        assert_eq!(
+            d.requirement(),
+            &Requirement::Refused {
+                reason: RefusalReason::WidthMismatch {
+                    expected: 1,
+                    got: 2
+                }
+            }
+        );
+    }
+    let (two, buses2) = width_facts(2, None);
+    let d = classify(&width_write(WriteValue::U16(7)), &two, &buses2);
+    assert!(d.is_refused());
+
+    // Encoder: the same refusal one layer down.
+    let words = [0x0001u16, 0x0002];
+    assert!(sawbones_busguard::BusWriteAction::new_with_width(
+        0,
+        1,
+        sawbones_busguard::WriteFunction::WriteMultipleRegisters,
+        0x0100,
+        1,
+        &words
+    )
+    .is_err());
+
+    // Guard: with a lease for the one-register action and rules wide enough
+    // to allow both, the two-register frame to the same register is blocked.
+    let action = sawbones_busguard::BusWriteAction::new_with_width(
+        0,
+        1,
+        sawbones_busguard::WriteFunction::WriteSingleRegister,
+        0x0100,
+        1,
+        &[0x0001],
+    )
+    .unwrap();
+    let mut g = guard(&[
+        rule(1, Function::WriteSingleRegister, 0, 65535, 1),
+        rule(1, Function::WriteMultipleRegisters, 0, 65535, 2),
+    ]);
+    assert_eq!(action.frame().as_bytes(), write_single(1, 0x0100, 1));
+    lease(&mut g, &write_single(1, 0x0100, 1), 1);
+    let wide = write_multiple(1, 0x0100, &words);
+    assert_eq!(
+        g.decide(P, &wide, 2),
+        Verdict::Block(BlockReason::DigestMismatch)
+    );
+    assert_eq!(g.decide(P, &write_single(1, 0x0100, 1), 2), Verdict::Pass);
+}
+
+#[test]
+fn redteam_bus_017_a_value_of_the_wrong_width_is_refused_with_or_without_a_range() {
+    use sawbones_policy::{classify, RefusalReason, Requirement, ValueRange, WriteValue};
+
+    // An entry with no range used to accept a value of any type.
+    let range = ValueRange::new(WriteValue::U16(4400), WriteValue::U16(5000)).unwrap();
+    for entry_range in [None, Some(range)] {
+        let (writes, buses) = width_facts(1, entry_range);
+        for v in [WriteValue::U32(4600), WriteValue::I32(4600)] {
+            let d = classify(&width_write(v), &writes, &buses);
+            assert!(
+                matches!(
+                    d.requirement(),
+                    Requirement::Refused {
+                        reason: RefusalReason::WidthMismatch { .. }
+                    }
+                ),
+                "{v:?} {entry_range:?}"
+            );
+        }
+        // Control: a value of the entry's width is classified as before.
+        let d = classify(&width_write(WriteValue::U16(4600)), &writes, &buses);
+        assert!(matches!(d.requirement(), Requirement::RailBLease { .. }));
+    }
+}

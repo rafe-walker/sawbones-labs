@@ -30,6 +30,7 @@ fn entry(name: &str, class: HazardClass, kind: SettingKind, trust: Trust) -> Wri
             .bytes()
             .fold(0u16, |a, b| a.wrapping_mul(31).wrapping_add(u16::from(b)))
             % 0xFF00,
+        width: 1,
         class,
         kind,
         energy_relevant: true,
