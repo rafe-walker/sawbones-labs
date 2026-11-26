@@ -1,7 +1,11 @@
 name: Regression guard
 
-# A pull request that fixes a bug must add the check that prevents it.
-# See CONTRIBUTING.md and ci/regression_guard.py.
+# A pull request that fixes a bug must add the check that prevents it, and a
+# pull request must not delete tests or CI steps without the `guards-change`
+# label. See CONTRIBUTING.md, ci/regression_guard.py and issue #199.
+#
+# The guard that judges a PR is the copy on the base branch, so a PR cannot
+# edit the guard to pass itself. Its own unit tests run from the PR copy.
 
 on:
   pull_request:
@@ -26,11 +30,17 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Check the diff
+      - name: Unit-test the guard (regression_199)
+        run: python3 -I -m unittest discover -s ci -p 'test_*.py' -v
+      - name: Check the diff with the base branch copy of the guard
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           BASE_REF: origin/${{ github.base_ref }}
-        run: python3 ci/regression_guard.py
+        run: |
+          guard="${RUNNER_TEMP}/regression_guard.py"
+          git show "${BASE_REF}:ci/regression_guard.py" > "${guard}" 2>/dev/null || cp ci/regression_guard.py "${guard}"
+          python3 -I "${guard}"
