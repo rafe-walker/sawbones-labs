@@ -1,0 +1,14 @@
+{
+  "cases": {
+    "busguard_frame_check": 983,
+    "interlock_step": 7438,
+    "policy_classify": 8544,
+    "policy_preflight": 2434,
+    "protocol_decode_request": 2737,
+    "protocol_decode_response": 562,
+    "protocol_encode_request": 2708,
+    "protocol_encode_response": 466
+  },
+  "threshold_percent": 10.0,
+  "unit": "Ir per iteration"
+}

@@ -37,6 +37,9 @@ jobs:
           config: |
             paths-ignore:
               - "**/tests/**"
+              # Benchmark harness: fixed inputs so every run measures the same
+              # thing; publish = false, never ships (#220).
+              - "crates/sawbones-bench/**"
       - uses: github/codeql-action/analyze@915412ff23e8b7659517e607487dbeae018f2934 # v4.39.5
         with:
           category: /language:${{ matrix.language }}

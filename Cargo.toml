@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+# The cargo-fuzz project needs nightly and its own lock file (#220).
+exclude = ["fuzz"]
 
 [workspace.package]
 version = "0.0.0"
