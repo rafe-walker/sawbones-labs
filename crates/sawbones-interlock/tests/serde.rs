@@ -58,7 +58,7 @@ fn state_and_outputs_round_trip_through_json() {
     let event: Event = serde_json::from_str(&serde_json::to_string(&event).unwrap()).unwrap();
     let (_, outputs) = step(state, inputs, Some(event));
     let json = serde_json::to_string(&outputs).unwrap();
-    let challenge = state.heartbeat.challenge().0;
+    let challenge = state.heartbeat.challenge().expect("started").0;
     assert_eq!(
         json,
         format!(

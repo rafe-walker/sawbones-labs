@@ -29,7 +29,9 @@
 //!   [`HeartbeatChallenge::reply`], on a later tick and before the next is
 //!   due. A reply that is wrong, stale, early or repeated, or no reply in
 //!   time, is a lost heartbeat. Nothing arms until a correct reply has been
-//!   seen since the last restart or loss.
+//!   seen since the last restart or loss. Until a restart delivers a non-zero
+//!   hardware nonce the heartbeat has not started: there is no challenge,
+//!   every reply is a loss, and nothing arms or clears.
 //! - **Output feedback.** Each rail's sensed state is compared with what the
 //!   previous tick commanded. A rail sensed live while commanded off is stuck
 //!   on: everything drops and [`FaultReason::OutputMismatch`] latches on that
@@ -84,7 +86,8 @@
 //! At boot the firmware starts from [`State::POWER_ON`] (or the state it kept
 //! in retained RAM) and makes its first step an [`Event::Restart`] carrying
 //! the record it read and a fresh nonce from the hardware random number
-//! generator. A restart is never cleaner than the worse of the state passed in
+//! generator (never 0: a zero nonce leaves the heartbeat not started, so the
+//! bench stays off). A restart is never cleaner than the worse of the state passed in
 //! and the record: a state with a real fault latched, or an armed one, wins
 //! over a record that says clear. [`State::POWER_ON`] says nothing, so the
 //! record decides.
@@ -120,6 +123,8 @@
 
 #![no_std]
 #![forbid(unsafe_code)]
+
+use core::num::NonZeroU64;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -299,12 +304,17 @@ pub struct HeartbeatReply(pub u64);
 /// The interlock's side of the heartbeat: the challenge outstanding and
 /// whether it has been answered. It lives inside [`State`] and only [`step`]
 /// moves it on.
+///
+/// A watch with no nonce has not started: no [`Event::Restart`] has
+/// delivered a hardware nonce yet (or it delivered 0). It issues no
+/// challenge, every reply to it is a loss, and it is never alive, so nothing
+/// arms and no fault clears. [`State::POWER_ON`] holds one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct HeartbeatWatch {
     /// The boot nonce the challenges are derived from, given with
-    /// [`Event::Restart`].
-    pub nonce: u64,
+    /// [`Event::Restart`]. `None` until a restart delivers a non-zero one.
+    pub nonce: Option<NonZeroU64>,
     /// The sequence number of the outstanding challenge since the restart.
     pub seq: u64,
     /// The tick the outstanding challenge was issued on.
@@ -317,23 +327,49 @@ pub struct HeartbeatWatch {
 }
 
 impl HeartbeatWatch {
+    /// A watch that has not started: no nonce, no challenge, never alive.
+    pub const NOT_STARTED: HeartbeatWatch = HeartbeatWatch {
+        nonce: None,
+        seq: 0,
+        issued_at: 0,
+        answered: false,
+        alive: false,
+    };
+
     /// A watch that has just issued its first challenge, at `now`, with no
-    /// reply yet.
+    /// reply yet. A nonce of 0 is not a hardware nonce: the watch stays
+    /// [`HeartbeatWatch::NOT_STARTED`].
     #[must_use]
     pub const fn start(nonce: u64, now: Tick) -> Self {
-        HeartbeatWatch {
-            nonce,
-            seq: 0,
-            issued_at: now,
-            answered: false,
-            alive: false,
+        match NonZeroU64::new(nonce) {
+            Some(nonce) => HeartbeatWatch {
+                nonce: Some(nonce),
+                seq: 0,
+                issued_at: now,
+                answered: false,
+                alive: false,
+            },
+            None => HeartbeatWatch::NOT_STARTED,
         }
     }
 
-    /// The outstanding challenge.
+    /// True once a restart has delivered a non-zero nonce.
     #[must_use]
-    pub const fn challenge(self) -> HeartbeatChallenge {
-        HeartbeatChallenge(fnv1a(&[CHALLENGE_TAG, self.nonce, self.seq]))
+    pub const fn started(self) -> bool {
+        self.nonce.is_some()
+    }
+
+    /// The outstanding challenge, or `None` if the watch has not started.
+    #[must_use]
+    pub const fn challenge(self) -> Option<HeartbeatChallenge> {
+        match self.nonce {
+            Some(nonce) => Some(HeartbeatChallenge(fnv1a(&[
+                CHALLENGE_TAG,
+                nonce.get(),
+                self.seq,
+            ]))),
+            None => None,
+        }
     }
 
     /// One tick: judge the reply that arrived, if any, and issue the next
@@ -349,6 +385,11 @@ impl HeartbeatWatch {
     /// withdraw the outstanding challenge, so a reply already on its way can
     /// still count; only the end of the period issues a new one.
     fn observe(self, reply: Option<HeartbeatReply>, now: Tick) -> (Self, bool) {
+        // Not started: there is nothing to answer, so any reply is a loss,
+        // and the watch is never alive.
+        let Some(challenge) = self.challenge() else {
+            return (HeartbeatWatch::NOT_STARTED, reply.is_some());
+        };
         let mut next = self;
         let mut lost = false;
         if let Some(reply) = reply {
@@ -356,7 +397,7 @@ impl HeartbeatWatch {
                 Some(age) => (1..HEARTBEAT_PERIOD_TICKS).contains(&age),
                 None => false,
             };
-            if in_window && !self.answered && reply.0 == self.challenge().reply().0 {
+            if in_window && !self.answered && reply == challenge.reply() {
                 next.answered = true;
                 next.alive = true;
             } else {
@@ -509,7 +550,9 @@ pub enum Event {
         /// missing, unreadable or failed its check.
         record: Option<FaultRecord>,
         /// A fresh nonce from the hardware random number generator, from
-        /// which this boot's heartbeat challenges are derived.
+        /// which this boot's heartbeat challenges are derived. 0 is not a
+        /// nonce: the heartbeat then stays not started, so nothing arms and
+        /// no fault clears until a restart brings a real one.
         nonce: u64,
     },
     /// The supervisor asks for rail A. This never arms anything, because only
@@ -671,11 +714,12 @@ impl Default for State {
 }
 
 impl State {
-    /// The state at power-on: everything off, the fault state unknown, and no
-    /// heartbeat seen.
+    /// The state at power-on: everything off, the fault state unknown, and the
+    /// heartbeat not started, so nothing can arm or clear until the firmware
+    /// feeds [`Event::Restart`] with a hardware nonce.
     pub const POWER_ON: State = State {
         mode: Mode::POWER_ON,
-        heartbeat: HeartbeatWatch::start(0, 0),
+        heartbeat: HeartbeatWatch::NOT_STARTED,
     };
 
     /// What the firmware must keep in non-volatile memory after this step.
@@ -802,8 +846,8 @@ pub struct Outputs {
     /// The latched fault, if there is one.
     pub fault: Option<FaultReason>,
     /// The heartbeat challenge outstanding, for the firmware to send to the
-    /// supervisor.
-    pub challenge: HeartbeatChallenge,
+    /// supervisor. `None` until a restart has started the heartbeat.
+    pub challenge: Option<HeartbeatChallenge>,
     /// Why this tick's event was refused, if it was.
     pub refusal: Option<Refusal>,
 }

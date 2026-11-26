@@ -71,11 +71,11 @@ impl Bench {
             (self.last.rail_a, b)
         });
         let challenge = self.last.challenge;
-        let heartbeat = if self.answered == Some(challenge) {
+        let heartbeat = if self.answered == challenge {
             None
         } else {
-            self.answered = Some(challenge);
-            Some(challenge.reply())
+            self.answered = challenge;
+            challenge.map(HeartbeatChallenge::reply)
         };
         let inputs = Inputs {
             now: self.now,

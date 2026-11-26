@@ -8,6 +8,8 @@
 //! torn or wrong, and a supervisor that answers heartbeat challenges late,
 //! wrongly, twice, stale, or not at all, or freezes.
 
+use core::num::NonZeroU64;
+
 use sawbones_interlock::{
     step, ActionDigest, Approval, ClearSource, Event, FaultReason, FaultRecord, HazardClass,
     HeartbeatChallenge, HeartbeatReply, HeartbeatWatch, Inputs, LeaseTarget, Mode, Outputs,
@@ -71,6 +73,11 @@ fn all_events() -> Vec<Option<Event>> {
     ] {
         events.push(Some(Event::Restart { record, nonce: 77 }));
     }
+    // A zero nonce is no nonce: the heartbeat stays not started.
+    events.push(Some(Event::Restart {
+        record: Some(FaultRecord::Clear),
+        nonce: 0,
+    }));
     for target in targets() {
         events.extend(CLASSES.map(|class| Some(Event::RequestLease { class, target })));
         events.push(Some(Event::LeaseUsed { target }));
@@ -91,16 +98,27 @@ fn rail_b_patterns() -> [[bool; RAIL_B_PORTS]; 4] {
 /// state would see them: none, the right one, a wrong one, and the one for
 /// the challenge before.
 fn replies(watch: HeartbeatWatch) -> [Option<HeartbeatReply>; 4] {
+    let Some(challenge) = watch.challenge() else {
+        // Not started: what a reply to a zero-nonce challenge would look
+        // like, and two others. All must fail.
+        let zero = HeartbeatChallenge(0).reply();
+        return [
+            None,
+            Some(zero),
+            Some(HeartbeatReply(zero.0 ^ 0x8000)),
+            Some(HeartbeatReply(0)),
+        ];
+    };
     let stale = HeartbeatWatch {
         seq: watch.seq.wrapping_sub(1),
         ..watch
     };
-    let right = watch.challenge().reply();
+    let right = challenge.reply();
     [
         None,
         Some(right),
         Some(HeartbeatReply(right.0 ^ 0x8000)),
-        Some(stale.challenge().reply()),
+        stale.challenge().map(HeartbeatChallenge::reply),
     ]
 }
 
@@ -182,9 +200,13 @@ fn judge_beat(before: State, inputs: &Inputs, event: Option<Event>) -> (bool, bo
         Some((_, nonce)) => HeartbeatWatch::start(nonce, inputs.now),
         None => before.heartbeat,
     };
+    // Not started: nothing to answer, never alive.
+    let Some(challenge) = watch.challenge() else {
+        return (inputs.heartbeat.is_some(), false);
+    };
     let age = inputs.now.checked_sub(watch.issued_at);
     let good = !watch.answered
-        && inputs.heartbeat == Some(watch.challenge().reply())
+        && inputs.heartbeat == Some(challenge.reply())
         && age.is_some_and(|a| (1..P).contains(&a));
     let bad_reply = inputs.heartbeat.is_some() && !good;
     let over = age.is_none_or(|a| a >= P);
@@ -277,6 +299,28 @@ fn check_tick(
             context()
         );
     }
+    // A heartbeat that has not started is never healthy: no challenge, no
+    // rail, and no clear.
+    if !next.heartbeat.started() {
+        assert_eq!(
+            out.challenge,
+            None,
+            "a challenge with no nonce: {}",
+            context()
+        );
+        assert!(
+            !rail_on,
+            "a rail on with no heartbeat started: {}",
+            context()
+        );
+        if matches!(before.mode, Mode::Faulted(_)) && restart.is_none() {
+            assert!(
+                out.fault.is_some(),
+                "a fault cleared with no heartbeat started: {}",
+                context()
+            );
+        }
+    }
     if inputs.firmware_jumper_fitted && armed_before {
         assert!(
             out.fault.is_some(),
@@ -350,10 +394,10 @@ fn check_tick(
 /// The heartbeat watches the single-step grid starts from, at `now`: alive
 /// and answered, alive and waiting, not alive, at the deadline answered and
 /// unanswered, two periods on (a stalled loop), just issued, and issued in
-/// the future (the clock went back).
-fn watches(now: Tick) -> [HeartbeatWatch; 8] {
+/// the future (the clock went back); and one not started.
+fn watches(now: Tick) -> [HeartbeatWatch; 9] {
     let w = |issued_at, answered, alive| HeartbeatWatch {
-        nonce: 0x5eed,
+        nonce: NonZeroU64::new(0x5eed),
         seq: 3,
         issued_at,
         answered,
@@ -368,6 +412,7 @@ fn watches(now: Tick) -> [HeartbeatWatch; 8] {
         w(now - 2 * P, true, true),
         w(now, false, true),
         w(now + 1, true, true),
+        HeartbeatWatch::NOT_STARTED,
     ]
 }
 
@@ -700,7 +745,10 @@ impl Fnv {
     fn state(&mut self, state: State) {
         self.mode(state.mode);
         let w = state.heartbeat;
-        self.word(w.nonce);
+        match w.nonce {
+            Some(nonce) => self.word(nonce.get()),
+            None => self.byte(0xff),
+        }
         self.word(w.seq);
         self.word(w.issued_at);
         self.flag(w.answered);
@@ -726,7 +774,10 @@ impl Fnv {
             None => self.byte(0xff),
             Some(reason) => self.fault(reason),
         }
-        self.word(out.challenge.0);
+        match out.challenge {
+            Some(challenge) => self.word(challenge.0),
+            None => self.byte(0xff),
+        }
         self.byte(match out.refusal {
             None => 0xff,
             Some(Refusal::ClassNeverPermitted) => 0,
@@ -903,14 +954,14 @@ impl Oracle {
         let beat_lost = self.lost_how != 0;
         // A new challenge appears exactly when a period is over or on a
         // restart.
-        let new_challenge = self.shown.is_none_or(|(c, _, _)| c != out.challenge);
+        let new_challenge = self.shown.map(|(c, _, _)| c) != out.challenge;
         assert_eq!(
             new_challenge,
-            period_over || restart.is_some(),
+            period_over || (restart.is_some() && out.challenge.is_some()),
             "a challenge changed off schedule: {context}"
         );
         if new_challenge {
-            self.shown = Some((out.challenge, now, false));
+            self.shown = out.challenge.map(|c| (c, now, false));
         }
 
         // What a restart may come up as.
@@ -1117,10 +1168,12 @@ impl Supervisor {
     fn reply(
         &mut self,
         rng: &mut Rng,
-        shown: HeartbeatChallenge,
+        shown: Option<HeartbeatChallenge>,
         restart: bool,
         quiet: bool,
     ) -> Option<HeartbeatReply> {
+        // Nothing shown, nothing to answer.
+        let shown = shown?;
         if self.current != Some(shown) {
             self.previous = self.current;
             self.current = Some(shown);

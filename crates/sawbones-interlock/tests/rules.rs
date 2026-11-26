@@ -336,12 +336,13 @@ impl Bench {
         let heartbeat = match tick.beat {
             _ if restarting => None,
             Beat::Silent => None,
-            Beat::Answer if self.answered == Some(outstanding) => None,
+            // Nothing shown (the heartbeat has not started): nothing to answer.
+            Beat::Answer if outstanding.is_none() || self.answered == outstanding => None,
             Beat::Answer => {
-                self.answered = Some(outstanding);
-                Some(outstanding.reply())
+                self.answered = outstanding;
+                outstanding.map(HeartbeatChallenge::reply)
             }
-            Beat::Wrong => Some(HeartbeatReply(outstanding.reply().0 ^ 1)),
+            Beat::Wrong => Some(HeartbeatReply(outstanding.map_or(1, |c| c.reply().0 ^ 1))),
             Beat::Repeat => Some(self.sent.expect("nothing sent yet to repeat")),
             Beat::Stale => Some(self.previous.expect("no earlier challenge").reply()),
         };
@@ -376,7 +377,7 @@ impl Bench {
         };
         let (next, outputs) = step(state, inputs, event);
         if outputs.challenge != outstanding {
-            self.previous = Some(outstanding);
+            self.previous = outstanding;
         }
         self.inputs = Inputs {
             heartbeat: None,
@@ -949,7 +950,7 @@ fn a_clock_that_goes_backwards_drops_the_lease() {
         nonce: 7,
     };
     let (state, _) = step(State::POWER_ON, at(9).with_arm(false), Some(restart));
-    let reply = state.heartbeat.challenge().reply();
+    let reply = state.heartbeat.challenge().expect("started").reply();
     let (state, _) = step(state, at(10).with_arm(false).with_reply(reply), None);
     let (state, _) = step(state, at(11), None);
     let (state, _) = step(state, at(12).with_rail_a(), Some(LEASE3));
@@ -1809,7 +1810,7 @@ fn regression_198_a_reply_before_the_challenge_is_seen_is_lost() {
     let inputs = Inputs {
         now: watch.issued_at + HEARTBEAT_PERIOD_TICKS,
         rail_a_sensed: true,
-        heartbeat: Some(next.challenge().reply()),
+        heartbeat: next.challenge().map(HeartbeatChallenge::reply),
         ..ARM.inputs
     };
     let (state, out) = step(bench.state, inputs, None);
@@ -1877,7 +1878,7 @@ fn regression_198_replies_from_another_boot_do_not_count() {
     assert_ne!(old.heartbeat.challenge(), new.heartbeat.challenge());
     let replay = Inputs {
         now: 1,
-        heartbeat: Some(old.heartbeat.challenge().reply()),
+        heartbeat: old.heartbeat.challenge().map(HeartbeatChallenge::reply),
         ..IDLE.inputs
     };
     let (_, out) = step(new, replay, None);
@@ -1894,7 +1895,8 @@ fn regression_198_the_reply_is_not_an_echo() {
             seq,
             ..HeartbeatWatch::start(3, 0)
         }
-        .challenge();
+        .challenge()
+        .expect("started");
         assert_ne!(challenge.reply().0, challenge.0);
         assert!(seen.insert(challenge), "challenge repeated at {seq}");
     }
@@ -1922,3 +1924,96 @@ fn regression_198_a_stalled_loop_is_a_loss() {
 }
 
 const P: u64 = HEARTBEAT_PERIOD_TICKS;
+
+/// What the challenge of a heartbeat "started" with nonce 0 at tick 0 would
+/// have been, computed here independently: FNV-1a over the challenge tag,
+/// the nonce and the sequence number. A reply to it looks correct.
+fn zero_nonce_reply() -> HeartbeatReply {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for word in [0x6567_6e65_6c6c_6168_u64, 0, 0] {
+        for b in word.to_le_bytes() {
+            hash ^= u64::from(b);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+    }
+    HeartbeatChallenge(hash).reply()
+}
+
+/// Until a restart delivers a non-zero hardware nonce, the heartbeat has not
+/// started: no challenge, every reply fails, no clear succeeds and nothing
+/// arms, even if the firmware never sends the restart at all.
+#[test]
+fn regression_198_no_heartbeat_before_restart() {
+    let reply = zero_nonce_reply();
+    let tick = |state: State, now, arm, button, event| {
+        let inputs = Inputs {
+            now,
+            arm_switch_on: arm,
+            panel_button_pressed: button,
+            heartbeat: Some(reply),
+            ..IDLE.inputs
+        };
+        step(state, inputs, event)
+    };
+    assert_eq!(State::POWER_ON.outputs().challenge, None);
+    assert!(!State::POWER_ON.heartbeat.started());
+
+    // From POWER_ON with no restart: a correct-looking reply, a panel clear
+    // with the switch off, then the switch on. Rails stay off throughout.
+    let mut state = State::POWER_ON;
+    for (now, arm, button, event) in [
+        (1, false, false, None),
+        (2, false, true, Some(PANEL_CLEAR)),
+        (3, false, false, None),
+        (4, true, false, Some(Event::RequestArm)),
+        (5, false, true, Some(PANEL_CLEAR)),
+        (6, true, false, None),
+    ] {
+        let (next, out) = tick(state, now, arm, button, event);
+        assert!(!out.rail_a && out.rail_b.is_none(), "tick {now}: a rail on");
+        assert!(out.fault.is_some(), "tick {now}: the fault cleared");
+        assert_eq!(out.challenge, None, "tick {now}: a challenge with no nonce");
+        if event == Some(PANEL_CLEAR) {
+            assert_eq!(out.refusal, Some(Refusal::HeartbeatUnhealthy));
+        }
+        assert!(!next.heartbeat.alive);
+        state = next;
+    }
+
+    // A restart with nonce 0 is no start: a clean record comes up unfaulted,
+    // but there is still no challenge, any reply is a loss, and with no reply
+    // the arm switch cannot arm.
+    let restart = Event::Restart {
+        record: Some(FaultRecord::Clear),
+        nonce: 0,
+    };
+    let boot = Inputs {
+        now: 1,
+        ..IDLE.inputs
+    };
+    let (booted, out) = step(State::POWER_ON, boot, Some(restart));
+    assert_eq!(booted.mode, Mode::Disarmed);
+    assert_eq!(out.challenge, None);
+    let (_, out) = tick(booted, 2, true, false, None);
+    assert_eq!(out.fault, Some(FaultReason::HeartbeatLost));
+    assert!(!out.rail_a);
+    let silent = Inputs {
+        now: 2,
+        arm_switch_on: true,
+        ..IDLE.inputs
+    };
+    let (next, out) = step(booted, silent, Some(Event::RequestArm));
+    assert!(!out.rail_a);
+    assert_eq!(next.mode, Mode::AwaitArmOff);
+    assert_eq!(out.refusal, Some(Refusal::HeartbeatUnhealthy));
+    let (_, out) = step(next, Inputs { now: 3, ..silent }, None);
+    assert!(!out.rail_a);
+
+    // A real nonce starts it.
+    let restart = Event::Restart {
+        record: Some(FaultRecord::Clear),
+        nonce: 41,
+    };
+    let (started, out) = step(State::POWER_ON, boot, Some(restart));
+    assert!(started.heartbeat.started() && out.challenge.is_some());
+}
