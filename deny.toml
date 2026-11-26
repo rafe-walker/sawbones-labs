@@ -1,0 +1,32 @@
+# cargo-deny policy. Run with `cargo deny check`; CI runs it on every push.
+
+[graph]
+all-features = true
+
+[advisories]
+# Vulnerabilities are always errors. Yanked crates are denied.
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Permissive licences only. Add one here deliberately, with a reason.
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.93
+
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
