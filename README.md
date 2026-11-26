@@ -4,7 +4,7 @@ An open-source, agent-first Maker's bench, and a portable test bench that docks 
 
 Sawbones is Old West slang for a field surgeon. This is one for machines: a carry-case of instruments that an AI agent operates over MCP, so it can observe, measure and, behind a safety layer, act on the thing under test. Inverters, battery packs, older vehicles, radios, appliances, a breadboard on the bench.
 
-**Status: design phase.** Nothing here is built or bench-tested yet. This repo holds the design document and the research behind it. Code follows once the design has been through outside review.
+**Status: P0.** Nothing here is built or bench-tested yet. The design has been through a first round of outside review. P0 is under way: the software, the firmware and the hardware blueprints, all built and tested without hardware. The first build after that is a small Bench Core.
 
 ## What is in here
 
@@ -12,7 +12,8 @@ Sawbones is Old West slang for a field surgeon. This is one for machines: a carr
 | --- | --- |
 | [`docs/project-document.md`](docs/project-document.md) | The design document: concept, architecture, module standard, knowledge store, safety layer, hardware, budget, risks. |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | The decision log, including the calls that were reversed and why. |
-| [`research/`](research/README.md) | The raw research notes behind the document, 21 lanes in three rounds, with confidence and known gaps for each. |
+| [`docs/reviews/`](docs/reviews/review-round-1-response.md) | The response to the first round of outside reviews: every point accepted, changed or disputed, and the phases that came out of it. |
+| [`research/`](research/README.md) | The raw research notes behind the document, with confidence and known gaps for each lane, plus the checks run against the reviews. |
 
 Work is tracked in the [GitHub Project](https://github.com/users/rafe-walker/projects/2) for this repo.
 

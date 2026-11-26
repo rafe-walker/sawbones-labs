@@ -42,6 +42,18 @@ A seventh lane in this round read the private IsoKron archive and the public kro
 | Store design against client limits | [store_ax_and_visuals.md](round-3-agent-tooling-rust-and-naming/store_ax_and_visuals.md) | Medium | Nothing tested on the owner's own clients. Two cited bugs may already be fixed. |
 | Name availability | [name_availability.md](round-3-agent-tooling-rust-and-naming/name_availability.md) | High for crates, npm and domains | No trademark search. |
 
+## Round 4: checks against the outside reviews
+
+Run on 25 November 2026 alongside the [review response](../docs/reviews/review-round-1-response.md).
+
+| Lane | File | What it settled |
+| --- | --- | --- |
+| Hardware fact check | [hardware_fact_check.md](round-4-review-checks/hardware_fact_check.md) | Sixteen hardware claims from the reviews checked against vendor documents. Most confirmed; the hub named in the first design is discontinued. |
+| Prior-art verification | [prior_art_verification.md](round-4-review-checks/prior_art_verification.md) | Every source the reviewers cited exists. Three were stretched. No built prior art found for the trust layer. |
+| Evidence viewer options | [evidence_viewer_options.md](round-4-review-checks/evidence_viewer_options.md) | Rerun as the borrowed viewer, Lichtblick as fallback, MCAP stays the recording format. |
+
+More lanes from this round are added as they finish.
+
 ## Notes written before later decisions
 
 Some notes predate decisions that changed the design. Where a note and [`../docs/DECISIONS.md`](../docs/DECISIONS.md) disagree, the decision log wins. The main cases: the tool fence was widened to allow active testing of owned gear, the LoRa pair moved to phase 2, and the knowledge store dropped kronicle-lite compatibility.

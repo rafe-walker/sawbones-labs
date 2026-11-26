@@ -31,7 +31,19 @@ Decisions made by the project owner, newest round last. The design document carr
 | Trust rule | A hardware write rests only on facts that are measured or owner-attested. |
 | 48 V bank | Touch-safe by voltage but not by energy. Anything that could short it is hazard class 3. |
 | Repo | A public repo, `rafe-walker/sawbones-labs`, Apache-2.0. It can move to its own account later. |
-| Roadmap | The phased build timeline is not laid out in the GitHub Project until three outside adversarial reviews have been worked through. |
+| Roadmap | The phased build timeline is not laid out in the GitHub Project until three outside adversarial reviews have been worked through. (Done on the same day; P0 was then opened.) |
+
+## 25 November 2026, after review round 1
+
+| Topic | Decision |
+| --- | --- |
+| Review response | Four outside reviews worked through. Verdicts and changes are in [reviews/review-round-1-response.md](reviews/review-round-1-response.md). |
+| P0 | A new first phase: all scaffolding, software and firmware that needs no hardware. |
+| Hardware in software | P0 also designs, simulates and tests the hardware as files, on GitHub runners and on the Mac, and ends in a blueprint pack that can itself be re-checked and improved. |
+| Bench Core | The first hardware is a much smaller Bench Core, dogfooded rung by rung, brain first. The seven-rung proposal awaits the owner's yes. |
+| Custom code | Our own firmware and software wherever possible, in Rust where it makes sense. |
+| IsoKron code-read note | Not published. What was needed from it is already in the design. |
+| Parked idea | An overhead-aircraft module (ADS-B). |
 
 ## Reversals and corrections
 
@@ -51,6 +63,11 @@ Decisions made by the project owner, newest round last. The design document carr
 
 | Question | Recommendation |
 | --- | --- |
-| Put the nRF52840 Bluetooth dongle back into phase 1, about $11? | Yes. |
+| Lay the seven-rung Bench Core into the project as P1? | Yes. |
+| Parts from US stock for the bench, as ruled for the drone? | Yes. |
+| Arm means yes for the session for class 2; a panel button for class 3 only? | Yes. |
+| Keep the ground-up Rust store, starting as the bare chain, with no kronicle-lite stopgap? | Yes. |
+| Thrust stand as Interlock's first real customer, after a lamp and a bare motor? | Yes. |
+| Put the nRF52840 Bluetooth dongle back in, about $11? Now a later-phase question, since all radio left the Bench Core. | Yes, with the radio work. |
 
 Facts only the owner can check: usable cell data at the far corners of the lot; which inverter is V1 and which is V2; panel labels and panels per string; how the EcoFlow array is wired against the 150 V input limit; the brand and model of the meter on hand.

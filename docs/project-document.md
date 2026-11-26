@@ -2,9 +2,53 @@
 
 Project document
 
-Working design document. Last synced 25 November 2026. Joshua Bryan, with Claude.
+Working design document. Last synced 25 November 2026, after review round 1. Joshua Bryan, with Claude.
 
 > Status: design phase. Nothing here is built or bench-tested yet. Prices marked estimate or unverified have no checked page behind them. "You" in this document is the project owner; "I" is Claude, the agent the bench is designed for.
+
+
+## Status after review round 1
+
+Four outside reviews came in late on 25 November. The principles survived. The first build shrinks to a Bench Core, and a new phase, P0, comes before any hardware. The sections below this one predate the reviews and are being rewritten as a P0 task. Where they disagree with this section, this section wins.
+
+The full point-by-point response, with every verdict and the checks behind it, is in the repo at [docs/reviews/review-round-1-response.md](reviews/review-round-1-response.md).
+
+### What changed
+
+| Area | Change |
+| --- | --- |
+| Connectivity | Three named modes: online, plan and recorder. A cloud model needs a link, so the pack joins the network the Mac is on. Its own access point is a last resort. Plan mode is the main field mode. |
+| Authority | The arm switch is one input, not the system. Added: an emergency stop that works with the Pi off, a watchdog outside the Pi, outputs off on every kind of restart, a latched fault, and a trusted panel with a display and button for class 3 approvals. The five hazard classes stay. |
+| The rail is the permission | Each hazard class gets a power rail limited by hardware. What the agent can do without asking is bounded by copper, not by policy. |
+| Trust root | The interlock controller takes firmware only with a physical jumper fitted. |
+| Reflashing | A reflash is a trust reset. The module drops to unverified until it passes the calibration cross-check again. |
+| World text | Network names, device names, decoded packets, OCR and speech are typed as untrusted and can never raise a fact above unverified. |
+| Module standard | A small spine beside USB-C: armed rail, calibration pair, sync. Nothing is frozen until three unlike modules exist. |
+| Isolation | Every terminal declares its ground domain, and the supervisor refuses a connection plan that makes a loop. The Mac on its charger is on the map. |
+| Parts | USB-C RP2350 boards in place of Picos. A USB 2 hub. Storage, cooler, clock battery, a 5 A supply and one reference meter added. The PiKVMs stay on the fixed bench. |
+| Measurement | "Self-test passed", not "calibrated". Each stream reports its own timing uncertainty. The 48 V bank is measured through an impedance-limited tap and a rated shunt. |
+| Solar | The agent's part ends at the no-contact stages. It does not direct connector or string work. |
+| Evidence | Results are ranked hypotheses with what would prove them wrong. A borrowed viewer, Rerun, in place of a home-built dashboard. |
+| Store | Still a ground-up Rust store, starting as the bare hash chain and growing by need. Values can be erased without breaking the chain. |
+| Positioning | Anthropic's Model Hardware Standard exists as a gated preview. This design is the physical and instrument-health layer beside it, not a rival platform. |
+
+### Phases
+
+**P0: everything that needs no hardware.** The brain's software running on the Mac against simulated modules, the firmware for the first boards, and the hardware itself designed, simulated and tested as files: one pack model from which budgets, schematics, wiring drawings, printed parts and the parts list are generated and checked on every change. P0 ends with a blueprint pack. A simulation result is never "measured", and every prediction is written down next to the P1 measurement that will check it.
+
+**P1, proposed: the Bench Core.** Mains-powered, on the bench, read-only.
+
+| Rung | Build | Verified by |
+| --- | --- | --- |
+| 1 | The brain: Pi 5, cooler, clock battery, NVMe, proper supply, switched hub | Its own health telemetry |
+| 2 | Build tools: debug probe and logic analyzer | The brain |
+| 3 | Trust root: interlock controller, emergency stop, armed rail, panel, jumper. Proved on a lamp | The brain and the logic analyzer |
+| 4 | Ground truth: one bought reference meter and the on-board reference | Each other |
+| 5 | Module 1: DC meter | The reference |
+| 6 | Module 2: isolated listen-only RS485 and RS232 pod | The logic analyzer and Solar Assistant |
+| 7 | One real EG4 question answered end to end | Everything above |
+
+The brain is first because every later rung is flashed, powered, timed and recorded by it. Analog capture, the thrust stand, the site port, senses, radio, portability and the vehicle follow in later phases.
 
 ## Concept and scope
 
@@ -19,7 +63,7 @@ It does three jobs, in rising order of risk:
 |  | Portable pack | Fixed Maker's bench |
 | --- | --- | --- |
 | Power | Internal battery, USB-C PD in | Mains or the house 48 V system |
-| Link to Claude | Its own Wi-Fi access point, no internet needed | Wired Ethernet on the LAN |
+| Link to Claude | The network the Mac is on, or a tether. Its own access point is a last resort | Wired Ethernet on the LAN |
 | Instruments | Small, rugged, USB or wireless | Adds bench supply, scope, soldering, printer |
 | MCP surface | Same server | Same server, more instruments registered |
 
@@ -44,7 +88,7 @@ One rule drives every choice: anything a person could read off a screen or a kno
 3. **Every reading carries provenance.** Instrument ID, range, units, raw and scaled value, calibration state, and a timestamp from one shared clock.
 4. **Ground truth is on board.** A voltage reference, a known resistor, a tone source and a known RF signal let the agent self-test before it trusts a number.
 5. **MWS for the write surface, a physical layer on top.** Every act tool meets MWS 0.9 (truthful results, targeting, concurrency, atomicity, retries). MWS says nothing about physical effects, so arming, previews and limits are this project's own layer, and a candidate annex for MWS.
-6. **No internet required.** The pack is its own access point. Everything runs locally.
+6. **No internet required.** True for the pack, which records and runs a pre-sent plan alone. A cloud model still needs a link. See the status section.
 7. **Borrow before building.** Proven open-source drivers get wrapped by a Rust supervisor, not rewritten.
 8. **Open and reproducible.** Public repo, printable enclosure parts, a bill of materials with part numbers, and CI that builds firmware and runs simulated instruments.
 
@@ -81,10 +125,10 @@ Every read and write passes through the supervisor, which is also the only thing
 | --- | --- | --- | --- |
 | Brain | Raspberry Pi 5, 4 GB. The spare Yellow is the $0 fallback. | USB 3 for SDRs and cameras, one-cable [USB Ethernet](https://www.raspberrypi.com/news/usb-gadget-mode-in-raspberry-pi-os-ssh-over-usb/) to the Mac, mainline OS. | [$110](https://hwbusters.com/news/raspberry-pi-5-16gb-price-jumps-to-385-and-the-extra-8gb-now-costs-more-than-a-whole-8gb-board/) |
 | USB | [Plugable USB3-HUB7BC](https://plugable.com/products/usb3-hub7bc), 7 ports, runs on 12 V | It is on the [uhubctl](https://github.com/mvp/uhubctl) list for per-port power switching, so the agent can power-cycle one hung instrument. Test every port on arrival. | $49.95 |
-| Power | 12 V LiFePO4 rail, bucks to 5 V, a current sensor on each rail | A 25 to 45 W load for 4 hours needs 120 to 210 Wh, more than a power bank holds. | About $100, unverified |
+| Power | 12 V LiFePO4 rail, bucks to 5 V, a current sensor on each rail | A 25 to 45 W load for 4 hours needs 100 to 180 Wh before conversion losses and 120 to 210 Wh with them, more than a power bank holds. | About $100, unverified |
 | Link | Pack is the Wi-Fi access point. USB-C tether as fallback, Ethernet when docked. | Works with no internet. A second radio stays free for sniffing. | $0 |
-| Clock | GNSS module with a pulse-per-second line into chrony | One microsecond-class time base for every stream. | $29.95 |
-| Eyes and hands | One PiKVM V4 Mini on Ethernet | Driven over its API. | $0 |
+| Clock | GNSS module with a pulse-per-second line into chrony | Absolute time and position. Each stream reports its own timestamp uncertainty. | $29.95 |
+| Eyes and hands | None in the pack. The PiKVMs stay on the fixed bench | Driven over its API. | $0 |
 | Case | [Apache 3800](https://www.harborfreight.com/3800-weatherproof-protective-case-large-black-63927.html), IP65, printed PETG panel in six tiles | Cheap, sealed when shut, panel fits the 180 mm bed. | $39.99 |
 | Interlock | Arm switch on the panel, relay watchdog, status light ring | Outputs drop if the link or the supervisor dies. | About $15 |
 
@@ -786,7 +830,7 @@ Your two inverters are the best free instrument you own. Each has one tracker, s
 | 3 | Shade test | None | An opaque cover, 1 Hz inverter data, spoken prompts | Covering a panel changes nothing, or current collapses (uncover at once) |
 | 4 | String comparison at the combiner | Hazardous DC area | A rated DC clamp on insulated cable only | A string at 0 A, or one string low |
 | 5 | Decide |  |  | Wiring, fuse and connector faults stop here |
-| 6 | Isolate the one suspect panel | Hazardous DC until both connectors are open | DC disconnect open, clamp under 0.1 A and seen by the agent, dawn or covered, a second person |  |
+| 6 | Isolate the one suspect panel | Hazardous DC until both connectors are open | Work for a qualified person under their own isolation procedure. The agent records and does not direct. A clamp reading near zero is an arc check, never proof that voltage is absent |  |
 | 7 | Test the isolated panel | Low voltage | Bluetooth meter now, PV test module later | Voltage at two-thirds of the label, steps in the curve, a soft knee |
 
 ### Hard limits
@@ -805,7 +849,7 @@ One thing to check on the EcoFlow array: EcoFlow [lists](https://www.ecoflow.com
 | Phase | What the pack can do |
 | --- | --- |
 | 1 | Stages 0 to 3 in full: string ratio monitor, morning open-circuit trend, clear-sky comparison with [pvlib-rust](https://docs.rs/crate/pvlib-rust/latest), guided photos, thermal scan, shade test with voice prompts. Stage 7 voltage check with the Bluetooth meter. About $30 of add-ons: two temperature probes, a home-made reference cell, a shade cover, connector tools. |
-| 2 | An open PV test module: a battery-powered, wireless, single-panel curve tracer with a reference cell, about $80 to $115 in parts, estimated. Its defining feature is refusal logic: it will not close above 60 V and must survive 600 V on its input. A rated Bluetooth DC clamp at the combiner. |
+| 2 | An open PV test module: a battery-powered, wireless, single-panel curve tracer with a reference cell, about $80 to $115 in parts, estimated. Its defining feature is refusal logic: it will not close above 60 V and must survive 600 V on its input. Not approved as specified after review round 1: it needs a full safety design first. A rated Bluetooth DC clamp at the combiner. |
 | 3 | Permanent per-string current pods, a soiling-ratio pair, night-time diode checks. |
 
 The tracer builds on [IV Swinger 2](https://github.com/csatt/IV_Swinger), an open design claimed at about $50. Its software is GPL v3, which matters for an Apache-2.0 repo. The bought alternatives are an Elejoy tester at [$89](https://shopsolarkits.com/products/elejoy-1600w-mppt-solar-panel-tester-multimeter) and the FLIR PV48 at [$189.99](https://www.transcat.com/flir-pv48-solar-panel-i-v-curve-tracer), neither with a stated data link.
@@ -835,12 +879,12 @@ Everything already owned gets a job. Only the PinePower supplies are dead ends f
 
 ### PiKVM off-label uses
 
-The PiKVM API already gives screen capture to 1920 x 1200, typed keys and mouse, a virtual USB drive, built-in OCR on snapshots, and GPIO drivers for relays and hobby servos.
+The PiKVM API already gives screen capture to 1920 x 1200, typed keys and mouse, a virtual USB drive, and built-in OCR on snapshots. Corrected after review: the V4 Mini has no USB host port and no documented user GPIO header, so it cannot drive relays, servos or USB switches.
 
 - **Run vendor-only software by proxy.** A junk Windows mini PC runs the tools that have no open protocol (Toyota Techstream, the JBD battery PC tool, inverter updaters). The PiKVM is the agent's eyes and hands on it. This reuses HNAO work directly.
 - **Read instruments that only have a screen.** An HDMI microscope or HDMI-out scope becomes a camera feed with OCR.
 - **Be a USB stick on command.** Instruments that update from a flash drive can be handed firmware without anyone walking over. Gated as a write.
-- **Press real buttons.** kvmd's [servo driver](https://docs.pikvm.org/gpio/) turns a $3 SG90 into a finger for devices with no remote control.
+- **Press real buttons.** kvmd's [servo driver](https://docs.pikvm.org/gpio/) does this on PiKVM models with GPIO. The V4 Mini is not one, so a servo finger would run from a bench module instead.
 - **Debug a board under test.** Boot screens, BIOS and serial-over-USB gadget for single-board computers on the bench.
 
 ## Fixed Maker's bench
@@ -1070,13 +1114,13 @@ Registry checks for crates, npm and domains are firm. GitHub availability has to
 - **Solar read path.** Solar Assistant's MQTT first to save money. Native port drivers stay on the roadmap for when Solar Assistant is down or absent, and the Delta Pro gets a driver too.
 - **Interlock** is the physical-safety layer. It builds on existing open source if any fits, otherwise Rust from the ground up.
 - **Module shape.** A 42 mm grid and USB-C for now, open to change after more module research.
-- **Repo.** Changed late on 25 November: a public repo, `sawbones-labs`, in your personal `rafe-walker` account, since this is a personal project. Apache-2.0. It can move to its own account later.
+- **Repo.** Changed late on 25 November: a public repo, sawbones-labs, in your personal rafe-walker account, since this is a personal project. Apache-2.0. It can move to its own account later.
 - **MWS Rust kit.** Decide nearer 16 December.
 - **Standing rules.** Every line gets a "build it cheaper and better" check, and the build order is dogfooded.
 
 Later the same day:
 
-- **Name.** Sawbones is the working name, and the repo is `rafe-walker/sawbones-labs`. You may still play with it.
+- **Name.** Sawbones`  is the working name, and the repo is rafe-walker/sawbones-labs `. You may still play with it.
 - **LoRa pair.** Moved to phase 2. Phase 1 drops to about $933 with the NVMe drive.
 - **Security testing.** Transmitting and active testing are allowed against your own gear on your property. Jamming stays out.
 - **Rust rule.** Rust where it makes sense. A tool that exists only in C or Python is used as it is. A port needs a reason and a test, or spare time while hardware money is short.
@@ -1144,4 +1188,4 @@ A third round of four lanes followed your answers.
 
 Next research pass: the two low-coverage lanes, an inventory of active assessment tools for owned gear, then price checks on every estimated line before anything is ordered.
 
-The full notes behind each lane are in [`research/`](../research/README.md). One lane, the read of the private IsoKron archive, is kept out of this public repo.
+The full notes behind each lane run to about 1.4 MB across 22 files. They are in the research folder of the public repo, github.com/rafe-walker/sawbones-labs, apart from the read of the private IsoKron archive, which is held back. Work items are in the Sawbones project on GitHub. P0 is laid out there. Later phases follow the owner's answers to review round 1.
