@@ -34,7 +34,12 @@
 //!   and a lease granted, only by [`BusGuard::apply`], which takes a
 //!   [`TrustRootEvent`]. That type stands for "came from the trust root after
 //!   a press of the panel button". There is no other way to change the
-//!   allow-list or create a lease.
+//!   allow-list or create a lease. With the `approvals` feature (on by
+//!   default) a [`TrustRootEvent`] is built only from an
+//!   `sawbones_approvals::Approved` lease or allow-list update: the trust
+//!   root's Ed25519 signature, the role, a replay counter and an expiry were
+//!   checked by a `sawbones_approvals::Verifier` (#172). Only the trust-root
+//!   role may approve either; the owner's phone cannot.
 //! - **At most one lease, used at most once.** A lease is present or absent;
 //!   passing its write removes it, so it cannot be spent twice. A new grant
 //!   replaces the old lease, and a new allow-list removes it.
@@ -44,16 +49,16 @@
 //!
 //! What is deliberately not here yet:
 //!
-//! - **Signatures (#172).** This crate cannot check where a
-//!   [`TrustRootEvent`] came from. Its only constructor,
-//!   [`TrustRootEvent::unverified_from_trust_root`], is the single audit
-//!   point; #172 replaces it with a constructor that verifies the trust
-//!   root's signature over the update.
-//! - **Replay.** For the same reason, nothing stops a captured grant being
-//!   sent again. The signed envelope in #172 must carry a counter or nonce
-//!   the guard checks. Within one program the event is neither `Clone` nor
+//! - **Real keys (#172).** The signature check is built and tested with
+//!   fixed test keys. It is switched on with real keys when hardware testing
+//!   starts; where the guard's keys and its last replay counter are stored is
+//!   for that phase. Within one program the event is neither `Clone` nor
 //!   `Copy` and `apply` consumes it, so the same value cannot be applied
-//!   twice.
+//!   twice; across messages the verifier's counter refuses a replay.
+//! - **The unverified constructor.**
+//!   `TrustRootEvent::unverified_from_trust_root` wraps an update with no
+//!   check. It exists only with the `test-unverified` feature, for tests and
+//!   simulation, and must never be in a firmware build.
 //! - **The wire.** Framing by silence, inter-frame gaps, the driver-enable
 //!   pin and buffer handling are the firmware's. The firmware must copy a
 //!   frame into its own buffer, decide on that buffer, and transmit exactly
@@ -89,6 +94,15 @@ pub const LEASE_TTL_TICKS: Tick = 100;
 
 /// How many rules the allow-list holds.
 pub const MAX_RULES: usize = 32;
+
+/// The length of one rule in [`AllowList::encode`].
+pub const RULE_ENCODED_LEN: usize = 9;
+
+/// The length of [`AllowList::encode`]: a count, then [`MAX_RULES`] slots.
+pub const ALLOW_LIST_ENCODED_LEN: usize = 1 + MAX_RULES * RULE_ENCODED_LEN;
+
+/// Hashed before an allow-list's encoding in [`AllowList::digest`].
+pub const ALLOW_LIST_DOMAIN: &[u8] = b"sawbones-busguard/allow-list/v1\0";
 
 /// One of the guard's serial ports. One guard may sit in front of more than
 /// one line driver.
@@ -229,6 +243,48 @@ impl AllowList {
     pub fn permits(&self, port: Port, frame: &Frame<'_>) -> bool {
         self.rules().any(|rule| rule.permits(port, frame))
     }
+
+    /// The list's one encoding, [`ALLOW_LIST_ENCODED_LEN`] bytes: the number
+    /// of rules (1 byte), then each rule in the order added as port, unit,
+    /// function code (1 byte each), first, last and max quantity (2 bytes
+    /// each, big-endian), then zeros for the unused slots.
+    #[must_use]
+    pub fn encode(&self) -> [u8; ALLOW_LIST_ENCODED_LEN] {
+        let mut out = [0; ALLOW_LIST_ENCODED_LEN];
+        let mut count: u8 = 0;
+        for (slot, rule) in out[1..]
+            .chunks_exact_mut(RULE_ENCODED_LEN)
+            .zip(self.rules())
+        {
+            let [f0, f1] = rule.first.to_be_bytes();
+            let [l0, l1] = rule.last.to_be_bytes();
+            let [m0, m1] = rule.max_quantity.to_be_bytes();
+            slot.copy_from_slice(&[
+                rule.port.0,
+                rule.unit,
+                rule.function.code(),
+                f0,
+                f1,
+                l0,
+                l1,
+                m0,
+                m1,
+            ]);
+            count += 1;
+        }
+        out[0] = count;
+        out
+    }
+
+    /// SHA-256 of [`ALLOW_LIST_DOMAIN`] followed by [`AllowList::encode`].
+    /// The trust root signs this digest to approve the list.
+    #[must_use]
+    pub fn digest(&self) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        hasher.update(ALLOW_LIST_DOMAIN);
+        hasher.update(self.encode());
+        hasher.finalize().into()
+    }
 }
 
 impl Default for AllowList {
@@ -281,8 +337,10 @@ pub enum Update {
 ///
 /// This is the only input that can change the allow-list or create a lease.
 /// It is deliberately not `Clone`, `Copy`, `Default` or deserializable, and
-/// its field is private, so the only way to make one is
-/// [`TrustRootEvent::unverified_from_trust_root`].
+/// its field is private. With the `approvals` feature it is made from a
+/// checked approval, by [`TrustRootEvent::from_approved_lease`] or
+/// [`TrustRootEvent::from_approved_allow_list`]. The unverified constructor
+/// exists only with the `test-unverified` feature, for tests.
 ///
 /// ```compile_fail
 /// use sawbones_busguard::{AllowList, TrustRootEvent, Update};
@@ -291,32 +349,69 @@ pub enum Update {
 /// ```
 ///
 /// ```compile_fail
-/// use sawbones_busguard::{BusGuard, LeaseGrant, Port, FrameDigest, TrustRootEvent, Update};
-/// let mut guard = BusGuard::new();
-/// let event = TrustRootEvent::unverified_from_trust_root(Update::GrantLease(LeaseGrant {
-///     port: Port(0),
-///     digest: FrameDigest([0; 32]),
-/// }));
-/// let _ = guard.apply(event, 0);
-/// // Applying consumed it: the same event cannot be applied twice.
-/// let _ = guard.apply(event, 0);
+/// use sawbones_busguard::{BusGuard, TrustRootEvent};
+/// fn twice(guard: &mut BusGuard, event: TrustRootEvent) {
+///     let _ = guard.apply(event, 0);
+///     // Applying consumed it: the same event cannot be applied twice.
+///     let _ = guard.apply(event, 0);
+/// }
 /// ```
 #[derive(Debug, PartialEq, Eq)]
 pub struct TrustRootEvent {
     update: Update,
 }
 
+/// An approved allow-list's digest is not the digest of the list given.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct AllowListMismatch;
+
 impl TrustRootEvent {
-    /// Wraps an update the caller asserts came from the trust root after a
-    /// panel press. **Nothing is verified.**
+    /// **TESTS AND SIMULATION ONLY.** Wraps an update with no check at all.
     ///
-    /// This is the audit point. In firmware it may be called only on a
-    /// message received on the trust-root link. #172 replaces it with a
-    /// constructor that checks the trust root's signature (and a replay
-    /// counter) and returns an error otherwise.
+    /// Exists only with the `test-unverified` feature, which nothing but
+    /// test builds turns on. Real code uses
+    /// [`TrustRootEvent::from_approved_lease`] or
+    /// [`TrustRootEvent::from_approved_allow_list`].
+    #[cfg(feature = "test-unverified")]
     #[must_use]
     pub const fn unverified_from_trust_root(update: Update) -> TrustRootEvent {
         TrustRootEvent { update }
+    }
+
+    /// A lease grant from a checked approval. The verifier has already
+    /// required the trust-root role, a valid signature, a fresh counter and
+    /// an unexpired approval for this device.
+    #[cfg(feature = "approvals")]
+    pub fn from_approved_lease(
+        approved: sawbones_approvals::Approved<sawbones_approvals::GrantLease>,
+    ) -> TrustRootEvent {
+        let grant = approved.into_approval();
+        TrustRootEvent {
+            update: Update::GrantLease(LeaseGrant {
+                port: Port(grant.port),
+                digest: FrameDigest(grant.action.0),
+            }),
+        }
+    }
+
+    /// An allow-list replacement from a checked approval of `list`'s digest.
+    ///
+    /// # Errors
+    ///
+    /// [`AllowListMismatch`] if the approval is for a list with another
+    /// [`AllowList::digest`]. The approval is spent either way.
+    #[cfg(feature = "approvals")]
+    pub fn from_approved_allow_list(
+        approved: sawbones_approvals::Approved<sawbones_approvals::BusGuardAllowList>,
+        list: AllowList,
+    ) -> Result<TrustRootEvent, AllowListMismatch> {
+        if approved.into_approval().allow_list.0 != list.digest() {
+            return Err(AllowListMismatch);
+        }
+        Ok(TrustRootEvent {
+            update: Update::ReplaceAllowList(list),
+        })
     }
 
     /// The update carried.

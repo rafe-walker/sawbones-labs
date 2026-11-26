@@ -3,3 +3,5 @@
 # Add a new no_std crate here and CI proves it still builds for the chip.
 sawbones-interlock --no-default-features
 sawbones-busguard --no-default-features
+sawbones-busguard --no-default-features --features approvals
+sawbones-approvals --no-default-features
