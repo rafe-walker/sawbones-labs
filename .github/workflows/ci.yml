@@ -56,6 +56,25 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build each crate in ci/no_std_crates.txt for thumbv8m.main-none-eabihf
         run: ci/check_no_std.sh
+      - name: Charge pump fed only from the main loop (#114, #144)
+        run: |
+          python3 -I ci/check_charge_pump.py --self-test
+          python3 -I ci/check_charge_pump.py
+      - name: Clippy on the trust-root firmware for thumbv8m.main-none-eabihf (#114)
+        run: cargo clippy --locked --target thumbv8m.main-none-eabihf -p sawbones-trust-root-fw -- -D warnings
+      - name: Build the trust-root firmware image and report its size (#114)
+        env:
+          SIZE_REPORT: "1"
+        run: ci/build_trust_root_fw.sh
+      - name: Upload the trust-root firmware image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sawbones-trust-root-fw
+          path: |
+            target/thumbv8m.main-none-eabihf/firmware/sawbones-trust-root-fw
+            target/thumbv8m.main-none-eabihf/firmware/sawbones-trust-root-fw.bin
+          if-no-files-found: error
+          retention-days: 30
 
   docs:
     name: rustdoc
