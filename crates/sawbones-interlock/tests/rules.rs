@@ -343,27 +343,347 @@ fn clearing_a_fault() {
     ]);
 }
 
-#[test]
-fn a_class_3_request_shows_on_the_panel_without_energising_rail_b() {
-    let last = run(&script(&ARMED, &[ARM.key().event(LEASE3)]));
-    assert_eq!(
-        last,
-        want_outputs(true, false, PanelState::ApprovalRequested)
-    );
-    let late = REQUEST_TTL_TICKS.max(LEASE_TTL_TICKS);
-    let last = run(&script(
-        &ARMED,
-        &[ARM.key().event(LEASE3), ARM.key().button().after(late)],
-    ));
-    assert_eq!(last, want_outputs(true, false, PanelState::Armed));
+/// Armed with the key in: the starting point for every lease row.
+const KEYED: Tick = Tick {
+    inputs: Inputs {
+        key_switch_on: true,
+        ..ARM.inputs
+    },
+    ..ARM
+};
+const PENDING: Want = want(true, false, PanelState::ApprovalRequested);
+const RAIL_B_ON: Want = want(true, true, PanelState::LeaseLive);
+
+/// Armed, a class 3 request made, then granted by a press.
+fn granted() -> Vec<Tick> {
+    script(&ARMED, &[KEYED.event(LEASE3), KEYED.button()])
 }
 
-fn want_outputs(rail_a: bool, rail_b: bool, panel: PanelState) -> Outputs {
-    Outputs {
-        rail_a,
-        rail_b,
-        panel,
-        fault: None,
-        refusal: None,
+#[test]
+fn lease_is_granted_only_by_a_fresh_button_press() {
+    check(&[
+        (
+            "a request alone gives no rail B",
+            &script(&ARMED, &[KEYED.event(LEASE3)]),
+            PENDING,
+        ),
+        ("request then press grants", &granted(), RAIL_B_ON),
+        (
+            "a press with no request gives nothing",
+            &script(&ARMED, &[KEYED.button(), KEYED, KEYED.button()]),
+            RAIL_A_ONLY,
+        ),
+        (
+            "a press before the request is not an approval of it",
+            &script(&ARMED, &[KEYED.button(), KEYED.event(LEASE3)]),
+            PENDING,
+        ),
+        (
+            "a press on the tick the request arrives does not grant",
+            &script(&ARMED, &[KEYED.button().event(LEASE3)]),
+            PENDING,
+        ),
+        (
+            "a button held down since before the request does not grant",
+            &script(
+                &ARMED,
+                &[KEYED.button().event(LEASE3), KEYED.button(), KEYED.button()],
+            ),
+            PENDING,
+        ),
+        (
+            "released and pressed again, it grants",
+            &script(
+                &ARMED,
+                &[KEYED.button().event(LEASE3), KEYED, KEYED.button()],
+            ),
+            RAIL_B_ON,
+        ),
+        (
+            "rail B stays on after the button is released",
+            &script(&granted(), &[KEYED, KEYED]),
+            RAIL_B_ON,
+        ),
+        (
+            "a second request while one is pending is refused",
+            &script(&ARMED, &[KEYED.event(LEASE3), KEYED.event(LEASE3)]),
+            PENDING.refused(Refusal::LeaseBusy),
+        ),
+        (
+            "a request while a lease is live is refused",
+            &script(&granted(), &[KEYED.event(LEASE3)]),
+            RAIL_B_ON.refused(Refusal::LeaseBusy),
+        ),
+        (
+            "a request before arming is refused",
+            &[IDLE.key().event(LEASE3)],
+            ALL_OFF_DISARMED.refused(Refusal::NotArmed),
+        ),
+        (
+            "a request on the tick of arming is refused and leaves nothing pending",
+            &[IDLE, KEYED.event(LEASE3)],
+            RAIL_A_ONLY.refused(Refusal::NotArmed),
+        ),
+    ]);
+}
+
+#[test]
+fn lease_needs_the_key() {
+    check(&[
+        (
+            "a request with the key off is refused",
+            &script(&ARMED, &[ARM.event(LEASE3)]),
+            RAIL_A_ONLY.refused(Refusal::KeyOff),
+        ),
+        (
+            "the key going off withdraws a pending request",
+            &script(&ARMED, &[KEYED.event(LEASE3), ARM, KEYED.button()]),
+            RAIL_A_ONLY,
+        ),
+        (
+            "a press with the key off grants nothing",
+            &script(&ARMED, &[KEYED.event(LEASE3), ARM.button()]),
+            RAIL_A_ONLY,
+        ),
+        (
+            "the key going off drops rail B",
+            &script(&granted(), &[ARM]),
+            RAIL_A_ONLY,
+        ),
+        (
+            "the key coming back does not bring rail B back",
+            &script(&granted(), &[ARM, KEYED, KEYED.button()]),
+            RAIL_A_ONLY,
+        ),
+    ]);
+}
+
+#[test]
+fn lease_expires_after_a_fixed_number_of_ticks() {
+    check(&[
+        (
+            "live on the last tick of the window",
+            &script(&granted(), &[KEYED.after(LEASE_TTL_TICKS - 1)]),
+            RAIL_B_ON,
+        ),
+        (
+            "off on the tick the window ends",
+            &script(&granted(), &[KEYED.after(LEASE_TTL_TICKS)]),
+            RAIL_A_ONLY,
+        ),
+        (
+            "holding the button does not extend it",
+            &script(&granted(), &[KEYED.button().after(LEASE_TTL_TICKS)]),
+            RAIL_A_ONLY,
+        ),
+        (
+            "a press after expiry is not a new approval",
+            &script(&granted(), &[KEYED.after(LEASE_TTL_TICKS), KEYED.button()]),
+            RAIL_A_ONLY,
+        ),
+        (
+            "a pending request can be granted on the last tick of its window",
+            &script(
+                &ARMED,
+                &[
+                    KEYED.event(LEASE3),
+                    KEYED.button().after(REQUEST_TTL_TICKS - 1),
+                ],
+            ),
+            RAIL_B_ON,
+        ),
+        (
+            "a stale request is dropped, so a late press grants nothing",
+            &script(
+                &ARMED,
+                &[KEYED.event(LEASE3), KEYED.button().after(REQUEST_TTL_TICKS)],
+            ),
+            RAIL_A_ONLY,
+        ),
+    ]);
+}
+
+#[test]
+fn lease_is_spent_after_one_use() {
+    let used = Event::LeaseUsed;
+    check(&[
+        (
+            "use drops rail B",
+            &script(&granted(), &[KEYED.event(used)]),
+            RAIL_A_ONLY,
+        ),
+        (
+            "a second use is refused",
+            &script(&granted(), &[KEYED.event(used), KEYED.event(used)]),
+            RAIL_A_ONLY.refused(Refusal::NoLiveLease),
+        ),
+        (
+            "a replayed press after use grants nothing",
+            &script(&granted(), &[KEYED.event(used), KEYED, KEYED.button()]),
+            RAIL_A_ONLY,
+        ),
+        (
+            "a use with nothing granted is refused",
+            &script(&ARMED, &[KEYED.event(LEASE3), KEYED.event(used)]),
+            PENDING.refused(Refusal::NoLiveLease),
+        ),
+        (
+            "a new request and a new press grant a new lease",
+            &script(
+                &granted(),
+                &[KEYED.event(used), KEYED.event(LEASE3), KEYED.button()],
+            ),
+            RAIL_B_ON,
+        ),
+    ]);
+}
+
+#[test]
+fn lease_does_not_survive_disarm_restart_or_fault() {
+    check(&[
+        (
+            "arm switch off drops both rails",
+            &script(&granted(), &[IDLE.key()]),
+            ALL_OFF_DISARMED,
+        ),
+        (
+            "re-arming does not bring rail B back",
+            &script(&granted(), &[IDLE.key(), KEYED, KEYED.button()]),
+            RAIL_A_ONLY,
+        ),
+        (
+            "restart drops both rails",
+            &script(&granted(), &[KEYED.event(Event::Restart)]),
+            ALL_OFF_AWAIT,
+        ),
+        (
+            "emergency stop drops both rails",
+            &script(&granted(), &[KEYED.estop()]),
+            fault(FaultReason::EmergencyStop),
+        ),
+        (
+            "lost heartbeat drops both rails",
+            &script(&granted(), &[KEYED.no_heartbeat()]),
+            fault(FaultReason::HeartbeatLost),
+        ),
+        (
+            "after a fault is cleared and the rail re-armed, the lease is gone",
+            &script(
+                &granted(),
+                &[
+                    KEYED.estop(),
+                    IDLE.key().event(Event::ClearFault),
+                    KEYED,
+                    KEYED.button(),
+                ],
+            ),
+            RAIL_A_ONLY,
+        ),
+        (
+            "a pending request does not survive a restart",
+            &script(
+                &ARMED,
+                &[
+                    KEYED.event(LEASE3),
+                    KEYED.event(Event::Restart),
+                    IDLE.key(),
+                    KEYED,
+                    KEYED.button(),
+                ],
+            ),
+            RAIL_A_ONLY,
+        ),
+    ]);
+}
+
+#[test]
+fn a_clock_that_goes_backwards_drops_the_lease() {
+    let at = |now| Inputs {
+        now,
+        ..KEYED.inputs
+    };
+    let (state, _) = step(State::POWER_ON, at(10).with_arm(false), None);
+    let (state, _) = step(state, at(11), None);
+    let (state, _) = step(state, at(12), Some(LEASE3));
+    let (state, outputs) = step(state, at(13).with_button(), None);
+    assert!(outputs.rail_b);
+    let (_, outputs) = step(state, at(12), None);
+    assert!(outputs.rail_a && !outputs.rail_b);
+}
+
+#[test]
+fn class_4_is_refused_in_every_state() {
+    let class4 = Event::RequestLease {
+        class: HazardClass::Class4,
+    };
+    let never = Refusal::ClassNeverPermitted;
+    check(&[
+        (
+            "awaiting the arm switch",
+            &[ARM.event(class4)],
+            ALL_OFF_AWAIT.refused(never),
+        ),
+        (
+            "disarmed",
+            &[IDLE.event(class4)],
+            ALL_OFF_DISARMED.refused(never),
+        ),
+        (
+            "armed",
+            &script(&ARMED, &[KEYED.event(class4)]),
+            RAIL_A_ONLY.refused(never),
+        ),
+        (
+            "armed, and a press afterwards grants nothing",
+            &script(&ARMED, &[KEYED.event(class4), KEYED.button()]),
+            RAIL_A_ONLY,
+        ),
+        (
+            "with a class 3 request pending",
+            &script(&ARMED, &[KEYED.event(LEASE3), KEYED.event(class4)]),
+            PENDING.refused(never),
+        ),
+        (
+            "with a class 3 lease live",
+            &script(&granted(), &[KEYED.event(class4)]),
+            RAIL_B_ON.refused(never),
+        ),
+        (
+            "with a fault latched",
+            &[IDLE.estop(), IDLE.event(class4)],
+            fault(FaultReason::EmergencyStop).refused(never),
+        ),
+    ]);
+}
+
+#[test]
+fn classes_without_a_lease_are_told_so() {
+    for class in [
+        HazardClass::Class0,
+        HazardClass::Class1,
+        HazardClass::Class2,
+    ] {
+        let request = Event::RequestLease { class };
+        let last = run(&script(&ARMED, &[KEYED.event(request), KEYED.button()]));
+        assert!(last.rail_a && !last.rail_b, "{class:?}");
+        let last = run(&script(&ARMED, &[KEYED.event(request)]));
+        assert_eq!(last.refusal, Some(Refusal::NoLeaseForClass), "{class:?}");
+    }
+}
+
+/// Small setters for the one test that drives `step` directly.
+trait InputsExt {
+    fn with_arm(self, on: bool) -> Self;
+    fn with_button(self) -> Self;
+}
+
+impl InputsExt for Inputs {
+    fn with_arm(mut self, on: bool) -> Self {
+        self.arm_switch_on = on;
+        self
+    }
+    fn with_button(mut self) -> Self {
+        self.panel_button_pressed = true;
+        self
     }
 }
