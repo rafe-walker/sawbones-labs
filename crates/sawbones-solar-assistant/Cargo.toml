@@ -1,0 +1,27 @@
+[package]
+name = "sawbones-solar-assistant"
+description = "PROVISIONAL read-only ingest of Solar Assistant MQTT telemetry into Sawbones readings. Not yet run against a real unit."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "sa-tap"
+path = "src/bin/sa-tap.rs"
+
+[dependencies]
+sawbones-reading = { path = "../sawbones-reading" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# Plain TCP only: default features would pull in a TLS stack that the
+# documented Solar Assistant setup (port 1883 on the local network) does not use.
+rumqttc = { version = "0.25.1", default-features = false }
+tokio = { version = "1", features = ["rt", "macros", "time", "signal"] }
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
