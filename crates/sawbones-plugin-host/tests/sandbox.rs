@@ -155,6 +155,9 @@ mod linux {
         let Ok(probe) = std::env::var(PROBE_ENV) else {
             return;
         };
+        // A descriptor opened before the lock-down stands in for one the
+        // child inherited.
+        let mut stray = std::fs::File::open("/proc/self/status").ok();
         if sandbox::prepare().is_err() {
             std::process::exit(40);
         }
@@ -168,6 +171,22 @@ mod linux {
                 Err(e) if e.raw_os_error() == Some(libc_eperm()) => std::process::exit(0),
                 Err(_) => std::process::exit(51),
             },
+            "stray-read" => {
+                use std::io::Read;
+                let mut buf = [0u8; 8];
+                let _ = stray.as_mut().map(|f| f.read(&mut buf));
+                std::process::exit(56)
+            }
+            "stray-write" => {
+                use std::io::Write;
+                let _ = stray.as_mut().map(|f| f.write(b"x"));
+                std::process::exit(57)
+            }
+            "stdout-write" => {
+                use std::io::Write;
+                let ok = std::io::stdout().write_all(b"ok").is_ok();
+                std::process::exit(if ok { 0 } else { 58 })
+            }
             "socket" => {
                 let _ = std::net::TcpStream::connect("127.0.0.1:9");
                 std::process::exit(52)
@@ -201,6 +220,14 @@ mod linux {
     }
 
     #[test]
+    fn inherited_descriptors_are_inert_under_the_filter() {
+        for probe in ["stray-read", "stray-write"] {
+            assert_eq!(run_probe(probe), (None, Some(SIGSYS)), "{probe}");
+        }
+        assert_eq!(run_probe("stdout-write"), (Some(0), None));
+    }
+
+    #[test]
     fn opening_a_file_fails_with_eperm() {
         assert_eq!(run_probe("open"), (Some(0), None));
     }
@@ -230,7 +257,7 @@ mod linux {
         // Any change to the list changes this line, in review.
         assert_eq!(
             names.join(" "),
-            "read write close mmap munmap mprotect madvise mremap brk futex sched_yield \
+            "close munmap mprotect madvise mremap brk futex sched_yield \
              getrandom clock_gettime membarrier rt_sigreturn rt_sigprocmask sigaltstack exit exit_group"
         );
         for bad in [
@@ -264,5 +291,13 @@ mod linux {
         ] {
             assert!(!names.contains(&bad), "{bad} must not be allowed");
         }
+        let restricted: Vec<String> = sandbox::ARG_RESTRICTED
+            .iter()
+            .map(|(n, _, i, v)| format!("{n}[{i}]={v:?}"))
+            .collect();
+        assert_eq!(
+            restricted.join(" "),
+            "read[0]=[0] write[0]=[1, 2] mmap[4]=[4294967295]"
+        );
     }
 }

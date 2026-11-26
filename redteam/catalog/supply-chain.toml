@@ -121,7 +121,7 @@ sources = ["https://www.kernel.org/doc/html/latest/admin-guide/LSM/landlock.html
 status = "partial"
 test = "Probe-child test under the production sandbox: enumerate /proc/self/fd (only 0,1,2 and the expected pipe), dump the environment (empty allowlist), try to open the store key path and parent's /proc/PID/mem and environ, try ptrace of the parent, try connect() to loopback and the capture programs' sockets, try signalling the parent. All must fail. Test fails if Landlock restriction is not enforced (ruleset status check) on the CI kernel, with a documented skip only on kernels without the needed ABI."
 issue = 177
-note = "#173: the runner starts with an empty environment, refuses to run with any descriptor beyond 0, 1 and 2, is not dumpable, dies with its parent, and under its filter cannot open a file, connect a socket or signal its parent (sawbones-plugin-host::opening_a_file_fails_with_eperm, network_process_thread_and_signal_calls_kill_the_child). It runs as the host's own user. Still open: a separate unprivileged user, namespaces and Landlock with a ruleset status check (#177)."
+note = "#173: the runner starts with an empty environment, makes every inherited descriptor inert under its filter (read only on 0, write only on 1 and 2, mmap only anonymous; any other use kills it), is not dumpable, dies with its parent, and under its filter cannot open a file, use a stray descriptor, connect a socket or signal its parent (sawbones-plugin-host::opening_a_file_fails_with_eperm, inherited_descriptors_are_inert_under_the_filter, network_process_thread_and_signal_calls_kill_the_child). It runs as the host's own user. Still open: a separate unprivileged user, namespaces and Landlock with a ruleset status check (#177)."
 
 [[attack]]
 id = "sup-010"

@@ -8,9 +8,11 @@
 //! 2. **Dies with the host**: `PR_SET_PDEATHSIG` is `SIGKILL`.
 //! 3. **Not dumpable**: `PR_SET_DUMPABLE` 0, so a same-user process cannot
 //!    `ptrace` it or read its `/proc/<pid>/mem`, and no core file is written.
-//! 4. **No inherited descriptors**: `/proc/self/fd` must hold only 0, 1 and
-//!    2. Any other descriptor (a key file, a socket) makes the runner refuse
-//!    to run at all. Fail closed.
+//! 4. **Inherited descriptors are inert**: safe Rust cannot close a
+//!    descriptor it did not open, and CI runners do leak some, so the filter
+//!    in step 6 makes every descriptor other than 0, 1 and 2 unusable:
+//!    `read` only on 0, `write` only on 1 and 2, `mmap` only anonymous
+//!    (fd -1). Using any other descriptor kills the process.
 //! 5. **Resource limits**: no core files, no file writes (`RLIMIT_FSIZE` 0),
 //!    no new processes or threads (`RLIMIT_NPROC` 0, which root ignores),
 //!    at most [`MAX_OPEN_FILES`] descriptors, [`ADDRESS_SPACE_BYTES`] of
@@ -19,8 +21,9 @@
 //! 6. **seccomp allow-list, after the engine is built and before the
 //!    component's bytes are parsed**: `no_new_privs`, then a filter that
 //!    checks the architecture first and kills the process on any system
-//!    call outside [`ALLOWED_SYSCALLS`] (memory management, reading and
-//!    writing the two pipes, futex, exit). A second filter answers the
+//!    call outside [`ALLOWED_SYSCALLS`] (memory management, reading stdin,
+//!    writing stdout and stderr, futex, exit), and on `read`, `write` or
+//!    `mmap` with any other descriptor. A second filter answers the
 //!    `open` family with `EPERM`, so a library that tries to open a file
 //!    (a coverage runtime at exit) fails cleanly instead of killing the run.
 //!    No `open` succeeds, no socket, no `ptrace`, no `execve`, no `clone`,
@@ -65,14 +68,13 @@ mod linux {
     #[cfg(target_arch = "aarch64")]
     const ARCH: TargetArch = TargetArch::aarch64;
 
-    /// System calls the runner may make once the filter is on, by name.
+    /// System calls the runner may make once the filter is on, by name,
+    /// with any arguments. `read`, `write` and `mmap` are allowed only as
+    /// [`ARG_RESTRICTED`] says.
     /// Anything else kills the process (`SIGSYS`). Keep this list short and
     /// keep it in step with the test that pins it.
     pub const ALLOWED_SYSCALLS: &[(&str, i64)] = &[
-        ("read", libc::SYS_read),
-        ("write", libc::SYS_write),
         ("close", libc::SYS_close),
-        ("mmap", libc::SYS_mmap),
         ("munmap", libc::SYS_munmap),
         ("mprotect", libc::SYS_mprotect),
         ("madvise", libc::SYS_madvise),
@@ -128,7 +130,6 @@ mod linux {
         }
         process::set_dumpable_behavior(DumpableBehavior::NotDumpable)
             .map_err(|e| err("dumpable", e))?;
-        check_descriptors()?;
         limit(Resource::Core, 0, "RLIMIT_CORE")?;
         limit(Resource::Fsize, 0, "RLIMIT_FSIZE")?;
         limit(Resource::Nproc, 0, "RLIMIT_NPROC")?;
@@ -138,45 +139,37 @@ mod linux {
         Ok(())
     }
 
-    /// Refuses to run with any descriptor beyond 0, 1 and 2.
-    fn check_descriptors() -> Result<(), SandboxError> {
-        let dir = std::fs::read_dir("/proc/self/fd").map_err(|e| err("/proc/self/fd", e))?;
-        let mut extra = Vec::new();
-        for entry in dir {
-            let entry = entry.map_err(|e| err("/proc/self/fd", e))?;
-            let name = entry.file_name();
-            let n: u32 = name
-                .to_str()
-                .and_then(|s| s.parse().ok())
-                .ok_or_else(|| SandboxError("odd entry in /proc/self/fd".into()))?;
-            if n <= 2 {
-                continue;
-            }
-            // The directory handle doing this listing shows up too.
-            let target = std::fs::read_link(entry.path()).unwrap_or_default();
-            let is_listing = target
-                .to_str()
-                .is_some_and(|t| t.starts_with("/proc/") && t.ends_with("/fd"));
-            if !is_listing {
-                extra.push(n);
-            }
-        }
-        if extra.is_empty() {
-            Ok(())
-        } else {
-            Err(SandboxError(format!(
-                "inherited file descriptors {extra:?}"
-            )))
-        }
+    /// Calls allowed only with one argument equal to one of some values:
+    /// `(syscall, argument index, allowed values)`. These keep inherited
+    /// descriptors inert.
+    pub const ARG_RESTRICTED: &[(&str, i64, u8, &[u64])] = &[
+        ("read", libc::SYS_read, 0, &[0]),
+        ("write", libc::SYS_write, 0, &[1, 2]),
+        // fd is a C int: compare its low 32 bits with -1.
+        ("mmap", libc::SYS_mmap, 4, &[0xFFFF_FFFF]),
+    ];
+
+    fn arg_rule(index: u8, value: u64) -> Result<SeccompRule, SandboxError> {
+        let cond = SeccompCondition::new(index, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, value)
+            .map_err(|e| err("seccomp condition", e))?;
+        SeccompRule::new(vec![cond]).map_err(|e| err("seccomp rule", e))
     }
 
-    /// The allow-list filter: kill on anything not listed.
+    /// The allow-list filter: kill on anything not listed, and on a
+    /// restricted call with an argument outside its values.
     pub fn allow_list_program() -> Result<BpfProgram, SandboxError> {
-        let rules: BTreeMap<i64, Vec<SeccompRule>> = ALLOWED_SYSCALLS
+        let mut rules: BTreeMap<i64, Vec<SeccompRule>> = ALLOWED_SYSCALLS
             .iter()
             .chain(EPERM_SYSCALLS)
             .map(|(_, nr)| (*nr, Vec::new()))
             .collect();
+        for (_, nr, index, values) in ARG_RESTRICTED {
+            let mut alternatives = Vec::with_capacity(values.len());
+            for v in *values {
+                alternatives.push(arg_rule(*index, *v)?);
+            }
+            rules.insert(*nr, alternatives);
+        }
         let filter = SeccompFilter::new(
             rules,
             SeccompAction::KillProcess,
@@ -235,7 +228,8 @@ mod linux {
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 pub use linux::{
-    allow_list_program, eperm_program, lock_down, prepare, ALLOWED_SYSCALLS, EPERM_SYSCALLS,
+    allow_list_program, eperm_program, lock_down, prepare, ALLOWED_SYSCALLS, ARG_RESTRICTED,
+    EPERM_SYSCALLS,
 };
 
 /// On other targets there is no sandbox, so the runner refuses to run.
