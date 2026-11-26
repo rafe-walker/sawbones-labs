@@ -11,6 +11,7 @@ Sawbones is Old West slang for a field surgeon. This is one for machines: a carr
 | Path | What it is |
 | --- | --- |
 | [`docs/project-document.md`](docs/project-document.md) | The design document: concept, architecture, module standard, knowledge store, safety layer, hardware, budget, risks. |
+| [`docs/bench-core-parts.md`](docs/bench-core-parts.md) | The priced parts list for the first hardware phase. |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | The decision log, including the calls that were reversed and why. |
 | [`docs/reviews/`](docs/reviews/review-round-1-response.md) | The response to the first round of outside reviews: every point accepted, changed or disputed, and the phases that came out of it. |
 | [`research/`](research/README.md) | The raw research notes behind the document, with confidence and known gaps for each lane, plus the checks run against the reviews. |

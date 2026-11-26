@@ -61,7 +61,7 @@ Accept = adopted as written. Change = adopted in a different form. Dispute = not
 | About 17 USB devices for 7 switched ports | Accept | A port budget table. The cut-down radio set removes most of the excess. |
 | USB 3 radiates across 2.4 GHz | Accept | Checked. Intel measured an idle USB 3 link as noisy as a busy one. Nothing in the Bench Core needs USB 3, so the hub is a USB 2 hub. Both Plugable hubs are now discontinued; see "Verified facts" for the replacement. |
 | "Pi 5 chosen for USB 3" | Accept | The real reasons are the on-board clock, the NVMe slot and the processor. |
-| PiKVM V4 Mini cannot be the pack's hands | Accept | Checked. The Mini has no USB host port and no documented user GPIO header. KVM only, bench only, out of the pack. The document's "GPIO drivers for relays and servos" line was wrong for this model and is withdrawn. |
+| PiKVM V4 Mini cannot be the pack's hands | Accept | Checked. The Mini has no USB host port and no documented user GPIO header. KVM only, bench only, out of the pack. The document's "GPIO drivers for relays and servos" line was wrong for this model and is withdrawn. One thing it can do: its ATX port has two isolated outputs meant to press a PC's power and reset buttons, and two inputs meant to read its LEDs. On the fixed bench those can press a button on a device under test or trigger an external relay. They cannot drive a servo and stay out of any safety path. |
 | No audio path, no storage, no 5 A supply, no cooler, no clock battery in the parts list | Accept | All added. The Pi 5 has no analog audio at all. |
 | An analog capture module is the missing core instrument | Change | Agreed on the need. Checked: one part can do it for about $35 to $39, but an RP2350 has only full-speed USB and cannot move that much data. Split into two bands. See below. |
 | Pico is micro-USB and too long; RP2040 has no second firmware slot | Accept | USB-C RP2350 boards, whose boot ROM supports A/B slots, so rollback is real. |
@@ -245,7 +245,7 @@ Two rules keep this honest.
 
 A plain plastic case shields nothing. The shielding question is really which internal metal can or foil lining to add and how much the fan and connector openings give back, and that is what the simulation ranks.
 
-### P1, proposed: the Bench Core
+### P1: the Bench Core
 
 Mains-powered, on the bench, read-only. No battery, no case, no radios, no cameras, no vehicle.
 
@@ -259,9 +259,9 @@ Mains-powered, on the bench, read-only. No battery, no case, no radios, no camer
 | 6 | Module 2: isolated listen-only RS485 and RS232 pod | The logic analyzer and Solar Assistant | It reads the EG4 directly, and the two paths are compared |
 | 7 | The investigation | Everything above | One real EG4 question answered end to end: a named experiment, a session, an evidence bundle, facts in the store, and what would prove it wrong |
 
-What it costs: priced at US sellers on 25 November. The lines priced so far come to about $470 for a mains-powered bench, once the battery converters are dropped and the discontinued hubs are swapped for the one that is still made. That covers the brain, storage, supply, hub, one isolator, one microcontroller board, one INA228, the panel display, the stop and key switches, and a Fluke 107 as the reference meter. Not yet in that figure: two more microcontroller boards, the debug probe and logic analyzer, the comms pod's transceivers, the on-board reference parts, and consumables. A working estimate for the whole Bench Core is $550 to $600 before shipping and tax. That is above the reviewers' $300 to $450, mostly because of the reference meter and the storage they left out.
+What it costs: the parts are on a private Amazon list, checked item by item on 26 November. 36 lines come to $679.77 at one of each and about $729 with the lines that need two, before tax. About $110 of that is wire, boards and cables to skip if they are on hand. The list with every line is in [bench-core-parts.md](../bench-core-parts.md). An earlier estimate here of $550 to $600 was low: it left out the wiring and hardware lines, and the Pi costs more on Amazon than at a Pi dealer.
 
-One finding matters for safety. None of the Bluetooth meters has an independently confirmed safety rating, and one teardown calls a popular model's printed rating optimistic. The Bluetooth meter is a data source for low-voltage work only. Anything hazardous is measured with the reference meter.
+No meter is bought for the Bench Core. It is low-voltage only, the voltage reference module is the accuracy anchor, and the meter already on hand cross-checks it. One finding matters for later: none of the Bluetooth meters has an independently confirmed safety rating, and one teardown calls a popular model's printed rating optimistic. A Bluetooth meter is a data source for low-voltage work only. When work moves to the battery bank or mains, a meter with an honest safety rating is bought then.
 
 Why the brain first: every later rung is flashed, powered, timed and recorded by it, and the P0 software is waiting for it. Moving that software from the Mac to the Pi is the first hardware test and the cheapest one.
 
@@ -297,8 +297,8 @@ Two results change the parts list. The hub named in the first design is disconti
 
 | Question | My recommendation |
 | --- | --- |
-| Lay P1 into the project as proposed above? | Yes |
-| Parts ship from US stock for the bench too, as you ruled for the drone? | Yes |
+| Lay P1 into the project as proposed above? | Answered: yes, 26 November |
+| Parts ship from US stock for the bench too, as you ruled for the drone? | Answered: Amazon from any seller, nothing a month out |
 | Approvals: keep "arm means yes for the session" for class 2, and add a panel button for class 3 only? | Yes |
 | Knowledge store: keep your Rust ground-up decision, starting as the bare chain, with no kronicle-lite stopgap? | Yes |
 | PiKVMs stay on the fixed bench, none in the pack? | Yes |

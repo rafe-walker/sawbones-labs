@@ -45,6 +45,15 @@ Decisions made by the project owner, newest round last. The design document carr
 | IsoKron code-read note | Not published. What was needed from it is already in the design. |
 | Parked idea | An overhead-aircraft module (ADS-B). |
 
+## 26 November 2026
+
+| Topic | Decision |
+| --- | --- |
+| P1 | Rungs 1 to 7 of the Bench Core are phase 1. |
+| Buying | Amazon, from any seller. Watch the delivery estimate; nothing a month out. This replaces the US-stock question for the bench. |
+| Merging | Claude merges and deploys once it has reviewed the change and all checks pass. |
+| Reference meter | No meter bought for P1. The voltage reference module and the meter on hand cover the low-voltage Bench Core. A safety-rated meter waits for bank or mains work. |
+
 ## Reversals and corrections
 
 | Was | Now | Why |
@@ -63,8 +72,6 @@ Decisions made by the project owner, newest round last. The design document carr
 
 | Question | Recommendation |
 | --- | --- |
-| Lay the seven-rung Bench Core into the project as P1? | Yes. |
-| Parts from US stock for the bench, as ruled for the drone? | Yes. |
 | Arm means yes for the session for class 2; a panel button for class 3 only? | Yes. |
 | Keep the ground-up Rust store, starting as the bare chain, with no kronicle-lite stopgap? | Yes. |
 | Thrust stand as Interlock's first real customer, after a lamp and a bare motor? | Yes. |
