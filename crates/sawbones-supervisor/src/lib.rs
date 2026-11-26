@@ -39,7 +39,13 @@
 //! fact it measured ([`FactEvent::ModuleReflashed`], the nearest event the
 //! ledger has). A dependent write's preflight then fails, naming the fact.
 //! An invalidation is sticky: the facts must be earned again. A lost device
-//! is identified again after a poll period.
+//! is identified again after a poll period; one lost [`MAX_LOSSES`] times
+//! within [`LOSS_WINDOW_TICKS`] (for example by repeated `Identify`
+//! replays) is quarantined. The supervisor takes at most
+//! [`MAX_FRAMES_PER_STEP`] frames from a port per pass, so a flood cannot
+//! stall the main loop, and a port that sends more than [`FLOOD_BUDGET`]
+//! frames it cannot take in one poll period is quarantined (or refused, if
+//! it has proved no identity).
 //!
 //! ## The heartbeat
 //!
@@ -89,7 +95,10 @@ pub use registry::{
     ConfigError, Enrollment, Happened, HubPort, ModuleState, PortRefusal, PortState,
     QuarantineReason,
 };
-pub use supervisor::{ArmedPlan, Config, Supervisor, LINK_TIMEOUT_TICKS, POLL_PERIOD_TICKS};
+pub use supervisor::{
+    ArmedPlan, Config, Supervisor, FLOOD_BUDGET, LINK_TIMEOUT_TICKS, LOSS_WINDOW_TICKS,
+    MAX_FRAMES_PER_STEP, MAX_LOSSES, POLL_PERIOD_TICKS,
+};
 pub use write::{ArmRefusal, Authorized, InvokeRefusal, Outcome, PendingWrite};
 
 pub use sawbones_interlock::Tick;

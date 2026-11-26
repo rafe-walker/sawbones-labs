@@ -555,3 +555,60 @@ fn the_config_refuses_ambiguous_enrollments() {
     );
     assert!(matches!(got, Err(ConfigError::SharedBusPort(_))));
 }
+
+#[test]
+fn repeated_session_loss_quarantines_the_module() {
+    // #98, card hw-031: each Identify replay costs one loss; three in the
+    // window and a person has to look.
+    let mut b = Bench::new(HazardClass::Class2);
+    b.tick();
+    let mut all = Vec::new();
+    for i in 0..sawbones_supervisor::MAX_LOSSES {
+        while b.s.module_state(POD) != Some(ModuleState::Available) {
+            all.extend(b.tick());
+        }
+        let mut other = HostLink::new();
+        let mut buf = [0u8; MAX_FRAME_LEN];
+        let len = other
+            .open(Challenge([0xe0 + i as u8; 16]), &mut buf)
+            .unwrap();
+        let _ = b.hub.module(POD_PORT).handle(&buf[..len]);
+        while b.s.module_state(POD) == Some(ModuleState::Available) {
+            all.extend(b.tick());
+        }
+    }
+    assert!(b.now < sawbones_supervisor::LOSS_WINDOW_TICKS);
+    assert_eq!(
+        quarantined(&all),
+        vec![QuarantineReason::RepeatedLoss {
+            losses: sawbones_supervisor::MAX_LOSSES
+        }]
+    );
+    assert!(matches!(
+        b.s.module_state(POD),
+        Some(ModuleState::Quarantined(_))
+    ));
+}
+
+#[test]
+fn a_flooding_port_is_quarantined_and_the_loop_stays_bounded() {
+    let mut b = Bench::new(HazardClass::Class2);
+    b.arm();
+    // Junk the host cannot take, far more than one pass reads.
+    for _ in 0..10 * sawbones_supervisor::MAX_FRAMES_PER_STEP {
+        b.hub.inject(POD_PORT, vec![0xff; 32]);
+    }
+    let out = b.tick();
+    let dropped = out
+        .iter()
+        .filter(|h| matches!(h, Happened::FrameDropped { .. }))
+        .count();
+    assert_eq!(dropped, sawbones_supervisor::MAX_FRAMES_PER_STEP);
+    // The heartbeat was answered first, flood or not.
+    let out = b.run(3);
+    assert!(matches!(
+        quarantined(&out)[..],
+        [QuarantineReason::Flooding { .. }]
+    ));
+    assert!(b.interlock.outputs.rail_a);
+}

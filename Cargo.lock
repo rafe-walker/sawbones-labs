@@ -476,10 +476,19 @@ dependencies = [
  "sawbones-module-protocol",
  "sawbones-policy",
  "sawbones-reading",
+ "sawbones-sim-modules",
  "sawbones-supervisor",
  "serde",
  "serde_json",
  "toml",
+]
+
+[[package]]
+name = "sawbones-sim-modules"
+version = "0.0.0"
+dependencies = [
+ "ed25519-dalek",
+ "sawbones-module-protocol",
 ]
 
 [[package]]

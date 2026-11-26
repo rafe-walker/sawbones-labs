@@ -183,6 +183,11 @@ impl FakeHub {
         self.modules.remove(&port)
     }
 
+    /// Somebody else on the line sends the host a frame.
+    pub fn inject(&mut self, port: HubPort, frame: Vec<u8>) {
+        self.inbox.entry(port).or_default().push_back(frame);
+    }
+
     pub fn module(&mut self, port: HubPort) -> &mut FakeModule {
         self.modules.get_mut(&port).unwrap()
     }

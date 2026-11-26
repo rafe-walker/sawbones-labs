@@ -66,6 +66,20 @@ pub enum QuarantineReason {
     },
     /// Its signed manifest digest is not the one pinned at install.
     ManifestMismatch,
+    /// It was lost [`MAX_LOSSES`](crate::MAX_LOSSES) times within
+    /// [`LOSS_WINDOW_TICKS`](crate::LOSS_WINDOW_TICKS): something keeps
+    /// ending its sessions (an `Identify` replay, card hw-031) or its link
+    /// keeps failing. A person should look before it is trusted again.
+    RepeatedLoss {
+        /// How many losses in the window.
+        losses: u32,
+    },
+    /// Its port sent more than [`FLOOD_BUDGET`](crate::FLOOD_BUDGET) frames
+    /// the host could not take within one poll period (card hw-033).
+    Flooding {
+        /// How many in the window.
+        bad_frames: u32,
+    },
 }
 
 /// Why the supervisor stopped talking to the device on a hub port, short of
@@ -80,6 +94,10 @@ pub enum PortRefusal {
     IdentifyRefused(RefusalCode),
     /// It claims an id that is quarantined.
     Quarantined(ModuleId),
+    /// Before it proved an identity, its port sent more than
+    /// [`FLOOD_BUDGET`](crate::FLOOD_BUDGET) frames the host could not take
+    /// within one poll period.
+    Flooding,
 }
 
 /// What one hub port holds.

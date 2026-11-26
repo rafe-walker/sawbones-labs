@@ -29,6 +29,23 @@ pub const LINK_TIMEOUT_TICKS: Tick = 5;
 /// how long it waits before identifying a lost device again. A placeholder.
 pub const POLL_PERIOD_TICKS: Tick = 10;
 
+/// The most frames the supervisor takes from one hub port in one pass, so a
+/// flooding port cannot stall the main loop (and with it the heartbeat).
+pub const MAX_FRAMES_PER_STEP: usize = 8;
+
+/// The most frames from one hub port that the host could not take (bad,
+/// unsolicited, replayed, for another session) in one poll period. One more
+/// and the port is a flood: its module is quarantined, or the port refused
+/// if it has proved no identity. A placeholder.
+pub const FLOOD_BUDGET: u32 = 16;
+
+/// How many losses of one module within [`LOSS_WINDOW_TICKS`] quarantine
+/// it. A placeholder.
+pub const MAX_LOSSES: u32 = 3;
+
+/// The window [`MAX_LOSSES`] is counted over. A placeholder.
+pub const LOSS_WINDOW_TICKS: Tick = 10 * POLL_PERIOD_TICKS;
+
 // A module must have time to answer one poll before the next is due.
 const _: () = assert!(LINK_TIMEOUT_TICKS >= 1 && LINK_TIMEOUT_TICKS < POLL_PERIOD_TICKS);
 
@@ -55,6 +72,9 @@ struct Slot {
     /// The tick of the next health poll, or of the next identify after a
     /// loss.
     next_poll: Tick,
+    /// Frames the host could not take since `window_start`.
+    bad_frames: u32,
+    window_start: Tick,
 }
 
 impl Slot {
@@ -65,6 +85,8 @@ impl Slot {
             challenge: None,
             deadline: None,
             next_poll: now,
+            bad_frames: 0,
+            window_start: now,
         }
     }
 }
@@ -85,6 +107,7 @@ pub struct Supervisor {
     pub(crate) enrollments: BTreeMap<ModuleId, Enrollment>,
     quarantine: BTreeMap<ModuleId, QuarantineReason>,
     firmware: BTreeMap<ModuleId, ImageDigest>,
+    losses: BTreeMap<ModuleId, Vec<Tick>>,
     slots: BTreeMap<HubPort, Slot>,
     challenges: Box<dyn ChallengeSource>,
     answered: Option<HeartbeatChallenge>,
@@ -147,6 +170,7 @@ impl Supervisor {
             enrollments,
             quarantine: BTreeMap::new(),
             firmware: BTreeMap::new(),
+            losses: BTreeMap::new(),
             slots: BTreeMap::new(),
             challenges,
             answered: None,
@@ -252,6 +276,7 @@ impl Supervisor {
         let module = enrollment.module;
         self.quarantine.remove(&module);
         self.firmware.remove(&module);
+        self.losses.remove(&module);
         self.enrollments.insert(module, enrollment);
         for slot in self.slots.values_mut() {
             if slot.state == PortState::Refused(PortRefusal::Quarantined(module)) {
@@ -332,8 +357,7 @@ impl Supervisor {
             if let Some(slot) = self.slots.remove(&port) {
                 out.push(Happened::Unplugged(port));
                 if let PortState::Verified(module) = slot.state {
-                    out.push(Happened::Lost { module, port });
-                    self.invalidate(module, now, out);
+                    self.lost(module, port, now, hub, out);
                 }
             }
         }
@@ -370,7 +394,10 @@ impl Supervisor {
     fn take_frames(&mut self, now: Tick, hub: &mut impl ModuleTransport, out: &mut Vec<Happened>) {
         let ports: Vec<HubPort> = self.slots.keys().copied().collect();
         for port in ports {
-            while let Some(bytes) = hub.receive(port) {
+            for _ in 0..MAX_FRAMES_PER_STEP {
+                let Some(bytes) = hub.receive(port) else {
+                    break;
+                };
                 self.take_frame(port, &bytes, now, hub, out);
             }
         }
@@ -395,6 +422,7 @@ impl Supervisor {
             Ok(r) => r.into_claim(),
             Err(error) => {
                 out.push(Happened::FrameDropped { port, error });
+                self.bad_frame(port, now, hub, out);
                 return;
             }
         };
@@ -537,6 +565,66 @@ impl Supervisor {
         self.invalidate(module, now, out);
     }
 
+    /// Marks a verified module lost: its facts are invalidated, and a module
+    /// lost [`MAX_LOSSES`] times within [`LOSS_WINDOW_TICKS`] is
+    /// quarantined.
+    fn lost(
+        &mut self,
+        module: ModuleId,
+        port: HubPort,
+        now: Tick,
+        hub: &mut impl ModuleTransport,
+        out: &mut Vec<Happened>,
+    ) {
+        out.push(Happened::Lost { module, port });
+        self.invalidate(module, now, out);
+        let times = self.losses.entry(module).or_default();
+        times.retain(|t| now.saturating_sub(*t) < LOSS_WINDOW_TICKS);
+        times.push(now);
+        let losses = u32::try_from(times.len()).unwrap_or(u32::MAX);
+        if losses >= MAX_LOSSES {
+            let reason = QuarantineReason::RepeatedLoss { losses };
+            self.quarantine_module(module, reason, port, now, hub, out);
+        }
+    }
+
+    /// Counts a frame the host could not take. Past [`FLOOD_BUDGET`] in one
+    /// poll period, the port's module is quarantined, or the port refused.
+    fn bad_frame(
+        &mut self,
+        port: HubPort,
+        now: Tick,
+        hub: &mut impl ModuleTransport,
+        out: &mut Vec<Happened>,
+    ) {
+        let Some(slot) = self.slots.get_mut(&port) else {
+            return;
+        };
+        if now.saturating_sub(slot.window_start) >= POLL_PERIOD_TICKS {
+            slot.window_start = now;
+            slot.bad_frames = 0;
+        }
+        slot.bad_frames = slot.bad_frames.saturating_add(1);
+        if slot.bad_frames <= FLOOD_BUDGET {
+            return;
+        }
+        let bad_frames = slot.bad_frames;
+        match slot.state {
+            PortState::Verified(module) => {
+                let reason = QuarantineReason::Flooding { bad_frames };
+                self.quarantine_module(module, reason, port, now, hub, out);
+            }
+            PortState::Opening => {
+                slot.link.abandon();
+                slot.deadline = None;
+                let why = PortRefusal::Flooding;
+                slot.state = PortState::Refused(why);
+                out.push(Happened::Refused { port, why });
+            }
+            PortState::Lost | PortState::Refused(_) => {}
+        }
+    }
+
     /// Invalidates, through the ledger, every fact on the bus ports the
     /// module carries, and every fact it measured.
     fn invalidate(&mut self, module: ModuleId, now: Tick, out: &mut Vec<Happened>) {
@@ -590,10 +678,7 @@ impl Supervisor {
                 let was = slot.state;
                 slot.state = PortState::Lost;
                 match was {
-                    PortState::Verified(module) => {
-                        out.push(Happened::Lost { module, port });
-                        self.invalidate(module, now, out);
-                    }
+                    PortState::Verified(module) => self.lost(module, port, now, hub, out),
                     _ => out.push(Happened::IdentifyTimedOut(port)),
                 }
                 continue;

@@ -1,0 +1,17 @@
+[package]
+name = "sawbones-sim-modules"
+description = "PROVISIONAL, test support: simulated Sawbones modules (a DC meter, a comms pod, an interlock controller) that speak sawbones-module-protocol over an in-memory link, with seeded, named fault scenarios. Host side, std, no real time, no threads. Never published."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Signs the simulated modules' identities. The seed is always passed in, so no
+# key lives in this crate; tests keep their fixed seeds under tests/.
+ed25519-dalek = { version = "3.0.0", default-features = false }
+sawbones-module-protocol = { path = "../sawbones-module-protocol", features = ["verify"] }
