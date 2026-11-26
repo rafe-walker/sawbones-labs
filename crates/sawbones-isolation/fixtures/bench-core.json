@@ -15,7 +15,9 @@
     { "id": "module-2", "role": "measuring_module", "must_float": true, "label": "Comms pod ground" },
     { "id": "dut", "label": "Device under test" },
     { "id": "inverter-comms", "label": "Ground of the inverter's comms port" },
-    { "id": "laptop", "label": "Laptop chassis and USB ground" }
+    { "id": "laptop", "label": "Laptop chassis and USB ground" },
+    { "id": "trust-root-supply", "label": "Output negative of the trust root's own 5 V supply" },
+    { "id": "voltage-reference", "label": "Voltage reference ground (output negative)" }
   ],
   "edges": [
     {
@@ -30,7 +32,7 @@
       "note": "Taken as a floating output. Rating assumed. Some 12 V adapters tie output negative to earth: check with a meter."
     },
     { "id": "hub-adapter-plug", "a": "hub-12v-adapter", "b": "hub", "link": { "kind": "bonded" }, "note": "Barrel plug" },
-    { "id": "hub-usb-trust-root", "a": "hub", "b": "trust-root", "link": { "kind": "bonded" }, "note": "USB cable" },
+    { "id": "hub-usb-trust-root", "a": "hub", "b": "trust-root", "link": { "kind": "bonded" }, "note": "USB cable with the power wire cut: ground and data only. The USB ground still bonds the trust root to the hub." },
     { "id": "hub-usb-debug-probe", "a": "hub", "b": "debug-probe", "link": { "kind": "bonded" }, "note": "USB cable" },
     { "id": "hub-usb-logic-analyzer", "a": "hub", "b": "logic-analyzer", "link": { "kind": "bonded" }, "note": "USB cable" },
     { "id": "hub-usb-serial-adapter", "a": "hub", "b": "serial-adapter", "link": { "kind": "bonded" }, "note": "USB cable" },
@@ -62,7 +64,7 @@
     {
       "id": "module-2-to-inverter", "a": "module-2", "b": "inverter-comms",
       "link": { "kind": "bonded" }, "switch": "inverter-connected",
-      "note": "Patch lead and breakout from the comms pod to the inverter's port"
+      "note": "RS-232 tap: the comms pod listens in parallel through a pass-through on the inverter's monitoring port, so it is bonded to the inverter's comms ground while connected."
     },
     {
       "id": "rail-adapter-barrier", "a": "mains-earth", "b": "rail-12v-adapter",
@@ -73,6 +75,36 @@
       "id": "rail-negative", "a": "rail-12v-adapter", "b": "trust-root",
       "link": { "kind": "bonded" },
       "note": "The armed rail's negative is the trust root's ground"
+    },
+    {
+      "id": "trust-root-supply-barrier", "a": "mains-earth", "b": "trust-root-supply",
+      "link": { "kind": "isolated", "rating_volts": 3000 },
+      "note": "The trust root's own 5 V supply. Taken as a floating output. Rating assumed."
+    },
+    {
+      "id": "trust-root-supply-negative", "a": "trust-root-supply", "b": "trust-root",
+      "link": { "kind": "bonded" },
+      "note": "The 5 V supply powers the board directly. The hub cannot power-cycle the trust root."
+    },
+    {
+      "id": "reference-supply-negative", "a": "rail-12v-adapter", "b": "voltage-reference",
+      "link": { "kind": "bonded" },
+      "note": "The reference runs from the armed rail's adapter, so its ground is the rail's negative. Assumed from the parts cross-check: confirm with a meter."
+    },
+    {
+      "id": "reference-to-module-1", "a": "voltage-reference", "b": "module-1",
+      "link": { "kind": "bonded" }, "switch": "reference-in-use",
+      "note": "Two-pole switch: both the reference's output wires are switched, so with the switch open the reference is isolated from module 1. One switched edge stands for the pair."
+    },
+    {
+      "id": "debug-probe-ground-on-module-2", "a": "debug-probe", "b": "module-2",
+      "link": { "kind": "bonded" }, "switch": "debug-probe-on-module-2",
+      "note": "Switched edge, open by design. The probe's ground is the brain's ground: closing it onto a module wired to the inverter defeats the isolator."
+    },
+    {
+      "id": "logic-analyzer-ground-on-module-2", "a": "logic-analyzer", "b": "module-2",
+      "link": { "kind": "bonded" }, "switch": "logic-analyzer-on-module-2",
+      "note": "Switched edge, open by design. The analyzer's ground is the brain's ground: closing it onto a module wired to the inverter defeats the isolator."
     },
     {
       "id": "laptop-ethernet", "a": "laptop", "b": "pi",

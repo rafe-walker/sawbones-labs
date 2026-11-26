@@ -1,6 +1,6 @@
 //! The Bench Core as designed, and the connection plans that must be refused.
 
-use sawbones_isolation::{Edge, Finding, IsolationMap, Report};
+use sawbones_isolation::{Edge, Finding, IsolationMap, Report, Severity};
 
 const BENCH_CORE: &str = include_str!("../fixtures/bench-core.json");
 
@@ -49,7 +49,9 @@ fn as_designed_the_modules_are_isolated_from_the_brain() {
             "rail-12v-adapter",
             "debug-probe",
             "logic-analyzer",
-            "serial-adapter"
+            "serial-adapter",
+            "trust-root-supply",
+            "voltage-reference"
         ]
     );
 
@@ -167,6 +169,93 @@ fn the_debug_probe_ground_wire_to_the_trust_root_is_a_ground_loop() {
             "debug-probe -[hub-usb-debug-probe]- hub -[hub-usb-trust-root]- trust-root".to_owned()
         )]
     );
+    // The loop stays inside the brain's hub domain and touches nothing the
+    // map protects: a warning, and the plan is not refused.
+    let report = plan.check();
+    assert_eq!(report.warnings().count(), 1);
+    assert!(report.is_clean(), "{:?}", report.findings);
+}
+
+#[test]
+fn the_trust_root_runs_from_its_own_supply_and_is_still_bonded_to_the_hub() {
+    let map = bench_core();
+    let path = map.bonded_path("trust-root", "hub").unwrap().unwrap();
+    assert_eq!(path.to_string(), "trust-root -[hub-usb-trust-root]- hub");
+    // The supply negative joins the trust root without making a loop.
+    assert!(map
+        .bonded_path("trust-root-supply", "trust-root")
+        .unwrap()
+        .is_some());
+    assert_eq!(map.check().warnings().count(), 0);
+    // The supply is behind its own barrier, so mains earth is not reached.
+    assert!(map
+        .bonded_path("trust-root-supply", "mains-earth")
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn the_reference_is_isolated_from_module_1_until_its_two_pole_switch_closes() {
+    let map = bench_core();
+    assert!(map
+        .bonded_path("voltage-reference", "module-1")
+        .unwrap()
+        .is_none());
+    assert!(map.check().is_clean());
+
+    // In use, the reference's ground (the rail's negative) is bonded to
+    // module 1, and the checker says so.
+    let in_use = map.with_switch("reference-in-use", true).unwrap();
+    let report = in_use.check();
+    assert!(!report.is_clean());
+    assert!(report.violations().all(|f| f.severity() == Severity::Stop));
+    assert!(report.findings.iter().any(|f| matches!(
+        f,
+        Finding::ModuleNotFloating { module, .. } if module.as_str() == "module-1"
+    )));
+}
+
+#[test]
+fn module_2_is_bonded_to_the_inverter_comms_ground_only_while_connected() {
+    let map = bench_core();
+    let path = map.bonded_path("module-2", "inverter-comms").unwrap();
+    assert_eq!(
+        path.unwrap().to_string(),
+        "module-2 -[module-2-to-inverter]- inverter-comms"
+    );
+    let unplugged = map.with_switch("inverter-connected", false).unwrap();
+    assert!(unplugged
+        .bonded_path("module-2", "inverter-comms")
+        .unwrap()
+        .is_none());
+}
+
+#[test]
+fn the_probe_and_analyzer_grounds_are_stops_on_a_module_wired_to_the_inverter() {
+    for switch in ["debug-probe-on-module-2", "logic-analyzer-on-module-2"] {
+        let plan = bench_core().with_switch(switch, true).unwrap();
+        let report = plan.check();
+        assert!(!report.is_clean(), "{switch}");
+        let broken = report.findings.iter().find(|f| {
+            matches!(f, Finding::IsolationBroken { a, b, .. }
+                if a.as_str() == "module-2" && b.as_str() == "pi")
+        });
+        let broken = broken.expect("module 2 is bonded to the brain");
+        assert_eq!(broken.severity(), Severity::Stop);
+        assert!(report.findings.iter().any(|f| matches!(
+            f,
+            Finding::ModuleNotFloating { module, .. } if module.as_str() == "module-2"
+        )));
+        // The inverter's comms ground comes along into the brain's domain.
+        assert!(plan.bonded_path("inverter-comms", "pi").unwrap().is_some());
+    }
+    // With the inverter unplugged, module 2 is wired to nothing and the
+    // same clip is still caught, because module 2 itself must float.
+    let unplugged = bench_core()
+        .with_switch("inverter-connected", false)
+        .and_then(|m| m.with_switch("debug-probe-on-module-2", true))
+        .unwrap();
+    assert!(!unplugged.check().is_clean());
 }
 
 #[test]
