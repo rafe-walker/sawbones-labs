@@ -277,9 +277,10 @@ how = "The challenge's boot ROM fault was one skipped instruction. For us the ma
 expected = "No single-bit or single-skip fault in the rail-enable decision yields rail on; the enable needs two independent conditions in the output path."
 severity = "medium"
 sources = ["https://www.keysight.com/blogs/en/tech/nwvs/2025/03/26/security-highlight-rp2350-hardware-attacks", "https://pip-assets.raspberrypi.com/categories/1260-security/documents/RP-009377-WP-1-Understanding%20RP2350_s%20security%20features.pdf"]
-status = "gap"
+status = "partial"
 test = "software: proptest that the output drive function maps every non-valid bit pattern of State and Outputs to off (transmute test in a test-only unsafe module); compile with the release profile and test again. bench: none."
 issue = 114
+note = "Landed in #238: the output decision is sawbones-trust-root::permitted, which turns a rail on only if the Outputs from step and the State mode agree; host tests flip each value in turn (sawbones-trust-root tests/permit.rs). Open: out-of-range bit patterns and a release-profile build that keeps the two reads apart."
 
 [[attack]]
 id = "hw-022"
@@ -480,3 +481,17 @@ status = "partial"
 test = "Signed commands (#172) that bind each command to the session and a fresh host value, so a recorded command is useless in any other session; then flip sawbones-sim-modules::replay_across_a_reboot_with_a_weak_session_generator_is_accepted_today to assert the replay is refused."
 issue = 172
 note = "Proven with a sound session generator: every replayed command is dropped (NoSession, then WrongSession after reopening), every replayed reply is refused, and the module stays in its safe state (sawbones-redteam::redteam_hw_036_frames_replayed_across_a_reboot_do_not_run, sawbones-sim-modules::frames_replayed_across_a_reboot_are_dropped_and_the_module_stays_safe). Open: with a repeating session id and a restarted host a recorded command is accepted today, which is pinned by sawbones-sim-modules::replay_across_a_reboot_with_a_weak_session_generator_is_accepted_today. The firmware contract (hardware random session ids) is what stands in the way until #172."
+
+[[attack]]
+id = "hw-037"
+title = "Fault injection (voltage, clock, laser, EM) against the trust root chip"
+category = "physical fault injection"
+target = "trust root microcontroller (RP2350), rail-enable path, watchdog, record store"
+how = "An attacker with the board on a bench cuts or glitches the core or OTP supply, the clock, or fires a laser or electromagnetic pulse at the die, to skip an instruction or corrupt a value so a check passes that should fail, a rail enable stays on, or the watchdog is fed while the logic is wrong. The RP2350 hacking challenge produced published breaks of this kind against the chip's own boot ROM and OTP (E16, E20, E21, E24), and its glitch detectors are off by default, weaker at slow clocks and do not catch all glitches. A chip broken this way also gives up keys held in it."
+expected = "The firmware fails toward off on a single corrupted value, and an external cut that does not depend on the MCU still drops the rail when the MCU is glitched. Nothing is promised against a determined attacker who also defeats the external cut."
+severity = "medium"
+sources = ["https://raspberrypi.com/news/security-through-transparency-rp2350-hacking-challenge-results-are-in", "https://www.keysight.com/blogs/en/tech/nwvs/2025/03/26/security-highlight-rp2350-hardware-attacks", "https://www.ioactive.com/characterizing-the-raspberry-pico-2-fi-countermeasures-part-1/"]
+status = "gap"
+test = "bench: hold a rail on with a voltage glitch rig on the core supply while the loop runs, then confirm the external cut drops the rail within its limit; repeat with the glitch detector armed at its highest sensitivity and record the undetected rate. Record the chip stepping, glitch-detector and brown-out settings, OTP and debug state. Not run as an attack on anyone else's board. software: complement-compare tests for lease and approval checks."
+issue = 144
+note = "Nothing is proven against real glitching: no board exists and the firmware has not been flashed. Built: hardware watchdog fed once per pass and fault paths to off (firmware/trust-root), and a two-read output decision with host tests (sawbones-trust-root tests/permit.rs, see hw-021). Not built: the external cut (#144), the glitch detector and brown-out setting (#114), complement-compare lease and approval checks (#114). See docs/THREAT-MODEL.md section 4a and #238."
