@@ -25,6 +25,27 @@ confidence-threshold = 0.93
 multiple-versions = "warn"
 wildcards = "allow"
 
+# Build scripts run arbitrary code at build time [#201, sup-013]. Only the crates
+# below may have a build.rs. A new one fails `cargo deny check` until someone
+# reviews it and adds it here by name. cargo-deny does not cover proc-macro
+# crates (they have no build.rs): ci/check_build_code.py does, with
+# ci/build-code-allowlist.txt, in .github/workflows/supply-chain.yml.
+[bans.build]
+allow-build-scripts = [
+    { name = "anyhow" },
+    { name = "curve25519-dalek" },
+    { name = "libc" },
+    { name = "proc-macro2" },
+    { name = "quote" },
+    { name = "serde" },
+    { name = "serde_core" },
+    { name = "serde_json" },
+    { name = "thiserror" },
+    { name = "zmij" },
+]
+executables = "deny"
+include-dependencies = true
+
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
