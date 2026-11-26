@@ -23,6 +23,8 @@ sawbones-interlock = { path = "../sawbones-interlock" }
 sawbones-module-protocol = { path = "../sawbones-module-protocol", features = ["verify"] }
 sawbones-policy = { path = "../sawbones-policy" }
 sawbones-reading = { path = "../sawbones-reading" }
+# Register maps (#174): the write map comes from data.
+sawbones-regmap = { path = "../sawbones-regmap" }
 # The supervisor skeleton (#100), driven by the fakes in its own tests/.
 sawbones-isolation = { path = "../sawbones-isolation" }
 sawbones-supervisor = { path = "../sawbones-supervisor" }
