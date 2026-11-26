@@ -11,10 +11,10 @@ The source notes the first 119 cards came from are in [`research/round-6-red-tea
 | Lane | Blocked | Partial | Gap | Total |
 | --- | --- | --- | --- | --- |
 | Agent injection (`agent-injection.toml`) | 4 | 12 | 14 | 30 |
-| Bus (`bus.toml`) | 10 | 7 | 12 | 29 |
+| Bus (`bus.toml`) | 11 | 6 | 12 | 29 |
 | Supply chain (`supply-chain.toml`) | 3 | 4 | 23 | 30 |
 | Interlock hardware (`interlock-hardware.toml`) | 2 | 22 | 6 | 30 |
-| **All lanes** | **19** | **45** | **55** | **119** |
+| **All lanes** | **20** | **44** | **55** | **119** |
 
 <!-- summary:end -->
 

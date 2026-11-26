@@ -472,9 +472,11 @@ dependencies = [
  "ed25519-dalek",
  "sawbones-busguard",
  "sawbones-interlock",
+ "sawbones-isolation",
  "sawbones-module-protocol",
  "sawbones-policy",
  "sawbones-reading",
+ "sawbones-supervisor",
  "serde",
  "serde_json",
  "toml",
@@ -492,6 +494,18 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "sawbones-supervisor"
+version = "0.0.0"
+dependencies = [
+ "ed25519-dalek",
+ "sawbones-interlock",
+ "sawbones-isolation",
+ "sawbones-module-protocol",
+ "sawbones-policy",
+ "sawbones-reading",
 ]
 
 [[package]]

@@ -1,0 +1,23 @@
+[package]
+name = "sawbones-supervisor"
+description = "PROVISIONAL host-side supervisor skeleton for the Sawbones test bench: module registry with hub-port binding and quarantine, link timeouts from passed-in ticks, the interlock heartbeat, the one write path (preflight, classify, confirm) and the isolation check before arming. No hardware I/O. The design is under review."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Host side: identities are verified here.
+sawbones-module-protocol = { path = "../sawbones-module-protocol", features = ["verify"] }
+sawbones-interlock = { path = "../sawbones-interlock" }
+sawbones-policy = { path = "../sawbones-policy" }
+sawbones-isolation = { path = "../sawbones-isolation" }
+
+[dev-dependencies]
+# Fake modules sign identities with fixed seeds kept under tests/, never in src/.
+ed25519-dalek = { version = "3.0.0", default-features = false }
+sawbones-reading = { path = "../sawbones-reading" }
