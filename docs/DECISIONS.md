@@ -60,6 +60,21 @@ Decisions made by the project owner, newest round last. The design document carr
 | Solar Assistant run | The first run of the ingest on the real unit moves to 27 November. |
 | Roadmap | P0 and P1 are cut into numbered stages, P0.1 to P0.8 and P1.1 to P1.7. Each stage is a milestone and ends in a check-in item: what the owner sees working and what he decides. No dates; order comes from what each stage needs first. See `docs/ROADMAP.md`. |
 
+## 26 November 2026, design review round 2 (two of three reviews in)
+
+Tracked in #166. The plugin and store index design itself is written up after the third review.
+
+| Topic | Decision |
+| --- | --- |
+| Plugin reviews | Every agent-written plugin change gets a second, clean-room review before merge: a separate model that sees the diff, the spec and the test results, never the data that triggered the change. The owner's yes is needed only when a change touches permissions or hazard classes. This narrows the earlier merge rule for plugin changes. |
+| Field fixtures | A recording captured in the field can only test that a decoder rejects bad input cleanly. What a frame means comes only from a second instrument or from the owner. |
+| Split-key changes | One pull request may change a decoder or its safety tests, never both. CI enforces it. Changing the safety tests needs the owner's yes. |
+| Device-reported tier | A new trust tier between measured and documented. Numbers a device reports about itself are evidence about itself; they can back a class 2 action only when one of the bench's own instruments agrees. |
+| Too clean to be true | Each module manifest states its sensor's noise floor. A stream quieter than physics allows is flagged as stuck. |
+| Panel shows what it approves | The trusted display shows the action and a short code for the state it was checked against. Any change voids the approval. |
+| Index headline metric | How close a small model gets to a large one using the index. |
+| Plugin logs and reports | Plugins emit structured logs and health counters the agent can read. The agent can spot problems in a plugin and file a report, so plugins and the product improve. See #166 for the shape. |
+
 ## Reversals and corrections
 
 | Was | Now | Why |
