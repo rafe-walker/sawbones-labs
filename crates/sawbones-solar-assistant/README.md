@@ -75,7 +75,7 @@ sa-tap ratio later.jsonl \
 ```json
 {"schema":"sawbones.reading/0-provisional",
  "source_id":"solar_assistant/inverter_1","quantity":"pv_power",
- "value":{"text":"1823","parsed":1823.0},
+ "value":{"text":"1823"},
  "unit":"W","unit_basis":"inferred_from_name",
  "received_at":1782064801001276516,"source_timestamp":null,
  "timestamp_quality":{"kind":"host_receive","uncertainty_ns":5000000000},

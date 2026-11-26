@@ -95,7 +95,7 @@ impl SummaryBuilder {
     pub fn push(&mut self, r: &Reading) {
         let s = &mut self.summary;
         s.readings += 1;
-        let at = r.received_at;
+        let at = r.received_at();
 
         match s.last {
             Some(prev) if at < prev => s.out_of_order += 1,
@@ -114,13 +114,13 @@ impl SummaryBuilder {
             }
         }
 
-        let key = format!("{}/{}", r.source_id, r.quantity);
+        let key = format!("{}/{}", r.source_id(), r.quantity());
         if !s.series.contains_key(&key) && s.series.len() >= MAX_SERIES {
             s.series_not_tracked += 1;
             return;
         }
-        let value = r.value.as_f64();
-        let retained = u64::from(r.timestamp_quality == TimestampQuality::HostReceiveRetained);
+        let value = r.value().as_f64();
+        let retained = u64::from(r.timestamp_quality() == TimestampQuality::HostReceiveRetained);
         match s.series.get_mut(&key) {
             None => {
                 s.series.insert(
@@ -130,7 +130,7 @@ impl SummaryBuilder {
                         retained,
                         min: value,
                         max: value,
-                        unit: r.unit.clone(),
+                        unit: r.unit().cloned(),
                         unit_changed: false,
                         first: at,
                         last: at,
@@ -144,7 +144,7 @@ impl SummaryBuilder {
                 e.retained += retained;
                 e.min = e.min.min(value);
                 e.max = e.max.max(value);
-                e.unit_changed |= e.unit != r.unit;
+                e.unit_changed |= e.unit.as_ref() != r.unit();
                 if at >= e.last {
                     let gap = at.nanos_since(e.last).unsigned_abs();
                     if gap > self.gap_threshold_ns {
@@ -258,7 +258,7 @@ mod tests {
             received_at: UtcNanos::from_unix_nanos(at_s * S),
             retained,
         }) {
-            Outcome::Reading(r) => *r,
+            Outcome::Observation(r) => crate::host_reading(*r),
             other => panic!("{other:?}"),
         }
     }

@@ -1,4 +1,4 @@
-//! A numeric value kept both as the text the source sent and as an `f64`.
+//! A numeric value kept as the exact text the source sent.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -18,51 +18,47 @@ pub enum DecimalValueError {
     /// The string was a decimal number too large to hold in an `f64`.
     #[error("value does not fit a finite f64")]
     NotFinite,
-    /// A serialised value's `parsed` field disagreed with its `text` field.
-    #[error("serialised value text and parsed number disagree")]
-    Mismatch,
 }
 
-/// A number as the source wrote it, plus the same number parsed to `f64`.
+/// A number exactly as the source wrote it.
 ///
-/// The text is kept because it is the evidence: `53.20` and `53.2` parse to
-/// the same double but say different things about the source's resolution.
+/// The text is the value: `53.20` and `53.2` parse to the same double but say
+/// different things about the source's resolution, and a float is not
+/// something that may be hashed or compared across machines. So the
+/// serialised form carries the text and nothing else, for example
+/// `{"text":"53.20"}`. [`DecimalValue::as_f64`] computes a double on demand
+/// for arithmetic; it is never stored or serialised.
 ///
 /// Accepted text is an optional sign, digits with an optional decimal point
 /// (at least one digit somewhere), and an optional exponent: `1823`, `-1550`,
 /// `53.2`, `.5`, `1e3`. Nothing else: no `NaN`, no `inf`, no hex, no digit
-/// separators, no surrounding whitespace. The parsed value is always finite.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// separators, no surrounding whitespace. The text always converts to a
+/// finite `f64`.
+///
+/// On input, unknown fields are ignored, so files written before the float
+/// was dropped (which carried a `parsed` field) still load. The ignored field
+/// is never used.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "DecimalValueWire", into = "DecimalValueWire")]
 pub struct DecimalValue {
     text: String,
-    parsed: f64,
 }
 
 #[derive(Serialize, Deserialize)]
 struct DecimalValueWire {
     text: String,
-    #[serde(default)]
-    parsed: Option<f64>,
 }
 
 impl TryFrom<DecimalValueWire> for DecimalValue {
     type Error = DecimalValueError;
     fn try_from(w: DecimalValueWire) -> Result<Self, Self::Error> {
-        let v = DecimalValue::parse(&w.text)?;
-        match w.parsed {
-            Some(p) if p != v.parsed => Err(DecimalValueError::Mismatch),
-            _ => Ok(v),
-        }
+        DecimalValue::parse(&w.text)
     }
 }
 
 impl From<DecimalValue> for DecimalValueWire {
     fn from(v: DecimalValue) -> Self {
-        DecimalValueWire {
-            text: v.text,
-            parsed: Some(v.parsed),
-        }
+        DecimalValueWire { text: v.text }
     }
 }
 
@@ -86,10 +82,7 @@ impl DecimalValue {
         if !parsed.is_finite() {
             return Err(DecimalValueError::NotFinite);
         }
-        Ok(Self {
-            text: s.to_owned(),
-            parsed,
-        })
+        Ok(Self { text: s.to_owned() })
     }
 
     /// The number exactly as the source wrote it.
@@ -97,9 +90,13 @@ impl DecimalValue {
         &self.text
     }
 
-    /// The number as a finite `f64`.
+    /// The number as a finite `f64`, computed on demand.
+    ///
+    /// For arithmetic only. It is not part of the serialised form and must
+    /// not be hashed.
     pub fn as_f64(&self) -> f64 {
-        self.parsed
+        // `parse` checked that the text converts to a finite double.
+        self.text.parse().unwrap_or(f64::NAN)
     }
 }
 
@@ -193,20 +190,27 @@ mod tests {
     }
 
     #[test]
-    fn json_round_trip_keeps_the_text() {
+    fn json_carries_only_the_text() {
         let v = DecimalValue::parse("53.20").unwrap();
         let json = serde_json::to_string(&v).unwrap();
-        assert_eq!(json, r#"{"text":"53.20","parsed":53.2}"#);
+        assert_eq!(json, r#"{"text":"53.20"}"#);
         let back: DecimalValue = serde_json::from_str(&json).unwrap();
         assert_eq!(back, v);
+        assert_eq!(back.text(), "53.20");
     }
 
     #[test]
-    fn json_with_disagreeing_fields_is_rejected() {
-        assert!(serde_json::from_str::<DecimalValue>(r#"{"text":"53.2","parsed":99.0}"#).is_err());
-        assert!(serde_json::from_str::<DecimalValue>(r#"{"text":"Hybrid","parsed":1.0}"#).is_err());
-        // The parsed field is optional on input; the text is the evidence.
-        let v: DecimalValue = serde_json::from_str(r#"{"text":"7"}"#).unwrap();
+    fn json_with_bad_text_is_rejected() {
+        assert!(serde_json::from_str::<DecimalValue>(r#"{"text":"Hybrid"}"#).is_err());
+        assert!(serde_json::from_str::<DecimalValue>(r#"{"text":"NaN"}"#).is_err());
+        assert!(serde_json::from_str::<DecimalValue>(r#"{}"#).is_err());
+    }
+
+    #[test]
+    fn a_legacy_parsed_field_is_ignored_not_trusted() {
+        let v: DecimalValue = serde_json::from_str(r#"{"text":"7","parsed":99.0}"#).unwrap();
+        assert_eq!(v.text(), "7");
         assert_eq!(v.as_f64(), 7.0);
+        assert_eq!(serde_json::to_string(&v).unwrap(), r#"{"text":"7"}"#);
     }
 }

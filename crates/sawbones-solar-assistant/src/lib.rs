@@ -26,8 +26,9 @@
 //!
 //! ## Trust
 //!
-//! Every reading this crate produces is labelled
-//! [`SOLAR_ASSISTANT_DEFAULT_TRUST`].
+//! The parser builds [`sawbones_reading::Observation`]s, which carry no trust
+//! tier. The host attaches one with [`host_reading`], which labels every
+//! value [`SOLAR_ASSISTANT_DEFAULT_TRUST`].
 
 #![forbid(unsafe_code)]
 
@@ -41,7 +42,7 @@ pub mod summary;
 pub mod topic;
 pub mod units;
 
-use sawbones_reading::Trust;
+use sawbones_reading::{Observation, Reading, Trust};
 
 /// The trust tier given to every value read from Solar Assistant:
 /// [`Trust::Unverified`].
@@ -54,6 +55,15 @@ use sawbones_reading::Trust;
 /// them a higher tier. Do not raise this default to make downstream code
 /// more convenient.
 pub const SOLAR_ASSISTANT_DEFAULT_TRUST: Trust = Trust::Unverified;
+
+/// **Host side.** Turns a parsed observation into a [`Reading`] at
+/// [`SOLAR_ASSISTANT_DEFAULT_TRUST`].
+///
+/// The parser never sets a tier; this is where the host does. It exists so
+/// every host caller of this crate applies the same default.
+pub fn host_reading(observation: Observation) -> Reading {
+    Reading::from_observation_host_only(observation, SOLAR_ASSISTANT_DEFAULT_TRUST)
+}
 
 /// Topic prefix Solar Assistant uses unless the owner changes it.
 pub const DEFAULT_TOPIC_PREFIX: &str = "solar_assistant";

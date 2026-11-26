@@ -242,17 +242,17 @@ fn record_subscribes_receives_reconnects_and_never_sends_a_message() {
         2,
         "text and command messages produce no reading"
     );
-    assert_eq!(readings[0].quantity.as_str(), "pv_power");
-    assert_eq!(readings[0].value.text(), "1823");
-    assert_eq!(readings[0].trust, Trust::Unverified);
-    assert_eq!(readings[0].provenance.broker, format!("127.0.0.1:{port}"));
+    assert_eq!(readings[0].quantity().as_str(), "pv_power");
+    assert_eq!(readings[0].value().text(), "1823");
+    assert_eq!(readings[0].trust(), Trust::Unverified);
+    assert_eq!(readings[0].provenance().broker, format!("127.0.0.1:{port}"));
     assert!(matches!(
-        readings[0].timestamp_quality,
+        readings[0].timestamp_quality(),
         TimestampQuality::HostReceive { .. }
     ));
-    assert_eq!(readings[1].quantity.as_str(), "battery_voltage");
+    assert_eq!(readings[1].quantity().as_str(), "battery_voltage");
     assert_eq!(
-        readings[1].timestamp_quality,
+        readings[1].timestamp_quality(),
         TimestampQuality::HostReceiveRetained
     );
     drain_client_packets(&mut stream, &mut seen);
@@ -269,7 +269,10 @@ fn record_subscribes_receives_reconnects_and_never_sends_a_message() {
         ))
         .unwrap();
     let readings = wait_for_lines(&out, 3);
-    assert_eq!(readings[2].source_id.as_str(), "solar_assistant/inverter_2");
+    assert_eq!(
+        readings[2].source_id().as_str(),
+        "solar_assistant/inverter_2"
+    );
     drain_client_packets(&mut stream, &mut seen);
 
     // The raw log holds every message, including the ones that made no reading.
