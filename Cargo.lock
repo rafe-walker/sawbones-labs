@@ -395,6 +395,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sawbones-bench"
+version = "0.0.0"
+dependencies = [
+ "sawbones-busguard",
+ "sawbones-interlock",
+ "sawbones-module-protocol",
+ "sawbones-policy",
+ "sawbones-reading",
+]
+
+[[package]]
 name = "sawbones-busguard"
 version = "0.0.0"
 dependencies = [
