@@ -33,7 +33,7 @@ class Typosquat(unittest.TestCase):
         self.assertEqual(flagged("sxx"), set())
 
     def test_clean_names_pass(self):
-        self.assertEqual(flagged("blake3", "bytemuck", "ratatui"), set())
+        self.assertEqual(flagged("blake3", "bytemuck", "bytes-utils"), set())
 
     def test_popular_crate_itself_passes(self):
         self.assertEqual(flagged("tokio", "rand"), set())

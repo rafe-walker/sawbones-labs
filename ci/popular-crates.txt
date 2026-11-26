@@ -126,7 +126,6 @@ diesel
 sqlx
 image
 png
-flate2
 miniz_oxide
 zstd
 tar
