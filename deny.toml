@@ -12,6 +12,9 @@ ignore = []
 # Permissive licences only. Add one here deliberately, with a reason.
 allow = [
     "Apache-2.0",
+    # Wasmtime and Cranelift (#173): Apache-2.0 with the LLVM exception, which only
+    # waives attribution for compiled object code. Same terms as Apache-2.0 otherwise.
+    "Apache-2.0 WITH LLVM-exception",
     "MIT",
     "BSD-2-Clause",
     "BSD-3-Clause",
@@ -32,7 +35,16 @@ wildcards = "allow"
 # ci/build-code-allowlist.txt, in .github/workflows/supply-chain.yml.
 [bans.build]
 allow-build-scripts = [
+    # The plugin host (#173) pulls in wasmtime and Cranelift. Their build scripts
+    # (reviewed for the PR): ISLE and x64 assembler code generation into OUT_DIR,
+    # a rustc --version probe (crc32fast, rustix, rustversion, target-lexicon),
+    # `git rev-parse` for a version string (cranelift-codegen), the C helpers
+    # wasmtime compiles with cc, and cfg flags only (the rest).
     { name = "anyhow" },
+    { name = "cranelift-assembler-x64" },
+    { name = "cranelift-codegen" },
+    { name = "cranelift-isle" },
+    { name = "crc32fast" },
     # The trust-root firmware's chip support (#114), reviewed: each build.rs
     # only prints cfg flags (bare-metal asks `rustc -vV` for its version) or
     # copies its linker script (link.x, device.x) into OUT_DIR.
@@ -41,14 +53,24 @@ allow-build-scripts = [
     { name = "cortex-m-macros" },
     { name = "cortex-m-rt" },
     { name = "curve25519-dalek" },
+    { name = "encoding_rs" },
+    { name = "generic-array" },
     { name = "libc" },
+    { name = "libm" },
     { name = "proc-macro2" },
     { name = "quote" },
+    { name = "rustix" },
+    { name = "rustversion" },
     { name = "rp235x-pac" },
     { name = "serde" },
     { name = "serde_core" },
     { name = "serde_json" },
+    { name = "target-lexicon" },
     { name = "thiserror" },
+    { name = "wasmtime" },
+    { name = "wasmtime-internal-core" },
+    { name = "wasmtime-internal-cranelift" },
+    { name = "wasmtime-internal-unwinder" },
     { name = "zmij" },
 ]
 executables = "deny"

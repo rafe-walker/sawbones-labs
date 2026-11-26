@@ -1,0 +1,28 @@
+# A tiny sample decoder plugin (#173), built for wasm32-unknown-unknown in CI
+# and wrapped into a component of the decoder world
+# (crates/sawbones-plugin-host/wit/decoder.wit). No dependencies.
+#
+# It is its own workspace, outside the root one, so the root build never
+# needs the wasm target.
+
+[package]
+name = "sawbones-sample-decoder"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[workspace]
+
+[profile.release]
+panic = "abort"
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+panic = "abort"

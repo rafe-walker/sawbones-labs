@@ -1,0 +1,38 @@
+// The v0 decoder world (#173). PROVISIONAL.
+//
+// A decoder imports nothing: no clock, no randomness, no files, no sockets, no
+// handles. The host gives it one captured frame of bytes and it returns
+// numbers. It cannot name a trust tier, a unit or a quantity in text: a
+// quantity is an index into the manifest the host holds, and a value is an
+// integer mantissa and a power-of-ten exponent. There is no `string`, `char`
+// or `flags` anywhere in a plugin world (lint: sup-003, `wit_worlds_have_no_text`).
+//
+// The host refuses any component with an import, a nested component, a start
+// function or a canonical built-in other than `lift`, and checks the export
+// against this world before running anything.
+
+package sawbones:plugin@0.1.0;
+
+world decoder {
+  /// A number as `mantissa * 10^exponent`. No floats.
+  record decimal {
+    mantissa: s64,
+    exponent: s8,
+  }
+
+  /// One value. `quantity` indexes the manifest's quantity list.
+  record observation {
+    quantity: u16,
+    value: decimal,
+  }
+
+  /// Why a decoder declined a frame.
+  enum decode-fault {
+    malformed,
+    unknown-frame,
+    unsupported,
+  }
+
+  /// Decode one captured frame.
+  export decode: func(frame: list<u8>) -> result<list<observation>, decode-fault>;
+}

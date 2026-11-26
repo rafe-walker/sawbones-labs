@@ -106,7 +106,14 @@ jobs:
       - uses: taiki-e/install-action@18101caa61cb89118e2ee749786f33c6d1f8a8cb # v2.90.9
         with:
           tool: cargo-llvm-cov
+      - name: Build the plugin runner without coverage instrumentation (#173)
+        # The runner is the plugin host's sandboxed child. An instrumented
+        # build tries to write its .profraw at exit, which its seccomp filter
+        # forbids, so it dies with SIGSYS. The host side is still measured.
+        run: cargo build --locked -p sawbones-plugin-host --bin sawbones-plugin-runner
       - name: Measure coverage
+        env:
+          SAWBONES_PLUGIN_RUNNER: ${{ github.workspace }}/target/debug/sawbones-plugin-runner
         run: cargo llvm-cov --workspace --locked --json --summary-only --output-path coverage.json
       - name: Per-crate line coverage table
         run: python3 ci/coverage_summary.py coverage.json >> "$GITHUB_STEP_SUMMARY"
@@ -125,6 +132,30 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Scan the default firmware build for the test-key marker
         run: ci/no_test_keys_in_default_build.sh
+
+  sample-plugin:
+    name: sample plugin built for wasm32 and run in the plugin host (#173)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain and the wasm32 target
+        # The wasm target is added in this job only; rust-toolchain.toml and
+        # every other job stay as they are.
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Build the sample decoder plugin for wasm32-unknown-unknown
+        working-directory: plugins/sample-decoder
+        run: cargo build --release --locked --target wasm32-unknown-unknown
+      - name: Load it in the plugin host and decode frames
+        run: |
+          export SAWBONES_SAMPLE_PLUGIN_CORE="$GITHUB_WORKSPACE/plugins/sample-decoder/target/wasm32-unknown-unknown/release/sawbones_sample_decoder.wasm"
+          export SAWBONES_REQUIRE_SAMPLE_PLUGIN=1
+          cargo test -p sawbones-plugin-host --locked --test sample_plugin
 
   build-artifacts:
     name: no build output committed (#208)

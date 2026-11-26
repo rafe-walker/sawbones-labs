@@ -1,0 +1,30 @@
+[package]
+name = "sawbones-plugin-host"
+description = "PROVISIONAL plugin host v0 for the Sawbones test bench: zero-import WebAssembly components run in their own sandboxed child process, as data-first decoders whose output becomes untrusted observations. The design is under review."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sawbones-reading = { path = "../sawbones-reading" }
+# Data-only decoders (#174), run in process through the same Decoder trait.
+sawbones-regmap = { path = "../sawbones-regmap" }
+thiserror.workspace = true
+wasmparser = { version = "0.263", default-features = false, features = ["std", "component-model"] }
+wasmtime = { version = "51.0.0", default-features = false, features = ["runtime", "cranelift", "component-model", "std"] }
+
+# The child-side sandbox (Linux only for now).
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+rustix = { version = "1", default-features = false, features = ["std", "process"] }
+seccompiler = { version = "0.5", default-features = false }
+
+[dev-dependencies]
+wasm-encoder = { version = "0.263", default-features = false, features = ["std", "component-model"] }
+wat = "1.263"
+
