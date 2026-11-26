@@ -1501,6 +1501,7 @@ mod tests {
             unit: 1,
             signal: signal.clone(),
             register: 1,
+            width: 1,
             class: HazardClass::Class2,
             kind: SettingKind::Config,
             energy_relevant: false,

@@ -117,6 +117,7 @@
 //!     unit: 1,
 //!     signal: signal.clone(),
 //!     register: 0x0020,
+//!     width: 1,
 //!     class: HazardClass::Class3,
 //!     kind: SettingKind::ChargeVoltage,
 //!     energy_relevant: true,
