@@ -2,7 +2,7 @@
 
 Prices and delivery dates as seen on Amazon on 26 November 2026, delivering to southern Arizona. They will move. Every line was added to a private Amazon list from its product page, so the live list is the authority on price.
 
-Total at one of each: **$679.77** for 36 lines. With the four lines that need two: about **$729**. Before tax.
+Total at one of each: **$679.77** for 36 lines. With the four lines that need two: about **$729**. Before tax. The four quantities are set on the Amazon list.
 
 "Skip if you have it" lines come to about $110.
 
