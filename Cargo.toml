@@ -25,3 +25,9 @@ opt-level = 3
 
 [profile.dev.package.sha2]
 opt-level = 3
+
+# The interlock's exhaustive and random safety tests run some ten million
+# steps. Optimise the crate and its tests lightly; overflow checks and debug
+# assertions stay on.
+[profile.dev.package.sawbones-interlock]
+opt-level = 1
