@@ -22,6 +22,7 @@ use sawbones_policy::{
     WriteFunction, WriteMap, WriteValue,
 };
 use sawbones_reading::Trust;
+use std::num::NonZeroU64;
 
 const GUARD: DeviceId = DeviceId(0x203);
 
@@ -240,7 +241,7 @@ fn interlock_lease(target: sawbones_interlock::LeaseTarget) -> (State, Outputs, 
     ];
     let boot = Event::Restart {
         record: Some(FaultRecord::Clear),
-        nonce: 0x203,
+        nonce: NonZeroU64::new(0x203),
     };
     let (mut state, mut last) = step(State::POWER_ON, armed, Some(boot));
     let mut answered: Option<HeartbeatChallenge> = None;

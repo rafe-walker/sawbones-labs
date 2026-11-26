@@ -252,7 +252,7 @@ impl FakeInterlock {
             self.started = true;
             Some(Event::Restart {
                 record: Some(FaultRecord::Clear),
-                nonce: 0x5eed,
+                nonce: NonZeroU64::new(0x5eed),
             })
         };
         let inputs = Inputs {

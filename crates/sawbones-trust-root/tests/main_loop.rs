@@ -7,8 +7,8 @@ mod sim;
 use std::num::NonZeroU64;
 
 use sawbones_interlock::{
-    ActionDigest, FaultReason, FaultRecord, HazardClass, HeartbeatReply, LeaseTarget, Mode, Port,
-    Refusal, HEARTBEAT_PERIOD_TICKS,
+    ActionDigest, FaultReason, FaultRecord, HazardClass, HeartbeatChallenge, HeartbeatReply,
+    LeaseTarget, Mode, Port, Refusal, HEARTBEAT_PERIOD_TICKS,
 };
 use sawbones_trust_root::{record, EventSource, LinkRequest, RecordWrite, TrustRoot};
 use sim::{Op, SimBoard};
@@ -137,6 +137,55 @@ fn a_failed_random_number_generator_leaves_the_bench_off() {
         assert!(!report.rail_a_driven);
     }
     assert_eq!(root.board().pump_toggles(), 0);
+    assert_clean(&root);
+}
+
+/// A board whose random number generator yields nothing restarts with no
+/// nonce, and from there nothing can ever arm: not the arm switch, not a
+/// correct-looking reply to any challenge, not the panel, not the link.
+#[test]
+fn a_board_whose_generator_yields_nothing_can_never_arm() {
+    let mut board = SimBoard::with_record(Some(record::encode(FaultRecord::Clear)));
+    board.nonce = None;
+    let mut root = TrustRoot::new(board);
+    let report = tick(&mut root);
+    assert_eq!(report.event, EventSource::Restart);
+    assert_eq!(root.state().heartbeat.nonce, None);
+    assert_eq!(report.outputs.challenge, None);
+
+    for i in 0..2_000u64 {
+        let b = root.board_mut();
+        // Every pattern of switch, key and button, with a reply that would
+        // answer a challenge derived from a guessable nonce.
+        b.arm_switch_on = i % 4 >= 2;
+        b.key_switch_on = i % 8 >= 4;
+        b.panel_button_pressed = i % 16 >= 12;
+        b.replies.push(HeartbeatChallenge(i).reply());
+        if i % 5 == 0 {
+            b.requests.push(LinkRequest::RequestArm);
+        }
+        if i % 7 == 0 {
+            b.requests.push(LinkRequest::RequestLease {
+                class: HazardClass::Class3,
+                target: TARGET,
+            });
+        }
+        let report = tick(&mut root);
+        assert!(!report.outputs.rail_a && report.outputs.rail_b.is_none());
+        assert!(!report.rail_a_driven && report.rail_b_driven.is_none());
+        assert_eq!(report.outputs.challenge, None);
+        assert!(!root.state().heartbeat.started());
+        assert!(!matches!(root.state().mode, Mode::Armed { .. }), "tick {i}");
+    }
+    assert_eq!(root.board().pump_toggles(), 0);
+    assert_eq!(
+        root.board()
+            .log
+            .iter()
+            .filter(|op| **op == Op::Nonce)
+            .count(),
+        1
+    );
     assert_clean(&root);
 }
 

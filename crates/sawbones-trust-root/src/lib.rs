@@ -14,8 +14,8 @@
 //!   tick reads the persisted [`FaultRecord`] (a record that fails its check
 //!   value is passed on as `None`), takes a nonce from the hardware random
 //!   number generator and makes its one event [`Event::Restart`] with both.
-//!   A board with no working generator gives nonce 0, which leaves the
-//!   heartbeat not started, so nothing can arm.
+//!   A board with no working generator gives no nonce (`None`), which
+//!   leaves the heartbeat not started, so nothing can arm.
 //! - **Outputs come only from [`step`].** Each tick samples the pins, calls
 //!   [`step`] once, and drives the rails only from the [`Outputs`] it
 //!   returned.
@@ -291,7 +291,7 @@ impl<B: Board> TrustRoot<B> {
                 .board
                 .read_record()
                 .and_then(|words| record::decode(&words));
-            let nonce = self.board.hardware_nonce().map_or(0, NonZeroU64::get);
+            let nonce = self.board.hardware_nonce();
             (Some(Event::Restart { record, nonce }), EventSource::Restart)
         } else if panel_press && matches!(self.state.mode, Mode::Faulted(_)) {
             let event = Event::ClearFault {
