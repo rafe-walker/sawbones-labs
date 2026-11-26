@@ -63,3 +63,12 @@ Some notes predate decisions that changed the design. Where a note and [`../docs
 ## Next research pass
 
 The two low-coverage lanes (old vehicles, module standard), an inventory of active assessment tools for owned gear, then price checks on every estimated line before anything is ordered.
+
+## Round 5: parts cross-check
+
+Each part on the Bench Core list checked against datasheets, maker pages and the parts it connects to. Summarised in [docs/bench-core-cross-reference.md](../docs/bench-core-cross-reference.md).
+
+| Note | File | What it found |
+| --- | --- | --- |
+| Brain and build tools | [01-brain-and-build-tools.md](round-5-parts-cross-check/01-brain-and-build-tools.md) | Debug pads exist on the RP2350-Zero. Its 5 V pin is the USB supply with no diode. The adapter plug and the hub jack differ in pin size. The NVMe drive is a boot risk. |
+| Ground truth, modules and comms | [03-ground-truth-modules-comms.md](round-5-parts-cross-check/03-ground-truth-modules-comms.md) | The inverter's monitoring port is RS232, not RS485. 12 V is too low for the reference's 10 V output. One isolation plan for the comms pod. |
