@@ -1,0 +1,23 @@
+[package]
+name = "sawbones-interlock"
+description = "PROVISIONAL interlock state machine for the Sawbones test bench, as a pure function with no hardware in it. The design is under review."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["serde"]
+# Serialize and Deserialize on the public types. The crate is `no_std` either
+# way; turn this off for a build with no dependencies at all.
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true

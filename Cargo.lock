@@ -272,6 +272,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sawbones-interlock"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "sawbones-reading"
 version = "0.0.0"
 dependencies = [
