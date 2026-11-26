@@ -2,3 +2,4 @@
 # One per line: the crate name, then any cargo flags it needs.
 # Add a new no_std crate here and CI proves it still builds for the chip.
 sawbones-interlock --no-default-features
+sawbones-busguard --no-default-features
