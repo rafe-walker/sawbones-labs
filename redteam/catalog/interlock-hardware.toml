@@ -399,3 +399,85 @@ sources = ["https://ez.analog.com/ez-blogs/b/engineerzone-spotlight/posts/an-int
 status = "gap"
 test = "bench: a written fault-injection table (each single fault on each layer, expected detection point) run at acceptance and after any rewiring, and a power-on self-test at arm that exercises the relay, MOSFET and feedback. software: a model that enumerates pairs of component faults and asserts the unsafe set is empty."
 issue = 144
+
+[[attack]]
+id = "hw-031"
+title = "Identify replay ends a module's session on demand"
+category = "replay; denial of service"
+target = "module protocol (session open), module firmware safe state"
+how = "An Identify in session 0 opens a new session and ends the old one, and the module goes to its safe state. Anyone on the link can send one, with any challenge, because the check value is not authentication. Sent again and again, it keeps the module in its safe state and keeps the host's session dead: the bench cannot run, though nothing hazardous happens."
+expected = "The module only ever goes safe, the host's later requests are dropped and never run, the host is never left waiting, and the supervisor notices repeated session loss and stops trusting the link until a person looks."
+severity = "medium"
+sources = ["https://attack.mitre.org/techniques/T0814/", "https://cwe.mitre.org/data/definitions/294.html"]
+status = "partial"
+test = "Authenticated session open: signed commands (#172) so the module refuses an Identify the host did not send. Supervisor test (#100): N session losses in a window raise a fault and quarantine the module; the interlock is told."
+issue = 172
+note = "What the protocol layer guarantees is proven: the replay forces the safe state and nothing else, the host's old session is dropped as WrongSession, and the host reopens and re-verifies (sawbones-redteam::redteam_hw_031_a_replayed_identify_only_forces_a_safe_state, sawbones-sim-modules::a_replayed_identify_ends_the_session_and_forces_the_safe_state). Open: it can still be done at will (#172), and nothing yet counts it (#100)."
+
+[[attack]]
+id = "hw-032"
+title = "A second device answers under an enrolled module id"
+category = "spoofing; impersonation"
+target = "module identity, supervisor registry"
+how = "A device on another hub port, or one swapped in, replies to the host's Identify with the id of a module the bench already trusts. Its own key cannot sign for that id. If it copies the id and capabilities and signs anyway, the signature fails. If it holds the enrolled key, only the hub port and a duplicate-id check can tell it from the real one."
+expected = "An identity that does not verify against the key enrolled for that id is never trusted and gets no command; a duplicate or moved id quarantines the module until a person re-enrolls it."
+severity = "high"
+sources = ["https://attack.mitre.org/techniques/T0856/", "https://cwe.mitre.org/data/definitions/290.html"]
+status = "partial"
+test = "Supervisor registry tests (#100): two ports answering one id, and an id that moves port, quarantine both until re-enrolled. Bench: swap two modules between ports and run the reference check."
+issue = 100
+note = "Proven: a device signing under its own key but naming the enrolled id fails with BadSignature and is sent nothing but another Identify (sawbones-redteam::redteam_hw_032_a_second_device_cannot_answer_under_an_enrolled_id, sawbones-sim-modules::a_module_claiming_another_ones_id_is_never_trusted). The wire-level half of hw-023. Open: hub-port binding and duplicate-id quarantine (#100)."
+
+[[attack]]
+id = "hw-033"
+title = "A module floods the link with frames"
+category = "denial of service; resource exhaustion"
+target = "host link, module link, supervisor"
+how = "A faulty or hostile module (or anything on the line) sends frames faster than the host can read them, some noise and some well-formed replies with made-up session and sequence numbers. Each costs the host a decode. Toward a module, forged frames that name the open session and carry a high sequence number make it drop the host's later requests as replays."
+expected = "No flooded frame is accepted as an answer, none runs as a command, a call gives up at a budget and is never left outstanding, and the supervisor limits and quarantines the noisy module."
+severity = "medium"
+sources = ["https://attack.mitre.org/techniques/T0814/", "https://cwe.mitre.org/data/definitions/400.html"]
+status = "partial"
+test = "Supervisor test (#100): a per-module budget of refused frames per second; over it the module is quarantined and the interlock is told. Signed commands (#172) so forged frames cannot move a module's sequence window."
+issue = 100
+note = "Proven: toward the host every junk frame is refused and the call ends Flooded at its budget; toward the module nothing executes but the host's own commands, and a new session recovers (sawbones-redteam::redteam_hw_033_a_flood_gets_no_frame_accepted_and_the_call_gives_up, sawbones-sim-modules::a_babbling_module_is_refused_frame_by_frame_and_the_call_gives_up, babbling_at_the_module_executes_nothing_and_a_new_session_recovers). The call budget lives in the simulated host, not in the protocol crate. Open: rate limiting and quarantine in the supervisor (#100); the sequence-window wedge needs #172."
+
+[[attack]]
+id = "hw-034"
+title = "Oversized length field in a module frame"
+category = "malformed input; memory safety"
+target = "frame decoder, byte-stream reader"
+how = "The header carries a payload length. A frame that declares more than the bound (just over it, or 65535), with or without a matching check value (anyone can recompute it), tries to make a reader reserve or wait for far more than a frame can hold, or to read past a buffer."
+expected = "Refused as oversized before any body is read, by the host, by the module and by a stream reader that sizes its read from the prefix; never a panic, never an allocation sized by the field."
+severity = "medium"
+sources = ["https://cwe.mitre.org/data/definitions/130.html", "https://cwe.mitre.org/data/definitions/789.html"]
+status = "blocked"
+test = "sawbones-redteam::redteam_hw_034_an_oversized_length_is_refused_everywhere + sawbones-sim-modules::an_oversized_length_field_is_refused_by_both_ends_and_the_stream_reader"
+
+[[attack]]
+id = "hw-035"
+title = "Stuck line or silent module"
+category = "denial of service; blocked reporting message"
+target = "host link timeout, module link timeout, supervisor"
+how = "The line sticks at one level, or the module stops answering, or only its replies are lost. The host gets no answer to anything. A command the module already ran is unconfirmed; a module that cannot hear the host keeps its last outputs until something tells it to stop."
+expected = "Every call times out and nothing is left outstanding; a module that hears nothing for its link timeout ends its session and goes safe by itself; the supervisor declares a silent module lost, drives the interlock and reads the state back before it retries a command that is not idempotent."
+severity = "high"
+sources = ["https://attack.mitre.org/techniques/T0804/", "https://attack.mitre.org/techniques/T0803/"]
+status = "partial"
+test = "Supervisor test (#100): N consecutive timeouts mark the module lost, raise a fault to the interlock and stop its readings counting as fresh; after a lost reply to a command that is not idempotent the supervisor reads the state back."
+issue = 100
+note = "Proven at the protocol and simulated-firmware layer: host calls end in a timeout and are abandoned, late replies are refused, a stuck-high line is refused as BadMagic every tick, and a module with no accepted request for its link timeout ends its session and goes safe (sawbones-redteam::redteam_hw_035_a_stuck_line_times_out_and_the_module_goes_safe_by_itself, sawbones-sim-modules::a_silent_line_times_out_every_call_and_the_module_goes_safe_on_its_own). The link timeout is firmware's half of the contract; the crate has no clock. Open: the host timeout policy and loss handling (#100)."
+
+[[attack]]
+id = "hw-036"
+title = "Replay of module frames across a module reboot"
+category = "replay"
+target = "module protocol (sessions, sequence numbers), module firmware session ids"
+how = "Frames recorded before a module reboots are sent again afterwards, both ways: old commands to the module, old replies to the host. A module whose session ids repeat after a reboot (a weak or unseeded generator) paired with a host that restarted its sequence numbers would take a recorded command into the new session."
+expected = "Old commands name a dead session and are dropped, old replies name a session the host no longer has and are refused, and a command cannot be carried into a new session by anyone who recorded the old one."
+severity = "medium"
+sources = ["https://cwe.mitre.org/data/definitions/294.html", "https://attack.mitre.org/techniques/T0830/"]
+status = "partial"
+test = "Signed commands (#172) that bind each command to the session and a fresh host value, so a recorded command is useless in any other session; then flip sawbones-sim-modules::replay_across_a_reboot_with_a_weak_session_generator_is_accepted_today to assert the replay is refused."
+issue = 172
+note = "Proven with a sound session generator: every replayed command is dropped (NoSession, then WrongSession after reopening), every replayed reply is refused, and the module stays in its safe state (sawbones-redteam::redteam_hw_036_frames_replayed_across_a_reboot_do_not_run, sawbones-sim-modules::frames_replayed_across_a_reboot_are_dropped_and_the_module_stays_safe). Open: with a repeating session id and a restarted host a recorded command is accepted today, which is pinned by sawbones-sim-modules::replay_across_a_reboot_with_a_weak_session_generator_is_accepted_today. The firmware contract (hardware random session ids) is what stands in the way until #172."

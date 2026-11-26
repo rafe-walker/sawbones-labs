@@ -23,3 +23,4 @@ sawbones-interlock = { path = "../sawbones-interlock" }
 sawbones-module-protocol = { path = "../sawbones-module-protocol", features = ["verify"] }
 sawbones-policy = { path = "../sawbones-policy" }
 sawbones-reading = { path = "../sawbones-reading" }
+sawbones-sim-modules = { path = "../sawbones-sim-modules" }
