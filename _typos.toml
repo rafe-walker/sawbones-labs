@@ -35,6 +35,7 @@ publically = "publically"
 managment = "managment"
 suh = "suh"                # pronunciation of saguaro
 leafs = "leafs"
+flate = "flate"            # flate2 crate name (ci/popular-crates.txt)
 
 [files]
 extend-exclude = ["Cargo.lock", "target/", "*.svg"]
