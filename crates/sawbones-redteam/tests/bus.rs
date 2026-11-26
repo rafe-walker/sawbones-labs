@@ -497,7 +497,7 @@ fn redteam_bus_015_both_words_of_a_two_register_signal_belong_to_it_and_a_shift_
 }
 
 #[test]
-fn redteam_bus_017_every_write_entry_from_a_register_map_has_a_range_and_a_class_at_least_the_policys(
+fn redteam_bus_017_every_write_entry_from_a_register_map_has_a_range_and_a_class_at_least_the_policy_floor(
 ) {
     use sawbones_regmap::{MapError, RegisterMap};
 
