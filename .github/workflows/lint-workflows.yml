@@ -1,0 +1,30 @@
+name: Lint workflows
+
+on:
+  push:
+    paths: [".github/**"]
+  pull_request:
+    paths: [".github/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-workflows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install zizmor
+        run: python3 -m pip install --user zizmor==1.33.1
+      - name: Audit workflows (medium and above fail the job)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ~/.local/bin/zizmor --min-severity medium --format plain .github/workflows/
