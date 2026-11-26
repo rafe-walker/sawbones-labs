@@ -103,6 +103,9 @@ pub enum RefusalReason {
         /// The entry's tier.
         trust: Trust,
     },
+    /// The written value is outside the entry's allowed range, or is a
+    /// different type than the range.
+    ValueOutOfRange,
     /// The request transmits on a port with no mastership fact.
     NoMastershipFact,
     /// The port's mastership fact is below [`Trust::OperatorAttested`], so it
@@ -212,7 +215,13 @@ impl Decision {
 ///   operator-attested, or another master active, it is refused.
 /// - **Class 4** is refused. Nothing in the facts can make it otherwise.
 ///
-/// Context only ever raises a class. The value of a write plays no part.
+/// - **Value limits**: if the entry has a [`crate::ValueRange`] and the
+///   written value is outside it (or of another type), the write is refused
+///   with [`RefusalReason::ValueOutOfRange`]. An entry with no range accepts
+///   any value. Class 4 is still reported first.
+///
+/// Context only ever raises a class. The value of a write never changes the
+/// class; it can only make the write refused.
 pub fn classify(request: &EffectRequest, writes: &WriteMap, buses: &BusFacts) -> Decision {
     let floor = match request {
         EffectRequest::BusListen(_) => Floor(HazardClass::Class0),
@@ -223,6 +232,16 @@ pub fn classify(request: &EffectRequest, writes: &WriteMap, buses: &BusFacts) ->
             };
             if !actionable(entry.trust) {
                 return Decision::refused(RefusalReason::EntryNotAttested { trust: entry.trust });
+            }
+            if let Some(range) = entry.range {
+                if matches!(entry.class, HazardClass::Class4)
+                    || matches!(entry.kind.minimum_class(), HazardClass::Class4)
+                {
+                    return Decision::refused(RefusalReason::ClassNeverPermitted);
+                }
+                if !range.contains(w.value) {
+                    return Decision::refused(RefusalReason::ValueOutOfRange);
+                }
             }
             let mut floor = Floor(entry.class).raise(entry.kind.minimum_class());
             if entry.energy_relevant {
