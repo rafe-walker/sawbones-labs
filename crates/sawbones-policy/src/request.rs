@@ -42,7 +42,7 @@ pub const MAX_POLICY_IDENT_BYTES: usize = 64;
 /// is a legal identifier. That is safe because the class depends on an
 /// identifier only through an exact lookup in the write map, so an
 /// identifier the write map does not list is refused as unknown.
-fn validate_policy_ident(s: &str) -> Result<(), PolicyIdentError> {
+pub(crate) fn validate_policy_ident(s: &str) -> Result<(), PolicyIdentError> {
     let bytes = s.as_bytes();
     let Some(first) = bytes.first() else {
         return Err(PolicyIdentError::Empty);
