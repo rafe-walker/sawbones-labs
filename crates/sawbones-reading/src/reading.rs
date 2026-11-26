@@ -12,6 +12,19 @@ pub const READING_SCHEMA: &str = "sawbones.reading/0-provisional";
 ///
 /// **Provisional.** Field names, tiers and the JSON shape are all subject to
 /// the design review.
+///
+/// # Canonical encoding for hashing
+///
+/// Anything that hashes or signs a reading hashes [`Reading::canonical_json`]
+/// and nothing else. That is the compact `serde_json` form of this type:
+/// UTF-8, no whitespace, fields in the order they are declared below, enum
+/// variants as `snake_case` strings, timestamps as integer nanoseconds, and
+/// values as their exact decimal text (see [`DecimalValue`]). There is no
+/// floating-point number anywhere in it, because a float can print
+/// differently on different machines and so cannot be hashed. Adding a field
+/// or reordering the fields changes every hash, so it is a schema change and
+/// must bump [`READING_SCHEMA`]. The golden test in this file pins the exact
+/// bytes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Reading {
     /// Schema label; [`READING_SCHEMA`] for readings made by this version.
@@ -21,7 +34,7 @@ pub struct Reading {
     pub source_id: Ident,
     /// What was measured, as the source names it, for example `pv_power`.
     pub quantity: Ident,
-    /// The value, as text and as a finite `f64`.
+    /// The value, as the exact decimal text the source sent.
     pub value: DecimalValue,
     /// The unit, if one is known. `None` means "not known", never "none".
     pub unit: Option<Unit>,
@@ -37,6 +50,16 @@ pub struct Reading {
     pub trust: Trust,
     /// The exact transport, endpoint, address and raw bytes behind the value.
     pub provenance: Provenance,
+}
+
+impl Reading {
+    /// The canonical encoding of this reading, for hashing. See the type
+    /// documentation for exactly what that means.
+    pub fn canonical_json(&self) -> String {
+        // Every field is a string, integer, bool, enum or option of those, so
+        // serialisation cannot fail.
+        serde_json::to_string(self).unwrap_or_default()
+    }
 }
 
 /// How a reading's unit was arrived at.
@@ -158,6 +181,46 @@ mod tests {
         assert!(!json.contains('\n'), "one reading must fit one JSON line");
         let back: Reading = serde_json::from_str(&json).unwrap();
         assert_eq!(back, r);
+    }
+
+    /// The canonical encoding, byte for byte. If this fails, the hashed form
+    /// changed: bump [`READING_SCHEMA`] and update the string deliberately.
+    #[test]
+    fn canonical_json_is_pinned_and_has_no_float() {
+        let r = sample();
+        let expected = concat!(
+            r#"{"schema":"sawbones.reading/0-provisional","#,
+            r#""source_id":"solar_assistant/inverter_1","#,
+            r#""quantity":"pv_power","#,
+            r#""value":{"text":"1823"},"#,
+            r#""unit":"W","#,
+            r#""unit_basis":"inferred_from_name","#,
+            r#""received_at":1795631400000000000,"#,
+            r#""source_timestamp":null,"#,
+            r#""timestamp_quality":{"kind":"host_receive","uncertainty_ns":5000000000},"#,
+            r#""trust":"unverified","#,
+            r#""provenance":{"transport":"mqtt","#,
+            r#""broker":"solar-assistant.local:1883","#,
+            r#""topic":{"untrusted":"solar_assistant/inverter_1/pv_power/state","truncated":false},"#,
+            r#""raw_payload":{"untrusted":"1823","truncated":false},"#,
+            r#""retained":false}}"#,
+        );
+        assert_eq!(r.canonical_json(), expected);
+
+        // Structural check, so a float added anywhere fails even if the
+        // golden string above is regenerated carelessly.
+        fn assert_no_float(v: &serde_json::Value) {
+            match v {
+                serde_json::Value::Number(n) => {
+                    assert!(!n.is_f64(), "float in canonical encoding: {n}");
+                }
+                serde_json::Value::Array(a) => a.iter().for_each(assert_no_float),
+                serde_json::Value::Object(o) => o.values().for_each(assert_no_float),
+                _ => {}
+            }
+        }
+        assert_no_float(&serde_json::from_str(&r.canonical_json()).unwrap());
+        assert!(r.canonical_json().find("parsed").is_none());
     }
 
     #[test]
