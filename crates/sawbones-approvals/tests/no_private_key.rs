@@ -3,7 +3,7 @@
 //! Every test seed starts with one marker. This test checks the source: the
 //! marker appears only in `src/test_keys.rs`, that module is compiled only
 //! with the `test-keys` feature, and the feature is not on by default. The CI
-//! job `no_std builds` checks the output: it builds the crate without the
+//! job `test-keys` checks the output: it builds the crate without the
 //! feature for the firmware target and fails if the marker is in any
 //! artifact, after checking that a build with the feature does contain it.
 

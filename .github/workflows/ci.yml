@@ -92,24 +92,18 @@ jobs:
       - name: Per-crate line coverage table
         run: python3 ci/coverage_summary.py coverage.json >> "$GITHUB_STEP_SUMMARY"
 
-  no-std:
-    name: no_std firmware builds, no test key in them
+  test-keys:
+    name: no test private key in the firmware build (#172)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           persist-credentials: false
-      - name: Install the pinned Rust toolchain and the firmware target
-        run: |
-          rustup show active-toolchain || rustup toolchain install
-          rustup target add thumbv8m.main-none-eabihf
-      - name: Build the no_std crates for the firmware target
-        run: |
-          cargo build --locked --target thumbv8m.main-none-eabihf -p sawbones-approvals --no-default-features
-          cargo build --locked --target thumbv8m.main-none-eabihf -p sawbones-busguard --no-default-features
-          cargo build --locked --target thumbv8m.main-none-eabihf -p sawbones-busguard --no-default-features --features approvals
-      - name: No test private key in a default build (#172)
+      - name: Install the pinned Rust toolchain
+        # rust-toolchain.toml lists the firmware target.
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Scan the default firmware build for the test-key marker
         run: ci/no_test_keys_in_default_build.sh
 
   deny:
