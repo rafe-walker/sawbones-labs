@@ -48,6 +48,30 @@ impl fmt::Display for Path {
     }
 }
 
+/// How seriously a [`Finding`] should be taken.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Severity {
+    /// Information for the operator, such as what is bonded to mains earth.
+    Info,
+    /// Worth a look, but it breaks no declared rule: a ground loop entirely
+    /// inside a domain that holds nothing the map protects.
+    Warn,
+    /// A declared rule is broken. A connection plan with one must not go
+    /// ahead.
+    Stop,
+}
+
+impl fmt::Display for Severity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Info => "note",
+            Self::Warn => "WARN",
+            Self::Stop => "STOP",
+        })
+    }
+}
+
 /// One thing the checker found.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "finding", rename_all = "snake_case")]
@@ -73,6 +97,10 @@ pub enum Finding {
         /// Another bonded path from `a` to `b` that shares no edge with
         /// `first`.
         second: Path,
+        /// [`Severity::Stop`] if the loop touches mains earth, a brain, a
+        /// module that must float, or a node named in an isolation rule;
+        /// otherwise [`Severity::Warn`].
+        severity: Severity,
     },
     /// A barrier is rated below the voltage difference declared across it.
     /// Reported whether or not the barrier's switch is closed.
@@ -102,13 +130,32 @@ pub enum Finding {
         /// The shortest bonded path from the module to the brain.
         path: Path,
     },
+    /// A bus has two or more active masters.
+    BusMastership {
+        /// The bus.
+        bus: NodeId,
+        /// Every active master, in declaration order.
+        masters: Vec<NodeId>,
+    },
 }
 
 impl Finding {
-    /// Whether this finding should stop a connection plan. Only
-    /// [`Finding::EarthedDomain`] is not a violation.
+    /// How seriously to take this finding.
+    pub fn severity(&self) -> Severity {
+        match self {
+            Self::EarthedDomain { .. } => Severity::Info,
+            Self::GroundLoop { severity, .. } => *severity,
+            Self::IsolationBroken { .. }
+            | Self::UnderratedBarrier { .. }
+            | Self::ModuleNotFloating { .. }
+            | Self::BusMastership { .. } => Severity::Stop,
+        }
+    }
+
+    /// Whether this finding should stop a connection plan: its severity is
+    /// [`Severity::Stop`].
     pub fn is_violation(&self) -> bool {
-        !matches!(self, Self::EarthedDomain { .. })
+        self.severity() == Severity::Stop
     }
 }
 
@@ -123,6 +170,7 @@ impl fmt::Display for Finding {
                 b,
                 first,
                 second,
+                ..
             } => write!(f, "ground loop between {a} and {b}: {first} and {second}"),
             Self::UnderratedBarrier {
                 edge,
@@ -144,6 +192,10 @@ impl fmt::Display for Finding {
                 brain,
                 path,
             } => write!(f, "{module} must float but is bonded to {brain}: {path}"),
+            Self::BusMastership { bus, masters } => {
+                write!(f, "bus {bus} has {} masters:", masters.len())?;
+                masters.iter().try_for_each(|m| write!(f, " {m}"))
+            }
         }
     }
 }
@@ -159,9 +211,17 @@ pub struct Report {
 }
 
 impl Report {
-    /// The findings that should stop a connection plan.
+    /// The findings that should stop a connection plan: those with
+    /// [`Severity::Stop`].
     pub fn violations(&self) -> impl Iterator<Item = &Finding> {
         self.findings.iter().filter(|f| f.is_violation())
+    }
+
+    /// The findings with [`Severity::Warn`].
+    pub fn warnings(&self) -> impl Iterator<Item = &Finding> {
+        self.findings
+            .iter()
+            .filter(|f| f.severity() == Severity::Warn)
     }
 
     /// Whether there are no violations.
@@ -312,18 +372,33 @@ impl IsolationMap {
                 continue;
             };
             match bonds.path(a, b, |other| kept[other]) {
-                Some(second) => findings.push(Finding::GroundLoop {
-                    a: edge.a.clone(),
-                    b: edge.b.clone(),
-                    first: Path {
+                Some(second) => {
+                    let protected = |n: &NodeId| {
+                        let node = &spec.nodes[self.index(n).unwrap_or(0)];
+                        matches!(node.role, Role::MainsEarth | Role::Brain)
+                            || node.must_float
+                            || spec.must_be_isolated.iter().any(|r| &r.a == n || &r.b == n)
+                    };
+                    let first = Path {
                         start: edge.a.clone(),
                         steps: vec![Step {
                             via: edge.id.clone(),
                             to: edge.b.clone(),
                         }],
-                    },
-                    second,
-                }),
+                    };
+                    let severity = if second.nodes().chain(first.nodes()).any(protected) {
+                        Severity::Stop
+                    } else {
+                        Severity::Warn
+                    };
+                    findings.push(Finding::GroundLoop {
+                        a: edge.a.clone(),
+                        b: edge.b.clone(),
+                        first,
+                        second,
+                        severity,
+                    });
+                }
                 None => kept[e] = true,
             }
         }
@@ -375,6 +450,30 @@ impl IsolationMap {
                         });
                     }
                 }
+            }
+        }
+
+        // 6. A bus with two active masters.
+        let mut seen: Vec<&NodeId> = Vec::new();
+        for claim in &spec.bus_masters {
+            if seen.contains(&&claim.bus) {
+                continue;
+            }
+            seen.push(&claim.bus);
+            let masters: Vec<NodeId> = spec
+                .bus_masters
+                .iter()
+                .filter(|c| c.bus == claim.bus && self.is_claim_active(c))
+                .map(|c| c.master.clone())
+                .collect();
+            let mut distinct = masters.clone();
+            distinct.sort();
+            distinct.dedup();
+            if distinct.len() > 1 {
+                findings.push(Finding::BusMastership {
+                    bus: claim.bus.clone(),
+                    masters,
+                });
             }
         }
 

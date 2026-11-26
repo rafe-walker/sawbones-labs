@@ -4,18 +4,71 @@ use std::fmt;
 
 use sawbones_reading::Ident;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 /// Domain label at the start of every [`EffectRequest::canonical_bytes`]
 /// encoding. It says "provisional" on purpose: a change to the encoding
 /// changes every digest, so it must bump this label.
 pub const ACTION_ENCODING: &str = "sawbones.policy.action/0-provisional";
 
+/// Why a string was rejected as a policy identifier ([`PortId`] or
+/// [`SignalId`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum PolicyIdentError {
+    /// The string was empty.
+    #[error("policy identifier is empty")]
+    Empty,
+    /// The string was longer than [`MAX_POLICY_IDENT_BYTES`].
+    #[error("policy identifier is longer than {MAX_POLICY_IDENT_BYTES} bytes")]
+    TooLong,
+    /// The string did not start with a lower-case ASCII letter.
+    #[error("policy identifier must start with a lower-case ASCII letter")]
+    BadStart,
+    /// The string held a character outside `a-z 0-9 _ -`.
+    #[error("policy identifier contains a character outside a-z 0-9 _ -")]
+    BadCharacter,
+}
+
+/// Longest policy identifier, in bytes.
+pub const MAX_POLICY_IDENT_BYTES: usize = 64;
+
+/// The one rule every policy identifier passes: 1 to
+/// [`MAX_POLICY_IDENT_BYTES`] bytes, a lower-case ASCII letter first, then
+/// only `a-z 0-9 _ -`. No spaces, punctuation, upper case, `/`, `.` or
+/// non-ASCII text, so an identifier cannot carry a sentence, markup or a
+/// control character.
+///
+/// The rule limits shape, not meaning: a string like `ignore_previous_rules`
+/// is a legal identifier. That is safe because the class depends on an
+/// identifier only through an exact lookup in the write map, so an
+/// identifier the write map does not list is refused as unknown.
+fn validate_policy_ident(s: &str) -> Result<(), PolicyIdentError> {
+    let bytes = s.as_bytes();
+    let Some(first) = bytes.first() else {
+        return Err(PolicyIdentError::Empty);
+    };
+    if bytes.len() > MAX_POLICY_IDENT_BYTES {
+        return Err(PolicyIdentError::TooLong);
+    }
+    if !first.is_ascii_lowercase() {
+        return Err(PolicyIdentError::BadStart);
+    }
+    if !bytes
+        .iter()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'-'))
+    {
+        return Err(PolicyIdentError::BadCharacter);
+    }
+    Ok(())
+}
+
 /// A bus port or a directly attached device the bench talks to, for example
 /// `rs485-1`.
 ///
-/// It wraps an [`Ident`], so it is a short label with no free text in it,
-/// and it is built only from an `Ident`. There is no conversion from
-/// [`sawbones_reading::WorldText`]:
+/// It is built only from a string that passes the policy identifier rule
+/// (see [`PortId::parse`]), so it is a short label with no free text in it.
+/// There is no conversion from [`sawbones_reading::WorldText`], and even
+/// text copied out of one through `as_untrusted_str` must pass the rule:
 ///
 /// ```compile_fail
 /// use sawbones_policy::PortId;
@@ -23,32 +76,54 @@ pub const ACTION_ENCODING: &str = "sawbones.policy.action/0-provisional";
 /// let port = PortId::new(WorldText::new("rs485-1", 64)); // error: expected `Ident`
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct PortId(Ident);
+#[serde(try_from = "String", into = "String")]
+pub struct PortId(String);
 
 impl PortId {
-    /// Wraps an identifier as a port id.
-    pub fn new(id: Ident) -> Self {
-        Self(id)
+    /// Wraps an identifier as a port id, applying the policy identifier
+    /// rule on top of the [`Ident`] rule.
+    pub fn new(id: Ident) -> Result<Self, PolicyIdentError> {
+        Self::parse(id.as_str())
+    }
+
+    /// Validates a string against the policy identifier rule: 1 to 64
+    /// bytes, a lower-case ASCII letter first, then only `a-z 0-9 _ -`.
+    pub fn parse(s: &str) -> Result<Self, PolicyIdentError> {
+        validate_policy_ident(s)?;
+        Ok(Self(s.to_owned()))
     }
 
     /// The port id as a string slice.
     pub fn as_str(&self) -> &str {
-        self.0.as_str()
+        &self.0
     }
 }
 
 impl fmt::Display for PortId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+        f.write_str(&self.0)
+    }
+}
+
+impl TryFrom<String> for PortId {
+    type Error = PolicyIdentError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        validate_policy_ident(&s)?;
+        Ok(Self(s))
+    }
+}
+
+impl From<PortId> for String {
+    fn from(p: PortId) -> Self {
+        p.0
     }
 }
 
 /// A named signal on a port: a register, coil or setting as the write map
 /// names it, for example `battery_low_cutoff`. Never a raw address.
 ///
-/// Like [`PortId`], it wraps an [`Ident`] and cannot be built from
-/// [`sawbones_reading::WorldText`]:
+/// Like [`PortId`], it is built only from a string that passes the policy
+/// identifier rule and cannot be built from [`sawbones_reading::WorldText`]:
 ///
 /// ```compile_fail
 /// use sawbones_policy::SignalId;
@@ -56,24 +131,46 @@ impl fmt::Display for PortId {
 /// let signal = SignalId::new(WorldText::new("charge_voltage", 64)); // error
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct SignalId(Ident);
+#[serde(try_from = "String", into = "String")]
+pub struct SignalId(String);
 
 impl SignalId {
-    /// Wraps an identifier as a signal name.
-    pub fn new(id: Ident) -> Self {
-        Self(id)
+    /// Wraps an identifier as a signal name, applying the policy identifier
+    /// rule on top of the [`Ident`] rule.
+    pub fn new(id: Ident) -> Result<Self, PolicyIdentError> {
+        Self::parse(id.as_str())
+    }
+
+    /// Validates a string against the policy identifier rule: 1 to 64
+    /// bytes, a lower-case ASCII letter first, then only `a-z 0-9 _ -`.
+    pub fn parse(s: &str) -> Result<Self, PolicyIdentError> {
+        validate_policy_ident(s)?;
+        Ok(Self(s.to_owned()))
     }
 
     /// The signal name as a string slice.
     pub fn as_str(&self) -> &str {
-        self.0.as_str()
+        &self.0
     }
 }
 
 impl fmt::Display for SignalId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+        f.write_str(&self.0)
+    }
+}
+
+impl TryFrom<String> for SignalId {
+    type Error = PolicyIdentError;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        validate_policy_ident(&s)?;
+        Ok(Self(s))
+    }
+}
+
+impl From<SignalId> for String {
+    fn from(p: SignalId) -> Self {
+        p.0
     }
 }
 
@@ -81,7 +178,8 @@ impl fmt::Display for SignalId {
 /// and no float: a value is something the digest can encode exactly.
 ///
 /// The value plays no part in the class. Whether a value is in range for its
-/// signal is not decided here.
+/// signal is the write-map entry's [`crate::ValueRange`], checked by
+/// [`crate::classify`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WriteValue {

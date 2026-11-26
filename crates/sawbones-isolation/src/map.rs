@@ -63,6 +63,9 @@ pub enum Role {
     Brain,
     /// A module that measures something outside the bench.
     MeasuringModule,
+    /// A shared bus (I2C, SPI, a serial line) rather than a ground. Masters
+    /// are declared with [`BusMaster`]; see [`IsolationMap::check`].
+    Bus,
     /// Anything else with a reference potential.
     #[default]
     Other,
@@ -220,6 +223,21 @@ pub struct IsolationRule {
     pub b: NodeId,
 }
 
+/// A declaration that `master` drives `bus` as its master, for as long as
+/// `switch` is closed (always, if there is no switch). A bus with two active
+/// masters is a [`Finding::BusMastership`](crate::Finding::BusMastership).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BusMaster {
+    /// The bus: a node with [`Role::Bus`].
+    pub bus: NodeId,
+    /// The node that masters it.
+    pub master: NodeId,
+    /// The switch that must be closed for this node to be a master.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub switch: Option<SwitchId>,
+}
+
 /// The plain description of a bench: what a JSON map file holds, and what the
 /// builder methods assemble. Nothing in it has been checked yet; call
 /// [`MapSpec::build`] to get an [`IsolationMap`].
@@ -238,6 +256,9 @@ pub struct MapSpec {
     /// The switches that are closed. Every other switch is open.
     #[serde(default)]
     pub closed_switches: BTreeSet<SwitchId>,
+    /// Who masters each bus.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bus_masters: Vec<BusMaster>,
 }
 
 impl Default for MapSpec {
@@ -255,6 +276,7 @@ impl MapSpec {
             edges: Vec::new(),
             must_be_isolated: Vec::new(),
             closed_switches: BTreeSet::new(),
+            bus_masters: Vec::new(),
         }
     }
 
@@ -278,6 +300,28 @@ impl MapSpec {
         self.must_be_isolated.push(IsolationRule {
             a: a.into(),
             b: b.into(),
+        });
+        self
+    }
+
+    /// Declares `master` as a master of `bus`, always.
+    #[must_use]
+    pub fn bus_master(mut self, bus: &str, master: &str) -> Self {
+        self.bus_masters.push(BusMaster {
+            bus: bus.into(),
+            master: master.into(),
+            switch: None,
+        });
+        self
+    }
+
+    /// Declares `master` as a master of `bus` only while `switch` is closed.
+    #[must_use]
+    pub fn bus_master_switched(mut self, bus: &str, master: &str, switch: &str) -> Self {
+        self.bus_masters.push(BusMaster {
+            bus: bus.into(),
+            master: master.into(),
+            switch: Some(switch.into()),
         });
         self
     }
@@ -332,6 +376,17 @@ pub enum MapError {
     /// `must_float` is set on a node that is not a measuring module.
     #[error("node {0} is marked must_float but is not a measuring module")]
     MustFloatNotModule(NodeId),
+    /// A bus master claim names a node that is not a [`Role::Bus`] node.
+    #[error("node {0} is named as a bus but is not a bus node")]
+    NotABus(NodeId),
+    /// The same master is declared twice on one bus.
+    #[error("{master} is declared a master of {bus} twice")]
+    DuplicateMaster {
+        /// The bus.
+        bus: NodeId,
+        /// The master.
+        master: NodeId,
+    },
 }
 
 /// A validated isolation map.
@@ -393,6 +448,29 @@ impl IsolationMap {
                 return Err(MapError::RuleSameNode(rule.a.clone()));
             }
         }
+        let mut claims = BTreeSet::new();
+        for claim in &spec.bus_masters {
+            known(&claim.bus)?;
+            known(&claim.master)?;
+            let is_bus = |id: &NodeId| {
+                spec.nodes
+                    .iter()
+                    .any(|n| &n.id == id && n.role == Role::Bus)
+            };
+            if !is_bus(&claim.bus) {
+                return Err(MapError::NotABus(claim.bus.clone()));
+            }
+            if claim.switch.as_ref().is_some_and(|s| s.0.is_empty()) {
+                return Err(MapError::EmptyName);
+            }
+            if !claims.insert((&claim.bus, &claim.master, &claim.switch)) {
+                return Err(MapError::DuplicateMaster {
+                    bus: claim.bus.clone(),
+                    master: claim.master.clone(),
+                });
+            }
+            switches.extend(claim.switch.as_ref());
+        }
         if let Some(stray) = spec.closed_switches.iter().find(|s| !switches.contains(s)) {
             return Err(MapError::UnknownSwitch(stray.clone()));
         }
@@ -424,6 +502,14 @@ impl IsolationMap {
             spec.closed_switches.remove(&SwitchId::from(switch));
         }
         Self::new(spec)
+    }
+
+    /// Whether a bus master claim holds in the current switch configuration.
+    pub(crate) fn is_claim_active(&self, claim: &BusMaster) -> bool {
+        claim
+            .switch
+            .as_ref()
+            .is_none_or(|s| self.spec.closed_switches.contains(s))
     }
 
     /// Whether an edge exists in the current switch configuration.

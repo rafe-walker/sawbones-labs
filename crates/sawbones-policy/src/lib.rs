@@ -24,10 +24,10 @@
 //! ```
 //! use sawbones_interlock::HazardClass;
 //! use sawbones_policy::*;
-//! use sawbones_reading::{Ident, Trust};
+//! use sawbones_reading::Trust;
 //!
-//! let port = PortId::new(Ident::new("rs485-1").unwrap());
-//! let signal = SignalId::new(Ident::new("battery_low_cutoff").unwrap());
+//! let port = PortId::parse("rs485-1").unwrap();
+//! let signal = SignalId::parse("battery_low_cutoff").unwrap();
 //! let writes = WriteMap::new([WriteEntry {
 //!     port: port.clone(),
 //!     signal: signal.clone(),
@@ -35,6 +35,7 @@
 //!     kind: SettingKind::BatteryProtectionLimit,
 //!     energy_relevant: true,
 //!     trust: Trust::OperatorAttested,
+//!     range: Some(ValueRange::new(WriteValue::U16(4400), WriteValue::U16(5000)).unwrap()),
 //! }])
 //! .unwrap();
 //! let buses = BusFacts::new([BusFact {
@@ -51,17 +52,24 @@
 //! assert!(matches!(decision.requirement(), Requirement::RailBLease { .. }));
 //! ```
 //!
-//! **No world text in decisions.** Every argument is a typed value. Ports and
-//! signals are [`Ident`](sawbones_reading::Ident)s, values are integers or
-//! booleans, and no type here holds or converts from
-//! [`WorldText`](sawbones_reading::WorldText). The class depends on a signal's
-//! name only through an exact lookup in the write map, never on what the name
-//! says. (Code can still copy outside text into an `Ident` through
-//! `WorldText::as_untrusted_str`; that call is named so review can find it.)
+//! **Value limits.** A write-map entry may carry a [`ValueRange`]. A write
+//! outside it is refused with [`RefusalReason::ValueOutOfRange`]; the range
+//! never changes the class. The range belongs to the entry, so it has the
+//! entry's trust tier.
 //!
-//! What is deliberately not here: value ranges per signal, the lease itself
-//! (the interlock grants it), and binding a lease to the state it was checked
-//! against.
+//! **No world text in decisions.** Every argument is a typed value. Ports and
+//! signals ([`PortId`], [`SignalId`]) are constructible only from a string of
+//! 1 to 64 bytes that starts with a lower-case ASCII letter and continues with
+//! `a-z 0-9 _ -` only; anything else is a [`PolicyIdentError`]. Values are
+//! integers or booleans, and no type here holds or converts from
+//! [`WorldText`](sawbones_reading::WorldText). Text copied out of a
+//! `WorldText` through `as_untrusted_str` must pass the same rule, so a
+//! sentence, markup or a path cannot become an identifier. The rule limits
+//! shape, not meaning; the class depends on a name only through an exact
+//! lookup in the write map, so an unlisted name is refused as unknown.
+//!
+//! What is deliberately not here: the lease itself (the interlock grants it),
+//! and binding a lease to the state it was checked against.
 
 #![forbid(unsafe_code)]
 
@@ -70,8 +78,12 @@ mod facts;
 mod request;
 
 pub use decide::{class_rank, classify, ActionDigest, Decision, RefusalReason, Requirement};
-pub use facts::{BusFact, BusFacts, FactError, Mastership, SettingKind, WriteEntry, WriteMap};
+pub use facts::{
+    BusFact, BusFacts, FactError, Mastership, RangeError, SettingKind, ValueRange, WriteEntry,
+    WriteMap,
+};
 pub use request::{
-    BusListen, BusRead, BusWrite, EffectRequest, PortId, SignalId, WriteValue, ACTION_ENCODING,
+    BusListen, BusRead, BusWrite, EffectRequest, PolicyIdentError, PortId, SignalId, WriteValue,
+    ACTION_ENCODING, MAX_POLICY_IDENT_BYTES,
 };
 pub use sawbones_interlock::HazardClass;
