@@ -233,6 +233,10 @@ Mains-powered, on the bench, read-only. No battery, no case, no radios, no camer
 | 6 | Module 2: isolated listen-only RS485 and RS232 pod | The logic analyzer and Solar Assistant | It reads the EG4 directly, and the two paths are compared |
 | 7 | The investigation | Everything above | One real EG4 question answered end to end: a named experiment, a session, an evidence bundle, facts in the store, and what would prove it wrong |
 
+What it costs: priced at US sellers on 25 November. The lines priced so far come to about $470 for a mains-powered bench, once the battery converters are dropped and the discontinued hubs are swapped for the one that is still made. That covers the brain, storage, supply, hub, one isolator, one microcontroller board, one INA228, the panel display, the stop and key switches, and a Fluke 107 as the reference meter. Not yet in that figure: two more microcontroller boards, the debug probe and logic analyzer, the comms pod's transceivers, the on-board reference parts, and consumables. A working estimate for the whole Bench Core is $550 to $600 before shipping and tax. That is above the reviewers' $300 to $450, mostly because of the reference meter and the storage they left out.
+
+One finding matters for safety. None of the Bluetooth meters has an independently confirmed safety rating, and one teardown calls a popular model's printed rating optimistic. The Bluetooth meter is a data source for low-voltage work only. Anything hazardous is measured with the reference meter.
+
 Why the brain first: every later rung is flashed, powered, timed and recorded by it, and the P0 software is waiting for it. Moving that software from the Mac to the Pi is the first hardware test and the cheapest one.
 
 Why this order: each rung is checked by the one before, so no instrument is ever trusted on its own word.
