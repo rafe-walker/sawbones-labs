@@ -9,3 +9,4 @@ sawbones-approvals --no-default-features
 sawbones-module-protocol --no-default-features
 sawbones-module-protocol --no-default-features --features verify
 sawbones-regmap --no-default-features
+sawbones-trust-root

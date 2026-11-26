@@ -71,12 +71,15 @@ fn all_events() -> Vec<Option<Event>> {
         Some(FaultRecord::Armed),
         Some(FaultRecord::Latched(FaultReason::EmergencyStop)),
     ] {
-        events.push(Some(Event::Restart { record, nonce: 77 }));
+        events.push(Some(Event::Restart {
+            record,
+            nonce: NonZeroU64::new(77),
+        }));
     }
-    // A zero nonce is no nonce: the heartbeat stays not started.
+    // No nonce (the generator failed): the heartbeat stays not started.
     events.push(Some(Event::Restart {
         record: Some(FaultRecord::Clear),
-        nonce: 0,
+        nonce: None,
     }));
     for target in targets() {
         events.extend(CLASSES.map(|class| Some(Event::RequestLease { class, target })));
@@ -186,7 +189,7 @@ impl Commanded {
 }
 
 /// The record and nonce of a restart event.
-fn restart_of(event: Option<Event>) -> Option<(Option<FaultRecord>, u64)> {
+fn restart_of(event: Option<Event>) -> Option<(Option<FaultRecord>, Option<NonZeroU64>)> {
     match event {
         Some(Event::Restart { record, nonce }) => Some((record, nonce)),
         _ => None,
@@ -1398,7 +1401,7 @@ fn next_event(
             };
             Some(Event::Restart {
                 record,
-                nonce: rng.next(),
+                nonce: NonZeroU64::new(rng.next()),
             })
         }
         1..=5 => Some(Event::RequestArm),
@@ -1592,7 +1595,7 @@ fn random_sequences_keep_the_invariants() {
         };
         let mut event = Some(Event::Restart {
             record: first,
-            nonce: rng.next(),
+            nonce: NonZeroU64::new(rng.next()),
         });
         let mut state = State::POWER_ON;
         let mut last = state.outputs();

@@ -29,9 +29,10 @@
 //!   [`HeartbeatChallenge::reply`], on a later tick and before the next is
 //!   due. A reply that is wrong, stale, early or repeated, or no reply in
 //!   time, is a lost heartbeat. Nothing arms until a correct reply has been
-//!   seen since the last restart or loss. Until a restart delivers a non-zero
+//!   seen since the last restart or loss. Until a restart delivers a
 //!   hardware nonce the heartbeat has not started: there is no challenge,
-//!   every reply is a loss, and nothing arms or clears.
+//!   every reply is a loss, and nothing arms or clears. A restart with no
+//!   nonce (`None`: the generator failed) leaves it not started.
 //! - **Output feedback.** Each rail's sensed state is compared with what the
 //!   previous tick commanded. A rail sensed live while commanded off is stuck
 //!   on: everything drops and [`FaultReason::OutputMismatch`] latches on that
@@ -86,8 +87,8 @@
 //! At boot the firmware starts from [`State::POWER_ON`] (or the state it kept
 //! in retained RAM) and makes its first step an [`Event::Restart`] carrying
 //! the record it read and a fresh nonce from the hardware random number
-//! generator (never 0: a zero nonce leaves the heartbeat not started, so the
-//! bench stays off). A restart is never cleaner than the worse of the state passed in
+//! generator, or `None` if the generator gave none (the heartbeat then stays
+//! not started, so the bench stays off). A restart is never cleaner than the worse of the state passed in
 //! and the record: a state with a real fault latched, or an armed one, wins
 //! over a record that says clear. [`State::POWER_ON`] says nothing, so the
 //! record decides.
@@ -308,14 +309,14 @@ pub struct HeartbeatReply(pub u64);
 /// moves it on.
 ///
 /// A watch with no nonce has not started: no [`Event::Restart`] has
-/// delivered a hardware nonce yet (or it delivered 0). It issues no
+/// delivered a hardware nonce yet (or it delivered `None`). It issues no
 /// challenge, every reply to it is a loss, and it is never alive, so nothing
 /// arms and no fault clears. [`State::POWER_ON`] holds one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct HeartbeatWatch {
     /// The boot nonce the challenges are derived from, given with
-    /// [`Event::Restart`]. `None` until a restart delivers a non-zero one.
+    /// [`Event::Restart`]. `None` until a restart delivers one.
     pub nonce: Option<NonZeroU64>,
     /// The sequence number of the outstanding challenge since the restart.
     pub seq: u64,
@@ -339,11 +340,11 @@ impl HeartbeatWatch {
     };
 
     /// A watch that has just issued its first challenge, at `now`, with no
-    /// reply yet. A nonce of 0 is not a hardware nonce: the watch stays
+    /// reply yet. With no nonce (`None`) the watch stays
     /// [`HeartbeatWatch::NOT_STARTED`].
     #[must_use]
-    pub const fn start(nonce: u64, now: Tick) -> Self {
-        match NonZeroU64::new(nonce) {
+    pub const fn start(nonce: Option<NonZeroU64>, now: Tick) -> Self {
+        match nonce {
             Some(nonce) => HeartbeatWatch {
                 nonce: Some(nonce),
                 seq: 0,
@@ -355,7 +356,7 @@ impl HeartbeatWatch {
         }
     }
 
-    /// True once a restart has delivered a non-zero nonce.
+    /// True once a restart has delivered a nonce.
     #[must_use]
     pub const fn started(self) -> bool {
         self.nonce.is_some()
@@ -552,10 +553,11 @@ pub enum Event {
         /// missing, unreadable or failed its check.
         record: Option<FaultRecord>,
         /// A fresh nonce from the hardware random number generator, from
-        /// which this boot's heartbeat challenges are derived. 0 is not a
-        /// nonce: the heartbeat then stays not started, so nothing arms and
-        /// no fault clears until a restart brings a real one.
-        nonce: u64,
+        /// which this boot's heartbeat challenges are derived, or `None` if
+        /// the generator gave none. With `None` the heartbeat stays not
+        /// started: every reply is a loss, nothing arms and no fault clears
+        /// until a restart brings a nonce.
+        nonce: Option<NonZeroU64>,
     },
     /// The supervisor asks for rail A. This never arms anything, because only
     /// the arm switch can. It is refused with [`Refusal::NotArmed`] unless

@@ -3,12 +3,18 @@
 # source. `ci/check_build_code.py` fails when the tree has a crate not listed here.
 # Build-script crates are also listed in deny.toml `[bans.build]`.
 anyhow
+bare-metal
 clap_derive
+cortex-m
+cortex-m-macros
+cortex-m-rt
+cortex-m-rt-macros
 curve25519-dalek
 curve25519-dalek-derive
 libc
 proc-macro2
 quote
+rp235x-pac
 serde
 serde_core
 serde_derive

@@ -36,6 +36,7 @@ managment = "managment"
 suh = "suh"                # pronunciation of saguaro
 leafs = "leafs"
 flate = "flate"            # flate2 crate name (ci/popular-crates.txt)
+ehr = "ehr"                # RP2350 TRNG entropy holding register (EHR_DATA)
 
 [files]
 extend-exclude = ["Cargo.lock", "target/", "*.svg"]

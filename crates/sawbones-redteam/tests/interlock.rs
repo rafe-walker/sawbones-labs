@@ -4,6 +4,7 @@ use sawbones_interlock::{
     step, ActionDigest, Event, FaultReason, FaultRecord, HazardClass, HeartbeatChallenge, Inputs,
     LeaseTarget, Outputs, Port, Rail, Refusal, State, OUTPUT_SETTLE_TICKS, RAIL_B_PORTS,
 };
+use std::num::NonZeroU64;
 
 const TARGET: LeaseTarget = LeaseTarget {
     port: Port(0),
@@ -44,7 +45,7 @@ impl Bench {
         };
         let boot = Event::Restart {
             record: Some(FaultRecord::Clear),
-            nonce: 0x0b00_7ed0,
+            nonce: NonZeroU64::new(0x0b00_7ed0),
         };
         let (state, last) = step(State::POWER_ON, inputs, Some(boot));
         Self {

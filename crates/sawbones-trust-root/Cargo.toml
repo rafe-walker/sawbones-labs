@@ -1,0 +1,14 @@
+[package]
+name = "sawbones-trust-root"
+description = "PROVISIONAL main-loop logic of the Sawbones trust root (the interlock controller), written against a hardware trait so it runs on the RP2350 and in host tests."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sawbones-interlock = { path = "../sawbones-interlock", default-features = false }

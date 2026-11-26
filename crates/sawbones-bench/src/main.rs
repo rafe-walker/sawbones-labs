@@ -13,6 +13,7 @@
 //! cases still work.
 
 use std::hint::black_box;
+use std::num::NonZeroU64;
 use std::process::ExitCode;
 
 use sawbones_busguard::{crc16_modbus, parse, AllowList, Function, Port, Rule};
@@ -219,7 +220,7 @@ pub fn sawbones_bench_measure(case: &str, input: &Input) -> bool {
             repeat(|| {
                 let restart = Event::Restart {
                     record: Some(FaultRecord::Clear),
-                    nonce: 1,
+                    nonce: NonZeroU64::new(1),
                 };
                 let (mut state, _) = step(State::POWER_ON, input.idle(0, true), Some(restart));
                 for t in 1..=16u64 {
