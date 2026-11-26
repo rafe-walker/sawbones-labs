@@ -34,9 +34,20 @@ fn exit_code_follows_the_violations() {
     assert_eq!(refused.status.code(), Some(1));
     let out = String::from_utf8(refused.stdout).unwrap();
     assert!(
-        out.contains(
-            "VIOLATION: module-1 and pi must be isolated but are bonded: module-1 -[clip]-"
-        ),
+        out.contains("STOP: module-1 and pi must be isolated but are bonded: module-1 -[clip]-"),
+        "{out}"
+    );
+
+    // A warning alone does not fail the checker.
+    let warned = IsolationMap::from_json(&text)
+        .and_then(|m| m.with_edge(Edge::bonded("debug-ground", "debug-probe", "trust-root")))
+        .unwrap();
+    std::fs::write(&bad, serde_json::to_string(&warned).unwrap()).unwrap();
+    let ok = run(&bad);
+    assert_eq!(ok.status.code(), Some(0));
+    let out = String::from_utf8(ok.stdout).unwrap();
+    assert!(
+        out.contains("WARN: ground loop between debug-probe"),
         "{out}"
     );
 

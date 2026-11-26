@@ -1,6 +1,6 @@
 //! Each check on a map small enough to read at a glance.
 
-use sawbones_isolation::{Edge, Finding, IsolationMap, MapError, MapSpec, Node, Role};
+use sawbones_isolation::{Edge, Finding, IsolationMap, MapError, MapSpec, Node, Role, Severity};
 
 /// Earth, a brain with a hub, and one floating meter behind an isolator.
 fn small() -> MapSpec {
@@ -88,7 +88,11 @@ fn a_second_bonded_path_is_a_ground_loop_with_both_paths() {
             "probe -[probe-usb]- hub -[board-usb]- board".to_owned()
         )]
     );
-    assert!(!report.is_clean());
+    // A loop inside the hub's domain touches nothing the map protects, so it
+    // is a warning, not a stop.
+    assert!(report.is_clean());
+    assert_eq!(report.warnings().count(), 1);
+    assert_eq!(report.findings[0].severity(), Severity::Warn);
 
     // Two cables between the same pair are a loop too.
     let doubled = map
@@ -203,4 +207,120 @@ fn json_round_trips_and_rejects_unknown_fields_and_schemas() {
         IsolationMap::from_json(&other),
         Err(MapError::Schema { .. })
     ));
+}
+
+#[test]
+fn a_loop_through_something_protected_is_a_stop() {
+    // Two cables between the brain and the hub: the loop touches the brain.
+    let doubled = small()
+        .edge(Edge::bonded("pi-usb-2", "pi", "hub"))
+        .build()
+        .unwrap();
+    let report = doubled.check();
+    let looped = report
+        .findings
+        .iter()
+        .find(|f| matches!(f, Finding::GroundLoop { .. }));
+    assert_eq!(looped.unwrap().severity(), Severity::Stop);
+    assert!(!report.is_clean());
+
+    // A loop that touches mains earth is a stop too.
+    let earthed = MapSpec::new()
+        .node(Node::new("earth", Role::MainsEarth))
+        .node(Node::new("a", Role::Other))
+        .edge(Edge::bonded("one", "earth", "a"))
+        .edge(Edge::bonded("two", "earth", "a"))
+        .build()
+        .unwrap();
+    assert!(!earthed.check().is_clean());
+}
+
+#[test]
+fn severities_are_stop_warn_and_info() {
+    let report = small().build().unwrap().check();
+    assert!(report
+        .findings
+        .iter()
+        .all(|f| f.severity() == Severity::Info));
+    assert!(Severity::Info < Severity::Warn && Severity::Warn < Severity::Stop);
+
+    let broken = small()
+        .edge(Edge::bonded("clip", "hub", "meter"))
+        .build()
+        .unwrap()
+        .check();
+    assert!(broken.violations().count() >= 2);
+    assert!(broken.violations().all(|f| f.severity() == Severity::Stop));
+
+    let underrated = small()
+        .edge(Edge::isolated("barrier", "earth", "meter", 100).max_difference(400))
+        .build()
+        .unwrap()
+        .check();
+    let found = underrated
+        .findings
+        .iter()
+        .find(|f| matches!(f, Finding::UnderratedBarrier { .. }));
+    assert_eq!(found.unwrap().severity(), Severity::Stop);
+}
+
+fn buses() -> MapSpec {
+    MapSpec::new()
+        .node(Node::new("pi", Role::Brain))
+        .node(Node::new("mcu", Role::Other))
+        .node(Node::new("laptop-probe", Role::Other))
+        .node(Node::new("i2c", Role::Bus))
+        .bus_master("i2c", "pi")
+}
+
+#[test]
+fn one_master_on_a_bus_is_fine_and_two_are_a_stop() {
+    let one = buses().build().unwrap().check();
+    assert!(one.is_clean() && one.findings.is_empty());
+
+    let two = buses().bus_master("i2c", "mcu").build().unwrap().check();
+    assert!(!two.is_clean());
+    match &two.findings[..] {
+        [f @ Finding::BusMastership { bus, masters }] => {
+            assert_eq!(bus.as_str(), "i2c");
+            assert_eq!(names(masters), ["pi", "mcu"]);
+            assert_eq!(f.severity(), Severity::Stop);
+            assert_eq!(f.to_string(), "bus i2c has 2 masters: pi mcu");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_switched_master_counts_only_while_its_switch_is_closed() {
+    let map = buses()
+        .bus_master_switched("i2c", "laptop-probe", "probe-on-bus")
+        .build()
+        .unwrap();
+    assert!(map.check().is_clean());
+    let probing = map.with_switch("probe-on-bus", true).unwrap();
+    assert!(!probing.check().is_clean());
+}
+
+#[test]
+fn bus_declarations_are_validated() {
+    let not_a_bus = buses().bus_master("mcu", "pi").build();
+    assert!(matches!(not_a_bus, Err(MapError::NotABus(_))));
+    let unknown = buses().bus_master("i2c", "ghost").build();
+    assert!(matches!(unknown, Err(MapError::UnknownNode(_))));
+    let twice = buses().bus_master("i2c", "pi").build();
+    assert!(matches!(twice, Err(MapError::DuplicateMaster { .. })));
+    // The same master on the same bus, once always and once switched, is
+    // not one master counted twice.
+    let both = buses()
+        .bus_master_switched("i2c", "pi", "s")
+        .close("s")
+        .build()
+        .unwrap();
+    assert!(both.check().is_clean());
+    // A switch named only by a master claim is a known switch.
+    assert!(buses().close("nowhere").build().is_err());
+    // Round trip through JSON.
+    let json = serde_json::to_string(&both).unwrap();
+    assert_eq!(IsolationMap::from_json(&json).unwrap(), both);
 }

@@ -1,7 +1,7 @@
 //! Reads a JSON isolation map and prints its ground domains and findings.
 //!
-//! Exit code 0 when no finding is a violation, 1 when one is, 2 when the map
-//! could not be read.
+//! Exit code 0 when no finding has `Stop` severity (warnings do not count), 1
+//! when one does, 2 when the map could not be read.
 
 use std::process::ExitCode;
 
@@ -32,12 +32,7 @@ fn main() -> ExitCode {
         println!("domain {}: {}", n + 1, names.join(" "));
     }
     for finding in &report.findings {
-        let kind = if finding.is_violation() {
-            "VIOLATION"
-        } else {
-            "note"
-        };
-        println!("{kind}: {finding}");
+        println!("{}: {finding}", finding.severity());
     }
     if report.is_clean() {
         ExitCode::SUCCESS
