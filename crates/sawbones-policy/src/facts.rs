@@ -151,6 +151,12 @@ pub struct WriteEntry {
     /// (zero-based). A 32-bit value occupies it and the next one, high word
     /// first.
     pub register: u16,
+    /// How many 16-bit registers the signal occupies, 1 or 2 (#214). It
+    /// comes from the entry, never from the value's type: the engine refuses
+    /// a value of any other width ([`crate::RefusalReason::WidthMismatch`]),
+    /// and the encoder refuses a frame whose register count differs. There
+    /// is no default, so a map that does not state it does not load.
+    pub width: u8,
     /// The class of writing this signal, as the entry states it. The engine
     /// may raise it, never lower it.
     pub class: HazardClass,
@@ -196,6 +202,16 @@ pub enum FactError {
         /// The signal.
         signal: SignalId,
     },
+    /// A write-map entry states a width that is not 1 or 2 registers.
+    #[error("write-map entry for signal {signal} on port {port} has width {width}, not 1 or 2")]
+    InvalidWidth {
+        /// The port.
+        port: PortId,
+        /// The width given.
+        width: u8,
+        /// The signal.
+        signal: SignalId,
+    },
     /// Two mastership facts name the same bench port number, so two names
     /// would reach one wire.
     #[error("ports {first} and {second} are both bench port {bench_port}")]
@@ -231,7 +247,8 @@ pub struct WriteMap {
 impl WriteMap {
     /// Builds a write map. Fails if two entries name the same signal of the
     /// same unit on the same port, since the engine would not know which to
-    /// believe, or if an entry's unit is not 1 to [`MAX_UNIT_ADDRESS`].
+    /// believe, or if an entry's unit is not 1 to [`MAX_UNIT_ADDRESS`] or its width is not
+    /// 1 or 2.
     pub fn new(entries: impl IntoIterator<Item = WriteEntry>) -> Result<Self, FactError> {
         let mut map = BTreeMap::new();
         for entry in entries {
@@ -239,6 +256,13 @@ impl WriteMap {
                 return Err(FactError::InvalidUnit {
                     port: entry.port,
                     unit: entry.unit,
+                    signal: entry.signal,
+                });
+            }
+            if !matches!(entry.width, 1 | 2) {
+                return Err(FactError::InvalidWidth {
+                    port: entry.port,
+                    width: entry.width,
                     signal: entry.signal,
                 });
             }

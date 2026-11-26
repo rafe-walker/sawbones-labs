@@ -40,6 +40,7 @@
 //!     unit: 1,
 //!     signal: signal.clone(),
 //!     register: 0x0010,
+//!     width: 1,
 //!     class: HazardClass::Class2,
 //!     kind: SettingKind::BatteryProtectionLimit,
 //!     energy_relevant: true,
@@ -188,7 +189,8 @@ mod preflight;
 mod request;
 
 pub use decide::{
-    bus_action, class_rank, classify, ActionDigest, Decision, RefusalReason, Requirement,
+    bus_action, bus_action_for_width, class_rank, classify, ActionDigest, Decision, RefusalReason,
+    Requirement,
 };
 pub use facts::{
     BusFact, BusFacts, FactError, Mastership, RangeError, SettingKind, ValueRange, WriteEntry,

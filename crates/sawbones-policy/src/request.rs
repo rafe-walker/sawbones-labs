@@ -195,6 +195,18 @@ pub enum WriteValue {
     I32(i32),
 }
 
+impl WriteValue {
+    /// How many 16-bit registers this value would occupy on the wire. This
+    /// is the width of the value, not of any signal: the signal's width is
+    /// the write-map entry's (#214), and a write is refused if they differ.
+    pub const fn width(self) -> u8 {
+        match self {
+            WriteValue::Bool(_) | WriteValue::U16(_) | WriteValue::I16(_) => 1,
+            WriteValue::U32(_) | WriteValue::I32(_) => 2,
+        }
+    }
+}
+
 /// Write one value to one named signal of one unit on one port.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

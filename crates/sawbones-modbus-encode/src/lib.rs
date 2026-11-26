@@ -158,6 +158,18 @@ pub enum ActionError {
     UnknownFunction(u8),
     /// Decoding: a non-zero byte in an unused value slot.
     NonZeroPadding,
+    /// The number of register values differs from the width the write-map
+    /// entry states for the signal (#214). A signal's width comes from its
+    /// entry, never from the value, so a two-register value cannot be
+    /// written into a one-register signal (it would overwrite the next
+    /// register) and a one-register value cannot be written into a
+    /// two-register signal (it would leave half of it stale).
+    WidthMismatch {
+        /// The register count the entry states.
+        expected: u8,
+        /// The register count the values would write.
+        got: u8,
+    },
 }
 
 /// One write to one unit on one bench port: the exact thing a class 3 lease
@@ -227,6 +239,40 @@ impl BusWriteAction {
             count: values.len() as u8,
             words,
         })
+    }
+
+    /// Like [`BusWriteAction::new`], for a signal whose write-map entry
+    /// states that it occupies `width` registers (#214).
+    ///
+    /// The width is not part of the action's encoding or digest: the value
+    /// count already is, and equals `width` for every action built here, so
+    /// the digest of an action is unchanged.
+    ///
+    /// # Errors
+    ///
+    /// [`ActionError::WidthMismatch`] if `values` does not hold exactly
+    /// `width` values, otherwise any error of [`BusWriteAction::new`].
+    pub const fn new_with_width(
+        port: u8,
+        unit: u8,
+        function: WriteFunction,
+        register: u16,
+        width: u8,
+        values: &[u16],
+    ) -> Result<BusWriteAction, ActionError> {
+        if values.len() != width as usize && !values.is_empty() {
+            return Err(ActionError::WidthMismatch {
+                expected: width,
+                // A slice longer than 255 is reported as 255; `new` would
+                // refuse it as too many values anyway.
+                got: if values.len() > 255 {
+                    255
+                } else {
+                    values.len() as u8
+                },
+            });
+        }
+        Self::new(port, unit, function, register, values)
     }
 
     /// The bench port the write goes out on.

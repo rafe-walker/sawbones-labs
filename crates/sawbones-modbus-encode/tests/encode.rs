@@ -305,3 +305,67 @@ fn regression_203_every_one_field_change_changes_the_encoding_and_digest() {
         }
     }
 }
+
+// --- #214: the register count comes from the entry's width -------------------
+
+#[test]
+fn regression_214_encoder_refuses_a_register_count_that_differs_from_the_width() {
+    // Two registers into a one-register signal, and one into a two-register
+    // signal, for every function and a spread of registers.
+    for register in [0u16, 1, 0x0100, 0xFFFD] {
+        assert_eq!(
+            BusWriteAction::new_with_width(0, 1, WriteMultipleRegisters, register, 1, &[1, 2]),
+            Err(ActionError::WidthMismatch {
+                expected: 1,
+                got: 2
+            })
+        );
+        assert_eq!(
+            BusWriteAction::new_with_width(0, 1, WriteSingleRegister, register, 2, &[1]),
+            Err(ActionError::WidthMismatch {
+                expected: 2,
+                got: 1
+            })
+        );
+        assert_eq!(
+            BusWriteAction::new_with_width(0, 1, WriteMultipleRegisters, register, 2, &[1]),
+            Err(ActionError::WidthMismatch {
+                expected: 2,
+                got: 1
+            })
+        );
+    }
+    assert_eq!(
+        BusWriteAction::new_with_width(0, 1, WriteMultipleRegisters, 5, 2, &[1, 2, 3]),
+        Err(ActionError::WidthMismatch {
+            expected: 2,
+            got: 3
+        })
+    );
+    // Width 0 matches no non-empty write.
+    assert_eq!(
+        BusWriteAction::new_with_width(0, 1, WriteMultipleRegisters, 5, 0, &[1]),
+        Err(ActionError::WidthMismatch {
+            expected: 0,
+            got: 1
+        })
+    );
+}
+
+#[test]
+fn regression_214_a_matching_width_builds_the_same_action_and_digest() {
+    // The width is not hashed: an action built with it equals, field for
+    // field and digest for digest, the one built without it.
+    for (function, values) in [
+        (WriteSingleRegister, &[0x1234u16][..]),
+        (WriteMultipleRegisters, &[0x1234, 0x5678][..]),
+        (WriteMultipleRegisters, &[7][..]),
+    ] {
+        let width = u8::try_from(values.len()).unwrap();
+        let with = BusWriteAction::new_with_width(3, 9, function, 0x0100, width, values).unwrap();
+        let without = BusWriteAction::new(3, 9, function, 0x0100, values).unwrap();
+        assert_eq!(with, without);
+        assert_eq!(with.digest(), without.digest());
+        assert_eq!(with.encode(), without.encode());
+    }
+}
