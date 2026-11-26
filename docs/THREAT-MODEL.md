@@ -1,0 +1,145 @@
+# Threat model and Bench Core acceptance checklist
+
+Work item [#117](https://github.com/rafe-walker/sawbones-labs/issues/117). Status: first version, written during P0, before any hardware exists.
+
+This file says what Sawbones protects, who or what can hurt it, what stops each harm today, and what is not built yet. It ends with the hardware tests that Bench Core (P1) must pass. Where a defence is only planned, the table says so and names the item.
+
+Sawbones is an agent-operated test bench. The agent drives it over MCP. The agent is clever and fast, and it can be wrong or fooled. So the design never asks the agent to be safe. Limits live in hardware and in signed approvals, never in the prompt.
+
+## 1. What we protect
+
+| Asset | What harm looks like | Main defence |
+| --- | --- | --- |
+| People and property (energy) | A battery bank or inverter driven into fire, shock or a short | Interlock: physical rails, emergency stop, hazard classes ([#101](https://github.com/rafe-walker/sawbones-labs/issues/101), [#144](https://github.com/rafe-walker/sawbones-labs/issues/144)) |
+| The owner's equipment | A wrong write to an inverter or BMS: a changed protection limit, a bad charge voltage, a bricked device | Write maps as facts, bus guard, leases bound to one exact action ([#171](https://github.com/rafe-walker/sawbones-labs/issues/171), [#169](https://github.com/rafe-walker/sawbones-labs/issues/169)) |
+| The truth of the record | A number that looks measured but is not, and later justifies a write | Trust tiers computed by the store from signed evidence ([#168](https://github.com/rafe-walker/sawbones-labs/issues/168), [#178](https://github.com/rafe-walker/sawbones-labs/issues/178)) |
+| Privacy | Site data, bystander audio or images, locations and serials leaking into a public repo | A scrub pass before anything is published; nothing private committed (see [CLAUDE.md](../CLAUDE.md)) |
+
+The five hazard classes (0 observe, 1 touch-safe, 2 bounded effect, 3 hazardous, 4 not offered) are in [project-document.md](project-document.md). Battery protection limits and charge voltages are class 3. Mains work and string switching are class 4: the agent never does them.
+
+## 2. Trust boundaries
+
+Four rules. Everything else follows from them.
+
+1. **The trust root trusts nothing the Pi says.** The trust root is the Interlock controller (an RP2350). It has its own clock, its own inputs and its own rule table. The Pi can ask. The trust root decides.
+2. **The store trusts the Pi only as far as its node key.** The Pi carries data but does not vouch for it. A fact is as good as the signature on its evidence, not as good as the Pi's word.
+3. **The keys that matter live off the Pi.** The trust root holds the approval, lease and core-release keys. Each module holds the key for its own measurements. The owner's phone holds the key for approvals that do not involve energy ([#172](https://github.com/rafe-walker/sawbones-labs/issues/172)).
+4. **The agent proposes. Physical rails and signed approvals decide.** The arm switch, the key switch and the panel button are a person's hand. No software event can turn a rail on.
+
+```
+ agent (MCP client)           untrusted, can be fooled
+      |
+ supervisor + plugin host     untrusted for safety; plugins in their own process
+      |
+ store (chain, node key)      trusts the Pi only as far as its node key
+      |
+ ------------------------------------------------------------  off-Pi keys
+ trust root (Interlock RP2350)   rails, leases, panel, heartbeat watch
+      |
+ bus guard (RP2350, per pod)     passes only the approved frame
+      |
+ rail A / rail B  ->  transmitter, actuator, device under test
+```
+
+Two rings, from review round 2 ([#166](https://github.com/rafe-walker/sawbones-labs/issues/166)):
+
+| Ring | Contains | Who may change it |
+| --- | --- | --- |
+| Core | Interlock and bus guard firmware, policy, loader, plugin host, store, recorder, MCP server, capture adapters, conformance suite, CI workflows | The agent may propose and merge. The Pi installs a core release only after the trust root countersigns its digest with a panel press. |
+| Plugin | Decoders, drivers, analyses, plans | The agent may merge within existing permissions, after a clean-room second review. Growth in permissions or hazard class needs the owner. |
+
+Approvals scale with risk (owner decision, 26 November, in [DECISIONS.md](DECISIONS.md)). Repo work needs no panel or phone approval. Signed approvals start when testing on the real Pi starts.
+
+## 3. Attackers and failures
+
+| Who or what | Plain description | What it can reach |
+| --- | --- | --- |
+| Mistaken or injected agent session | The agent errs, or text it read tells it what to do | Every tool the session may call |
+| Outside text and images | A Wi-Fi name, a Bluetooth name, a decoded packet, OCR of a label, a spoken phrase carries instructions. This is prompt injection through the physical world. | The agent's context |
+| Malicious or buggy plugin | A decoder or driver that lies, loops, leaks or asks for too much | What the plugin host lets it emit |
+| Lying or reflashed module | A meter that reports a wrong number, or a module that was reflashed and now claims an old identity | The readings that feed trust |
+| Compromised Pi | An attacker or a bug has root on the brain | Everything on the Pi, including the supervisor and the store's node key |
+| Supply-chain compromise | A bad dependency, a moved GitHub Action tag, a poisoned toolchain or a malicious pull request | What gets built and installed |
+| The owner's own mistakes | A wrong attestation, a wrong label, a switch left on, a wire in the wrong place | Facts at the operator-attested tier, and the physical bench |
+
+## 4. Threat table
+
+"Today" means built and tested in the repo now. Nearly all of it is software with no hardware yet. "Later" names the item that adds the missing defence. The crates are provisional.
+
+| Threat | Stops it today | Stops it later | Residual risk |
+| --- | --- | --- | --- |
+| Agent turns on a rail by itself | `sawbones-interlock`: no event can turn a rail on. Rail A follows the arm switch. Rail B needs the key switch and a fresh panel press. Class 4 has no rail. | Hardware proof of the same rules on a lamp: [#144](https://github.com/rafe-walker/sawbones-labs/issues/144) | The rules are proved in software only. Pin wiring, boot and brown-out behaviour are untested until P1. |
+| Agent keeps going after it hangs or is cut off | `sawbones-interlock`: a lost heartbeat or a pressed emergency stop drops every output and latches a fault. A restart does not clear it. | The heartbeat's own timing and the wiring: [#144](https://github.com/rafe-walker/sawbones-labs/issues/144) | The crate takes "heartbeat healthy" as an input. The watchdog that decides it is not built. |
+| One approval reused for another action | `sawbones-policy`: a class 3 requirement carries an `ActionDigest` of the exact request. `sawbones-busguard`: a write passes only if the SHA-256 of its exact bytes equals the lease digest, on the same port, before expiry. A lease is spent on use. | Leases bound to a target and parameters inside the interlock itself: [#144](https://github.com/rafe-walker/sawbones-labs/issues/144). Signed approvals: [#172](https://github.com/rafe-walker/sawbones-labs/issues/172) | The interlock crate does not yet bind a lease to a target. The bus guard cannot yet check who sent an update. |
+| Replayed or forged approval or allow-list update | `TrustRootEvent` is not `Clone` and `apply` consumes it, so one program cannot apply it twice. | Signed envelope with a counter or nonce: [#172](https://github.com/rafe-walker/sawbones-labs/issues/172) | Today nothing checks where an update came from, and a captured grant could be sent again. This is an open gap. |
+| An armed rail lets any frame out | `sawbones-busguard`: only well-formed Modbus RTU requests with function 3, 4, 6 or 16 pass. Broadcast is blocked. Reads need an allow-list rule. Writes need a rule and a matching lease. | Firmware on a real RP2350 in the transmit path: [#169](https://github.com/rafe-walker/sawbones-labs/issues/169). Hardware only when the first write capability is wanted. | Pure logic only. The wire, framing by silence and the driver-enable pin are firmware work not yet written. P1 is listen-only. |
+| Write to an unknown or dangerous register | `sawbones-policy`: a write needs a write-map entry at measured or operator-attested tier, or it is refused as class 4. Context only raises a class. Battery protection limits are class 3. | Value limits as facts, and no outside text in identifiers: [#187](https://github.com/rafe-walker/sawbones-labs/issues/187). Measured write maps: [#171](https://github.com/rafe-walker/sawbones-labs/issues/171) | The written value does not affect the class today. A harmful value at an allowed register is not caught. |
+| A read collides with another bus master | `sawbones-policy`: anything that transmits, a read included, is at least class 2 and needs a mastership fact saying the bench is the only master. | Mastership checked like grounds: [#171](https://github.com/rafe-walker/sawbones-labs/issues/171) | The fact is attested by the owner. A wrong attestation is not detected. |
+| Prompt injection through outside text | `sawbones-reading`: `WorldText` marks any string from outside our code. It has no `Display`, so it cannot be dropped into a prompt unmarked. It renders inside an untrusted-data fence. Nothing built from it rises above unverified. | Used by every ingest path: [#105](https://github.com/rafe-walker/sawbones-labs/issues/105). A session that has received world text or images loses `invoke_armed` and `invoke_hazard` (the taint latch from review C; no item yet). | Today only the type exists. Fencing does not stop a model from being persuaded. The taint latch is not scheduled. |
+| Injection through images and OCR | A visual finding is agent-inferred, never measured. Hazardous acts need arming from outside the conversation. | Every visual finding that matters gets an electrical check: [#107](https://github.com/rafe-walker/sawbones-labs/issues/107) | A fooled agent can still waste time or propose a bad action. It cannot arm one. |
+| A plugin picks its own trust tier | `sawbones-reading`: an `Observation` has no tier. A `Reading` has private fields and is made only by the host. | Float-free hashed encoding: [#168](https://github.com/rafe-walker/sawbones-labs/issues/168). Tiers computed from signed evidence: [#178](https://github.com/rafe-walker/sawbones-labs/issues/178) | Tier is set by host code that is not yet signed-evidence based. |
+| Malicious or buggy plugin runs wild | Nothing is built yet. | Zero-import plugins in an unprivileged process without the store key, fuel, memory and output quotas: [#173](https://github.com/rafe-walker/sawbones-labs/issues/173). Conformance suite: [#176](https://github.com/rafe-walker/sawbones-labs/issues/176). Logs and health counters kept by the host: [#175](https://github.com/rafe-walker/sawbones-labs/issues/175) | The plugin host does not exist. Wasmtime had two critical advisories in October 2026; we pin and track it. |
+| Plugin change weakens its own safety test | A decision on 26 November: one pull request may change a decoder or its safety tests, never both. | Enforced in CI by [#176](https://github.com/rafe-walker/sawbones-labs/issues/176) | The rule is a decision, not yet a CI check. |
+| Lying or reflashed module | Not enforced yet. | A reflash invalidates every fact the module made until it passes a known-answer check against the voltage reference ([#110](https://github.com/rafe-walker/sawbones-labs/issues/110), [#146](https://github.com/rafe-walker/sawbones-labs/issues/146)). Module identity by signed challenge, and noise-floor stuck detection ([#178](https://github.com/rafe-walker/sawbones-labs/issues/178)) | Until P1, all modules are simulated. A module that reports its own numbers is evidence about itself only. |
+| Stuck or lying actuator output | `sawbones-interlock` has no output feedback yet. | Feedback detects a stuck output: [#144](https://github.com/rafe-walker/sawbones-labs/issues/144) | Not covered until hardware exists. |
+| Ground path or isolation mistake damages gear | `sawbones-isolation`: a typed map and checker finds a declared isolation defeated by a bonded path, ground loops, a barrier rated too low, and a measuring module bonded to the brain. | The same checks on the real wiring plan: [#111](https://github.com/rafe-walker/sawbones-labs/issues/111) | The map is only as true as what the owner enters. |
+| Compromised Pi | The design assumes it. The trust root has its own rule table and trusts nothing the Pi says. Keys that matter are off the Pi. | Core releases need a trust root countersign: [#172](https://github.com/rafe-walker/sawbones-labs/issues/172). Native capture runs sandboxed; no third-party native plugins: [#177](https://github.com/rafe-walker/sawbones-labs/issues/177) | A root attacker can lie to the agent and corrupt records. It cannot arm a rail, but it can starve the heartbeat. If the agent holds root on the Pi, the rings mean nothing, so its deploy path must be the updater. |
+| Native code escapes its sandbox | Not built. | Landlock check that fails closed (absent from the Pi 5 kernel defconfig), private mount namespace, unprivileged user, no new privileges, seccomp, cgroups, empty network namespace, USB authorization by interface class: [#177](https://github.com/rafe-walker/sawbones-labs/issues/177) | Depends on what the real image supports. |
+| Supply-chain: dependencies | `deny.toml` is present. | Pinned toolchain and `cargo-deny` in CI: [#167](https://github.com/rafe-walker/sawbones-labs/issues/167) | A new dependency still needs a human look. |
+| Supply-chain: GitHub Actions | Rules in [CLAUDE.md](../CLAUDE.md): every action pinned to a 40-character SHA, `contents: read` by default, `pull_request` never `pull_request_target`, no self-hosted runner on the public repo. Workflow lint and Scorecard run. | Dependabot keeps pins current: [#167](https://github.com/rafe-walker/sawbones-labs/issues/167) | A compromised pinned action version stays possible until noticed. |
+| Owner attests something wrong | Attested facts are labelled operator-attested, never measured. A claim about a measurement needs an instrument. | Known-answer checks and second-instrument agreement: [#178](https://github.com/rafe-walker/sawbones-labs/issues/178) | A wrong attestation about a register or a bus master is not caught by software. Class 3 still needs a physical press. |
+| Private data published | Nothing private in the repo (rule in [CLAUDE.md](../CLAUDE.md)). Fixtures pass a scrubber check. | Scrub pass before any session is published: [#176](https://github.com/rafe-walker/sawbones-labs/issues/176) | Review is by an agent and a human, not by a tool that sees every file. |
+| Unauthenticated MCP transport | Not built; v0 is read-only: [#103](https://github.com/rafe-walker/sawbones-labs/issues/103) | Review C asked for transport authentication; no item yet. | Anyone who reaches the port reads. Writes do not exist in v0. |
+
+## 5. Bench Core acceptance checklist
+
+These are the hardware tests P1 must pass, from the P1 rung items [#142](https://github.com/rafe-walker/sawbones-labs/issues/142) to [#148](https://github.com/rafe-walker/sawbones-labs/issues/148) and the review findings. Each test runs on the real bench. A box is ticked only with a recording or a logic-analyzer capture saved in the session store. Each test names the P0 test it repeats on hardware, so the simulation and the bench can be compared.
+
+### Trust root ([#144](https://github.com/rafe-walker/sawbones-labs/issues/144))
+
+- [ ] **Outputs stay off through boot.** Power the controller with the arm switch on. Logic analyzer on both rail enables. Both stay off until the switch is seen off, then on. Repeat 20 times.
+- [ ] **Outputs stay off through reset.** Trigger a reset while rail A is on. Enables drop and stay off. The arm switch must cycle before rail A returns.
+- [ ] **Outputs stay off through brown-out.** Sag the supply with a bench supply to below the brown-out threshold and back, slowly and fast. Enables never glitch on.
+- [ ] **Outputs stay off through a hung Pi.** Freeze the supervisor (stop it, pull its USB). The heartbeat is lost and rails drop within the stated limit. A fault latches and survives a controller restart.
+- [ ] **Stop works with the Pi powered off.** Remove all power from the Pi. Press the emergency stop with rails on. Both rails drop. No Pi software is in the path.
+- [ ] **A lost heartbeat drops the rail.** Stop the heartbeat only. Measure the time from the last beat to rail off. It is under the written limit.
+- [ ] **An expired approval is refused.** Request a class 3 lease. Wait past the lifetime. Press the panel button. No lease, and the panel says so.
+- [ ] **A replayed approval is refused.** Capture a grant on the link. Send it again after it is spent. Refused. (Needs the signed envelope from [#172](https://github.com/rafe-walker/sawbones-labs/issues/172).)
+- [ ] **A wrong-port or wrong-target approval is refused.** Take a lease for port A. Try the frame on port B, and try a changed register or value on port A. Both blocked, and the lease for the approved frame stays.
+- [ ] **Firmware changes only with the jumper.** With the jumper out, every update path fails. With it fitted, an update takes. Remove it again and confirm.
+- [ ] **A stuck output is detected.** With the enable off, hold the output on through a bypass or a stuck switch. Feedback shows it and a fault latches.
+- [ ] **The panel shows what it approves.** The display shows the action and the short state code. Change the state after the request. The approval is void.
+
+### Bus guard and comms pod ([#147](https://github.com/rafe-walker/sawbones-labs/issues/147), [#169](https://github.com/rafe-walker/sawbones-labs/issues/169))
+
+- [ ] **The listen-only pod cannot transmit while disarmed.** Logic analyzer on the bus with rail A off. Drive the pod's UART in every way. Nothing reaches the line, and the driver stays unpowered.
+- [ ] **The bus guard blocks an unapproved frame.** With rail A armed, send a frame that is well-formed but not allow-listed, a write with no lease, a changed byte, a bad CRC and a broadcast. The analyzer sees none of them on the wire. This runs wherever a guard is fitted; P1 is listen-only, so run it against the guard firmware on a bench board if no write path exists.
+- [ ] **The pod reads the EG4 listen-only.** Its numbers match Solar Assistant's, and any disagreement is explained in a note.
+
+### Brain, tools and ground truth ([#142](https://github.com/rafe-walker/sawbones-labs/issues/142), [#143](https://github.com/rafe-walker/sawbones-labs/issues/143), [#145](https://github.com/rafe-walker/sawbones-labs/issues/145))
+
+- [ ] **Landlock presence is recorded on the real image.** Read the active security modules on the final Pi image. Store the result as a fact. If Landlock is absent, the loader fails closed and a test shows it ([#177](https://github.com/rafe-walker/sawbones-labs/issues/177)).
+- [ ] **USB authorization works by interface class.** Plug in a device with an unexpected interface class. It is not authorized. A device on the allow-list is. A hub port can be power-cycled from the brain.
+- [ ] **The P0 supervisor runs on the Pi unchanged,** reports its rails and temperatures, and records Solar Assistant for four hours with no gaps.
+- [ ] **The brain flashes and debugs an RP2350** and captures and decodes a serial line.
+- [ ] **The on-board voltage reference is characterised against the meter on hand,** with a stated uncertainty. The record says "self-test passed", never "calibrated".
+
+### Module 1, the DC meter ([#146](https://github.com/rafe-walker/sawbones-labs/issues/146))
+
+- [ ] **It agrees with the reference** within the stated uncertainty.
+- [ ] **It detects a disconnected, stale or out-of-range input.**
+- [ ] **A reflash drops it to unverified.** Trust returns only after the known-answer check against the reference, not after the module's own self-test.
+- [ ] **Its measured behaviour is compared** with the predictions registered in P0 ([#134](https://github.com/rafe-walker/sawbones-labs/issues/134)).
+
+### The investigation ([#148](https://github.com/rafe-walker/sawbones-labs/issues/148))
+
+- [ ] **One real EG4 question is answered end to end, read-only:** a named experiment with a hypothesis and what would prove it wrong, a recorded session, an evidence bundle that cites computed values, facts in the store with their scope, and a short report.
+
+Every box needs an owner test. If a line cannot be tested, it is written down here as a known gap instead of being ticked.
+
+## 6. Known gaps with no item yet
+
+- **Taint latch.** A session that has received world text or images should lose `invoke_armed` and `invoke_hazard`. Review C proposed it. No item holds it.
+- **MCP transport authentication.** Review C asked for it. No item holds it.
+- **Owner attestation errors.** Only a second instrument can catch a wrong attestation. For registers and bus mastership there is no such instrument.
+- **Heartbeat starvation.** A compromised Pi can drop rails at will. That is safe, but it can disrupt a test. It is accepted.
