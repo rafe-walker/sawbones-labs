@@ -358,3 +358,238 @@ fn redteam_bus_017_a_value_of_the_wrong_width_is_refused_with_or_without_a_range
         assert!(matches!(d.requirement(), Requirement::RailBLease { .. }));
     }
 }
+
+// --- bus-015 and bus-017 (#174): the write map comes from a register map ------
+
+const EXAMPLE_MAP: &str = include_str!("../../../data/register-maps/example-sim-device.toml");
+
+fn regmap_body(extra: &str) -> String {
+    format!(
+        "schema = \"sawbones.regmap/0-provisional\"\n[device]\nid = \"t\"\naddress_base = 0\n{extra}"
+    )
+}
+
+fn regmap_reg(name: &str, address: u32, table: &str, width: u8, ty: &str, rest: &str) -> String {
+    format!(
+        "\n[[register]]\nname = \"{name}\"\naddress = {address}\ntable = \"{table}\"\nwidth = {width}\ntype = \"{ty}\"\n{rest}\n"
+    )
+}
+
+#[test]
+fn redteam_bus_015_a_register_map_with_overlap_or_aliasing_does_not_load() {
+    use sawbones_regmap::{MapError, RegisterMap};
+    let ro = "access = \"read\"";
+
+    // Two names on one register, and a two-register signal over its
+    // neighbour, in either file order.
+    let aliased = regmap_reg("a", 100, "holding", 1, "u16", ro)
+        + &regmap_reg("b", 100, "holding", 1, "u16", ro);
+    let spill = regmap_reg("next", 101, "holding", 1, "u16", ro)
+        + &regmap_reg("wide", 100, "holding", 2, "u32", ro);
+    for body in [aliased, spill] {
+        assert!(
+            matches!(
+                RegisterMap::from_toml(&regmap_body(&body)),
+                Err(MapError::Overlap { .. })
+            ),
+            "{body}"
+        );
+    }
+    // Two names for one signal.
+    let same_name =
+        regmap_reg("a", 1, "holding", 1, "u16", ro) + &regmap_reg("a", 2, "holding", 1, "u16", ro);
+    assert!(matches!(
+        RegisterMap::from_toml(&regmap_body(&same_name)),
+        Err(MapError::DuplicateName { .. })
+    ));
+    // A device whose tables alias: the same address in two tables is one
+    // register, and the map must say so to be refused (or accepted without).
+    let two =
+        regmap_reg("m", 5, "input", 1, "u16", ro) + &regmap_reg("s", 5, "holding", 1, "u16", ro);
+    assert!(RegisterMap::from_toml(&regmap_body(&two)).is_ok());
+    let aliased_tables = format!(
+        "schema = \"sawbones.regmap/0-provisional\"\n[device]\nid = \"t\"\naddress_base = 0\ninput_aliases_holding = true\n{two}"
+    );
+    assert!(matches!(
+        RegisterMap::from_toml(&aliased_tables),
+        Err(MapError::Overlap { .. })
+    ));
+    // One-based addresses: a one-based map read as zero-based would shift
+    // every register by one. The base is required, so it cannot be assumed,
+    // and address 0 does not exist in a one-based map.
+    let one_based = format!(
+        "schema = \"sawbones.regmap/0-provisional\"\n[device]\nid = \"t\"\naddress_base = 1\n{}",
+        regmap_reg("a", 0, "holding", 1, "u16", ro)
+    );
+    assert!(matches!(
+        RegisterMap::from_toml(&one_based),
+        Err(MapError::BadAddress { .. })
+    ));
+}
+
+#[test]
+fn redteam_bus_015_both_words_of_a_two_register_signal_belong_to_it_and_a_shift_by_one_leaves_it() {
+    use sawbones_policy::{classify, PortId, RefusalReason, Requirement, SignalId, WriteValue};
+    use sawbones_reading::Trust;
+    use sawbones_regmap::{RegisterMap, Table};
+
+    let map = RegisterMap::from_toml(EXAMPLE_MAP).unwrap();
+    let port = PortId::parse("rs485-1").unwrap();
+    let writes = map.write_map(&port, 1, Trust::OperatorAttested).unwrap();
+    for e in writes.entries() {
+        let name = e.signal.as_str();
+        let reg = map.register(name).unwrap();
+        // Every word the entry's width covers resolves to this signal in the
+        // map, so each inherits its class.
+        for k in 0..u16::from(e.width) {
+            assert_eq!(
+                map.register_at(Table::Holding, e.register + k)
+                    .unwrap()
+                    .name(),
+                name
+            );
+        }
+        // A shift of one word either way is never the same signal: it is
+        // another mapped register or nothing.
+        for shifted in [
+            e.register.checked_sub(1),
+            e.register.checked_add(u16::from(e.width)),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if let Some(other) = map.register_at(Table::Holding, shifted) {
+                assert_ne!(other.name(), name);
+            }
+        }
+        assert_eq!(reg.width(), e.width);
+    }
+    // The two-register setpoint refuses a one-register value, and the
+    // one-register brightness refuses a two-register value (the policy side
+    // of the same fact).
+    let buses = sawbones_policy::BusFacts::new([sawbones_policy::BusFact {
+        port: port.clone(),
+        bench_port: 0,
+        mastership: sawbones_policy::Mastership::BenchOnly,
+        trust: Trust::OperatorAttested,
+    }])
+    .unwrap();
+    let write = |name: &str, value| {
+        sawbones_policy::EffectRequest::BusWrite(sawbones_policy::BusWrite {
+            port: port.clone(),
+            unit: 1,
+            signal: SignalId::parse(name).unwrap(),
+            value,
+        })
+    };
+    for (name, value) in [
+        ("output_power_setpoint", WriteValue::I16(5)),
+        ("display_brightness", WriteValue::I32(5)),
+    ] {
+        let d = classify(&write(name, value), &writes, &buses);
+        assert!(matches!(
+            d.requirement(),
+            Requirement::Refused {
+                reason: RefusalReason::WidthMismatch { .. }
+            }
+        ));
+    }
+}
+
+#[test]
+fn redteam_bus_017_every_write_entry_from_a_register_map_has_a_range_and_a_class_at_least_the_policy_floor(
+) {
+    use sawbones_regmap::{MapError, RegisterMap};
+
+    // The map cannot describe an unlimited or under-classed write.
+    let w = |rest: &str| {
+        regmap_body(&regmap_reg(
+            "a",
+            1,
+            "holding",
+            1,
+            "u16",
+            &format!("access = \"read_write\"\n{rest}"),
+        ))
+    };
+    let no_range = w("class = \"class2\"\nkind = \"config\"\nenergy_relevant = false");
+    assert!(matches!(
+        RegisterMap::from_toml(&no_range),
+        Err(MapError::WritableNeedsRange { .. })
+    ));
+    let no_class = w("min = \"0\"\nmax = \"100\"\nkind = \"config\"\nenergy_relevant = false");
+    assert!(matches!(
+        RegisterMap::from_toml(&no_class),
+        Err(MapError::MissingWriteField { field: "class", .. })
+    ));
+    let low = w("min = \"0\"\nmax = \"100\"\nclass = \"class0\"\nkind = \"config\"\nenergy_relevant = false");
+    assert!(matches!(
+        RegisterMap::from_toml(&low),
+        Err(MapError::ClassBelowFloor { .. })
+    ));
+
+    // Every entry a map produces carries its range, so none accepts any
+    // value of the right width.
+    let map = RegisterMap::from_toml(EXAMPLE_MAP).unwrap();
+    let port = sawbones_policy::PortId::parse("rs485-1").unwrap();
+    let entries = map.write_entries(&port, 1, sawbones_reading::Trust::OperatorAttested);
+    assert!(!entries.is_empty());
+    assert!(entries.iter().all(|e| e.range.is_some()));
+}
+
+#[test]
+fn redteam_bus_017_a_value_outside_the_maps_range_is_refused_by_the_policy_and_the_decoder() {
+    use sawbones_policy::{
+        classify, BusFact, BusFacts, BusWrite, EffectRequest, Mastership, PortId, RefusalReason,
+        Requirement, SignalId, WriteValue,
+    };
+    use sawbones_reading::Trust;
+    use sawbones_regmap::{DecodeError, RegisterMap};
+
+    let map = RegisterMap::from_toml(EXAMPLE_MAP).unwrap();
+    let port = PortId::parse("rs485-1").unwrap();
+    let writes = map.write_map(&port, 1, Trust::OperatorAttested).unwrap();
+    let buses = BusFacts::new([BusFact {
+        port: port.clone(),
+        bench_port: 0,
+        mastership: Mastership::BenchOnly,
+        trust: Trust::OperatorAttested,
+    }])
+    .unwrap();
+    let req = |v| {
+        EffectRequest::BusWrite(BusWrite {
+            port: port.clone(),
+            unit: 1,
+            signal: SignalId::parse("battery_low_cutoff").unwrap(),
+            value: v,
+        })
+    };
+    // 40.0 to 52.0 V at 0.1 V a step is raw 400 to 520.
+    for v in [0u16, 399, 521, 0xFFFF] {
+        let d = classify(&req(WriteValue::U16(v)), &writes, &buses);
+        assert_eq!(
+            d.requirement(),
+            &Requirement::Refused {
+                reason: RefusalReason::ValueOutOfRange
+            },
+            "{v}"
+        );
+    }
+    for v in [400u16, 520] {
+        let d = classify(&req(WriteValue::U16(v)), &writes, &buses);
+        assert!(
+            matches!(d.requirement(), Requirement::RailBLease { .. }),
+            "{v}"
+        );
+    }
+    // A sign flip: -1 sent as a one-register signed value to an unsigned
+    // entry is the wrong type, so it is outside the range too.
+    let d = classify(&req(WriteValue::I16(-1)), &writes, &buses);
+    assert!(d.is_refused());
+    // And reading: a reported value outside the valid range is refused, not
+    // clamped.
+    assert!(matches!(
+        map.decode("battery_low_cutoff", &[0xFFFF]),
+        Err(sawbones_regmap::ReadError::Decode(DecodeError::OutOfRange))
+    ));
+}

@@ -606,10 +606,23 @@ dependencies = [
  "sawbones-module-protocol",
  "sawbones-policy",
  "sawbones-reading",
+ "sawbones-regmap",
  "sawbones-sim-modules",
  "sawbones-supervisor",
  "serde",
  "serde_json",
+ "toml",
+]
+
+[[package]]
+name = "sawbones-regmap"
+version = "0.0.0"
+dependencies = [
+ "sawbones-interlock",
+ "sawbones-policy",
+ "sawbones-reading",
+ "serde",
+ "thiserror",
  "toml",
 ]
 

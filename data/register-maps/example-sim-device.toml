@@ -1,0 +1,152 @@
+# EXAMPLE ONLY. A register map for an invented, simulated device.
+#
+# Every register number, scale and range below is made up for this example.
+# It describes no real product and is not copied from any manual. Vendor
+# manuals are private and must never be published here. A real device's map
+# is written from the owner's own captures and a second instrument.
+#
+# Addresses are written one-based here on purpose (address_base = 1), to show
+# the loader turning them into zero-based wire addresses.
+
+schema = "sawbones.regmap/0-provisional"
+
+[device]
+id = "example-sim-device"
+address_base = 1
+# This device keeps input registers apart from holding registers.
+input_aliases_holding = false
+
+# --- Measurements: input registers, read only -------------------------------
+
+[[register]]
+name = "pv_power"
+address = 101
+table = "input"
+width = 1
+type = "u16"
+access = "read"
+unit = "W"
+min = "0"
+max = "6000"
+
+[[register]]
+name = "battery_voltage"
+address = 102
+table = "input"
+width = 1
+type = "u16"
+access = "read"
+scale = "0.01"
+unit = "V"
+min = "30.00"
+max = "70.00"
+
+[[register]]
+name = "battery_current"
+address = 103
+table = "input"
+width = 1
+type = "i16"
+access = "read"
+scale = "0.1"
+unit = "A"
+min = "-200.0"
+max = "200.0"
+
+[[register]]
+name = "heatsink_temperature"
+address = 104
+table = "input"
+width = 1
+type = "u16"
+access = "read"
+scale = "0.5"
+offset = "-40"
+unit = "C"
+min = "-40"
+max = "125"
+
+# Two registers, least significant word first, low byte first in each word.
+[[register]]
+name = "energy_total"
+address = 105
+table = "input"
+width = 2
+type = "u32"
+access = "read"
+scale = "0.1"
+unit = "kWh"
+byte_order = "little"
+word_order = "little"
+
+# --- Settings: holding registers --------------------------------------------
+
+[[register]]
+name = "battery_low_cutoff"
+address = 201
+table = "holding"
+width = 1
+type = "u16"
+access = "read_write"
+scale = "0.1"
+unit = "V"
+min = "40.0"
+max = "52.0"
+class = "class3"
+kind = "battery_protection_limit"
+energy_relevant = true
+
+[[register]]
+name = "charge_voltage_limit"
+address = 202
+table = "holding"
+width = 1
+type = "u16"
+access = "read_write"
+scale = "0.1"
+unit = "V"
+min = "48.0"
+max = "58.4"
+class = "class3"
+kind = "charge_voltage"
+energy_relevant = true
+
+# Two registers: the power setpoint is 32 bits, high word first.
+[[register]]
+name = "output_power_setpoint"
+address = 203
+table = "holding"
+width = 2
+type = "i32"
+access = "read_write"
+unit = "W"
+min = "-3000"
+max = "3000"
+class = "class2"
+kind = "config"
+energy_relevant = true
+
+[[register]]
+name = "display_brightness"
+address = 205
+table = "holding"
+width = 1
+type = "u16"
+access = "read_write"
+unit = "%"
+min = "10"
+max = "100"
+class = "class2"
+kind = "config"
+energy_relevant = false
+
+# Read only, in the holding table: a status word the device reports.
+[[register]]
+name = "status_code"
+address = 206
+table = "holding"
+width = 1
+type = "u16"
+access = "read"
+min = "0"
+max = "15"

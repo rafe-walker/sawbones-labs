@@ -1,0 +1,34 @@
+[package]
+name = "sawbones-regmap"
+description = "PROVISIONAL data-first decoders for the Sawbones test bench: a device is a register map in TOML, run by a small total no_std decoder that gives exact decimal values (no floats). The design is under review."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["std"]
+# The strict TOML loader, the Observation builder and the policy write-map
+# entries. The decoder core (`decimal`, `decode`) is `no_std` and needs no
+# allocation, so the firmware build is `--no-default-features`.
+std = [
+    "dep:serde",
+    "dep:thiserror",
+    "dep:toml",
+    "dep:sawbones-policy",
+    "dep:sawbones-reading",
+]
+
+[dependencies]
+sawbones-policy = { path = "../sawbones-policy", optional = true }
+sawbones-reading = { path = "../sawbones-reading", optional = true }
+serde = { workspace = true, optional = true }
+thiserror = { workspace = true, optional = true }
+toml = { version = "1", default-features = false, features = ["parse", "serde"], optional = true }
+
+[dev-dependencies]
+sawbones-interlock = { path = "../sawbones-interlock" }
