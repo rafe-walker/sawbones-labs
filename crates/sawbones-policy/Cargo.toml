@@ -1,0 +1,23 @@
+[package]
+name = "sawbones-policy"
+description = "PROVISIONAL hazard-class policy engine for the Sawbones test bench: classifies typed effect requests against write-map and bus facts, as a pure function. The design is under review."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+sawbones-interlock = { path = "../sawbones-interlock" }
+sawbones-reading = { path = "../sawbones-reading" }
+serde.workspace = true
+thiserror.workspace = true
+# SHA-256 for the action digest a class 3 lease is bound to. No default
+# features: no allocation, no OID tables; the hash itself is no_std.
+sha2 = { version = "0.11", default-features = false }
+
+[dev-dependencies]
+serde_json.workspace = true
