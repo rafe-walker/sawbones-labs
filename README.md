@@ -14,7 +14,7 @@ Sawbones is Old West slang for a field surgeon. This is one for machines: a carr
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | The decision log, including the calls that were reversed and why. |
 | [`research/`](research/README.md) | The raw research notes behind the document, 21 lanes in three rounds, with confidence and known gaps for each. |
 
-Work is tracked in the [GitHub Project](https://github.com/users/rafe-walker/projects) for this repo.
+Work is tracked in the [GitHub Project](https://github.com/users/rafe-walker/projects/2) for this repo.
 
 ## The idea in five lines
 
