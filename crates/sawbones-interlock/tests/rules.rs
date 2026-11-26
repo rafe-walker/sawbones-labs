@@ -6,6 +6,8 @@
 //! answers each heartbeat challenge once, on the tick after it appears,
 //! unless the script says otherwise.
 
+use std::num::NonZeroU64;
+
 use sawbones_interlock::{
     step, ActionDigest, ClearSource, Event, FaultReason, FaultRecord, HazardClass,
     HeartbeatChallenge, HeartbeatReply, HeartbeatWatch, Inputs, LeaseTarget, Mode, Outputs,
@@ -262,7 +264,7 @@ impl Bench {
         };
         let restart = Event::Restart {
             record: Some(FaultRecord::Clear),
-            nonce: 1,
+            nonce: NonZeroU64::new(1),
         };
         let (state, last) = step(State::POWER_ON, boot, Some(restart));
         assert_eq!(state.mode, Mode::AwaitArmOff);
@@ -364,7 +366,7 @@ impl Bench {
                 self.nonce += 1;
                 Some(Event::Restart {
                     record,
-                    nonce: self.nonce,
+                    nonce: NonZeroU64::new(self.nonce),
                 })
             }
         };
@@ -947,7 +949,7 @@ fn a_clock_that_goes_backwards_drops_the_lease() {
     };
     let restart = Event::Restart {
         record: Some(FaultRecord::Clear),
-        nonce: 7,
+        nonce: NonZeroU64::new(7),
     };
     let (state, _) = step(State::POWER_ON, at(9).with_arm(false), Some(restart));
     let reply = state.heartbeat.challenge().expect("started").reply();
@@ -1576,7 +1578,14 @@ fn regression_197_a_restart_is_never_cleaner_than_ram_or_record() {
             now: 5,
             ..IDLE.inputs
         };
-        let (next, _) = step(state, inputs, Some(Event::Restart { record, nonce: 9 }));
+        let (next, _) = step(
+            state,
+            inputs,
+            Some(Event::Restart {
+                record,
+                nonce: NonZeroU64::new(9),
+            }),
+        );
         next.mode
     };
     let stopped = Mode::Faulted(FaultReason::EmergencyStop);
@@ -1869,7 +1878,7 @@ fn regression_198_replies_from_another_boot_do_not_count() {
         };
         let restart = Event::Restart {
             record: Some(FaultRecord::Clear),
-            nonce,
+            nonce: NonZeroU64::new(nonce),
         };
         step(State::POWER_ON, inputs, Some(restart)).0
     };
@@ -1893,7 +1902,7 @@ fn regression_198_the_reply_is_not_an_echo() {
     for seq in 0..10_000 {
         let challenge = HeartbeatWatch {
             seq,
-            ..HeartbeatWatch::start(3, 0)
+            ..HeartbeatWatch::start(NonZeroU64::new(3), 0)
         }
         .challenge()
         .expect("started");
@@ -1939,7 +1948,7 @@ fn zero_nonce_reply() -> HeartbeatReply {
     HeartbeatChallenge(hash).reply()
 }
 
-/// Until a restart delivers a non-zero hardware nonce, the heartbeat has not
+/// Until a restart delivers a hardware nonce, the heartbeat has not
 /// started: no challenge, every reply fails, no clear succeeds and nothing
 /// arms, even if the firmware never sends the restart at all.
 #[test]
@@ -1980,12 +1989,12 @@ fn regression_198_no_heartbeat_before_restart() {
         state = next;
     }
 
-    // A restart with nonce 0 is no start: a clean record comes up unfaulted,
-    // but there is still no challenge, any reply is a loss, and with no reply
-    // the arm switch cannot arm.
+    // A restart with no nonce (the generator gave none) is no start: a clean
+    // record comes up unfaulted, but there is still no challenge, any reply
+    // is a loss, and with no reply the arm switch cannot arm.
     let restart = Event::Restart {
         record: Some(FaultRecord::Clear),
-        nonce: 0,
+        nonce: None,
     };
     let boot = Inputs {
         now: 1,
@@ -2012,7 +2021,7 @@ fn regression_198_no_heartbeat_before_restart() {
     // A real nonce starts it.
     let restart = Event::Restart {
         record: Some(FaultRecord::Clear),
-        nonce: 41,
+        nonce: NonZeroU64::new(41),
     };
     let (started, out) = step(State::POWER_ON, boot, Some(restart));
     assert!(started.heartbeat.started() && out.challenge.is_some());

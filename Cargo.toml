@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+# The trust-root firmware image builds as a host stub here, and for the
+# RP2350 with ci/build_trust_root_fw.sh (#114).
+members = ["crates/*", "firmware/*"]
 # The cargo-fuzz project needs nightly and its own lock file (#220). The sample
 # plugins are their own workspaces, built for wasm32 in CI only (#173).
 exclude = ["fuzz", "plugins"]
@@ -34,3 +36,14 @@ opt-level = 3
 # assertions stay on.
 [profile.dev.package.sawbones-interlock]
 opt-level = 1
+
+# The trust-root firmware image (#114): small, with overflow checks on, so an
+# arithmetic bug panics, and a panic drives every output off and resets.
+# A profile of its own, so release builds (the benchmarks) are unchanged.
+[profile.firmware]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+debug = true
+overflow-checks = true

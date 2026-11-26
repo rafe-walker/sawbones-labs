@@ -45,6 +45,13 @@ allow-build-scripts = [
     { name = "cranelift-codegen" },
     { name = "cranelift-isle" },
     { name = "crc32fast" },
+    # The trust-root firmware's chip support (#114), reviewed: each build.rs
+    # only prints cfg flags (bare-metal asks `rustc -vV` for its version) or
+    # copies its linker script (link.x, device.x) into OUT_DIR.
+    { name = "bare-metal" },
+    { name = "cortex-m" },
+    { name = "cortex-m-macros" },
+    { name = "cortex-m-rt" },
     { name = "curve25519-dalek" },
     { name = "encoding_rs" },
     { name = "generic-array" },
@@ -54,6 +61,7 @@ allow-build-scripts = [
     { name = "quote" },
     { name = "rustix" },
     { name = "rustversion" },
+    { name = "rp235x-pac" },
     { name = "serde" },
     { name = "serde_core" },
     { name = "serde_json" },

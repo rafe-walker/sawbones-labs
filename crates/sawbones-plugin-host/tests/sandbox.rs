@@ -124,14 +124,42 @@ fn a_missing_runner_is_a_spawn_error() {
     any(target_arch = "x86_64", target_arch = "aarch64")
 ))]
 mod linux {
+    use std::io::Write;
+
     use super::*;
     use sawbones_plugin_host::sandbox;
 
-    /// Runs `probe` in a child under the production sandbox. Returns the
-    /// child's exit code and the signal that killed it, if any.
-    fn run_probe(probe: &str) -> (Option<i32>, Option<i32>) {
+    const SIGSYS: i32 = 31;
+    const EPERM: i32 = 1;
+
+    /// What a probe child did: its stdout, exit code and killing signal.
+    struct Probe {
+        out: String,
+        code: Option<i32>,
+        signal: Option<i32>,
+    }
+
+    impl Probe {
+        /// The probe passed. Under coverage instrumentation the test binary
+        /// itself then dies with SIGSYS at exit, writing its profile, so the
+        /// pass is read from stdout, not only from the exit status.
+        fn passed(&self) -> bool {
+            self.out.contains("locked\n")
+                && self.out.contains("pass\n")
+                && (self.code == Some(0) || self.signal == Some(SIGSYS))
+        }
+        /// The forbidden call killed the child on the spot.
+        fn killed_by_the_filter(&self) -> bool {
+            self.out.contains("locked\n")
+                && !self.out.contains("survived")
+                && self.signal == Some(SIGSYS)
+        }
+    }
+
+    /// Runs `probe` in a child under the production sandbox.
+    fn run_probe(probe: &str) -> Probe {
         use std::os::unix::process::ExitStatusExt;
-        let status = Command::new(std::env::current_exe().unwrap())
+        let out = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
                 "linux::probe_entry",
@@ -141,15 +169,24 @@ mod linux {
             .env_clear()
             .env(PROBE_ENV, probe)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .status()
+            .output()
             .unwrap();
-        (status.code(), status.signal())
+        Probe {
+            out: String::from_utf8_lossy(&out.stdout).into_owned(),
+            code: out.status.code(),
+            signal: out.status.signal(),
+        }
+    }
+
+    fn say(line: &str) {
+        let mut out = std::io::stdout();
+        let _ = out.write_all(line.as_bytes());
+        let _ = out.flush();
     }
 
     /// The child side of the probes. Does nothing unless the probe variable
-    /// is set, which only `run_probe` does.
+    /// is set, which only the probe tests do.
     #[test]
     fn probe_entry() {
         let Ok(probe) = std::env::var(PROBE_ENV) else {
@@ -164,78 +201,86 @@ mod linux {
         if sandbox::lock_down().is_err() {
             std::process::exit(41);
         }
+        say("locked\n");
         match probe.as_str() {
-            "nothing" => std::process::exit(0),
+            "nothing" | "stdout-write" => say("pass\n"),
             "open" => match std::fs::File::open("/proc/self/status") {
-                Ok(_) => std::process::exit(50),
-                Err(e) if e.raw_os_error() == Some(libc_eperm()) => std::process::exit(0),
-                Err(_) => std::process::exit(51),
+                Err(e) if e.raw_os_error() == Some(EPERM) => say("pass\n"),
+                _ => say("open did not fail with EPERM\n"),
             },
             "stray-read" => {
                 use std::io::Read;
                 let mut buf = [0u8; 8];
                 let _ = stray.as_mut().map(|f| f.read(&mut buf));
-                std::process::exit(56)
+                say("survived\n");
             }
             "stray-write" => {
-                use std::io::Write;
                 let _ = stray.as_mut().map(|f| f.write(b"x"));
-                std::process::exit(57)
-            }
-            "stdout-write" => {
-                use std::io::Write;
-                let ok = std::io::stdout().write_all(b"ok").is_ok();
-                std::process::exit(if ok { 0 } else { 58 })
+                say("survived\n");
             }
             "socket" => {
                 let _ = std::net::TcpStream::connect("127.0.0.1:9");
-                std::process::exit(52)
+                say("survived\n");
             }
             "spawn" => {
                 let _ = Command::new("/bin/true").status();
-                std::process::exit(53)
+                say("survived\n");
             }
             "thread" => {
                 let _ = std::thread::spawn(|| ()).join();
-                std::process::exit(54)
+                say("survived\n");
             }
             "signal-parent" => {
                 let parent = rustix::process::getppid().unwrap();
                 let _ = rustix::process::test_kill_process(parent);
-                std::process::exit(55)
+                say("survived\n");
             }
-            _ => std::process::exit(99),
+            _ => say("unknown probe\n"),
         }
+        std::process::exit(0)
     }
-
-    fn libc_eperm() -> i32 {
-        1
-    }
-
-    const SIGSYS: i32 = 31;
 
     #[test]
     fn allowed_calls_still_work_under_the_filter() {
-        assert_eq!(run_probe("nothing"), (Some(0), None));
+        assert!(run_probe("nothing").passed());
+        assert!(run_probe("stdout-write").passed());
+    }
+
+    #[test]
+    fn opening_a_file_fails_with_eperm() {
+        assert!(run_probe("open").passed());
     }
 
     #[test]
     fn inherited_descriptors_are_inert_under_the_filter() {
         for probe in ["stray-read", "stray-write"] {
-            assert_eq!(run_probe(probe), (None, Some(SIGSYS)), "{probe}");
+            assert!(run_probe(probe).killed_by_the_filter(), "{probe}");
         }
-        assert_eq!(run_probe("stdout-write"), (Some(0), None));
-    }
-
-    #[test]
-    fn opening_a_file_fails_with_eperm() {
-        assert_eq!(run_probe("open"), (Some(0), None));
     }
 
     #[test]
     fn network_process_thread_and_signal_calls_kill_the_child() {
         for probe in ["socket", "spawn", "thread", "signal-parent"] {
-            assert_eq!(run_probe(probe), (None, Some(SIGSYS)), "{probe}");
+            assert!(run_probe(probe).killed_by_the_filter(), "{probe}");
+        }
+    }
+
+    /// A runner that makes a forbidden call under the real filter is killed
+    /// with SIGSYS, and the host reports `Died` with that signal.
+    #[test]
+    fn a_forbidden_syscall_in_the_runner_ends_in_died_with_sigsys() {
+        let exe = std::env::current_exe().unwrap();
+        let script = format!(
+            "exec env -i {PROBE_ENV}=socket '{}' --exact linux::probe_entry --test-threads=1 --nocapture",
+            exe.display()
+        );
+        let host = PluginHost::new(fake_runner("forbidden-syscall", &script), test_limits());
+        let bytes = decoder_component(&echo_len_core(), Shape::Decoder);
+        match host.load(&bytes, manifest()) {
+            Err(sawbones_plugin_host::LoadRefusal::Run(PluginError::Died { code, signal })) => {
+                assert_eq!((code, signal), (None, Some(SIGSYS)));
+            }
+            other => panic!("expected Died with SIGSYS, got {other:?}"),
         }
     }
 

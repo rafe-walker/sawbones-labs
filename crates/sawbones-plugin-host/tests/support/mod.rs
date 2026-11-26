@@ -189,8 +189,15 @@ pub fn echo_len_core() -> Vec<u8> {
     )
 }
 
+/// The runner binary. `SAWBONES_PLUGIN_RUNNER` overrides the one Cargo
+/// built for these tests: the coverage job points it at an uninstrumented
+/// build, because an instrumented runner writes a profile at exit, which
+/// its own seccomp filter forbids.
 pub fn runner() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_sawbones-plugin-runner"))
+    match std::env::var_os("SAWBONES_PLUGIN_RUNNER") {
+        Some(path) => PathBuf::from(path),
+        None => PathBuf::from(env!("CARGO_BIN_EXE_sawbones-plugin-runner")),
+    }
 }
 
 pub fn host() -> PluginHost {

@@ -2,6 +2,8 @@
 //! log them and read them back.
 #![cfg(feature = "serde")]
 
+use std::num::NonZeroU64;
+
 use sawbones_interlock::{
     step, ActionDigest, Approval, ClearSource, Event, FaultReason, FaultRecord, HazardClass,
     HeartbeatWatch, Inputs, LeaseTarget, Mode, Outputs, PanelToken, Port, Rail, State,
@@ -25,7 +27,7 @@ fn state_and_outputs_round_trip_through_json() {
         heartbeat: HeartbeatWatch {
             answered: true,
             alive: true,
-            ..HeartbeatWatch::start(5, 41)
+            ..HeartbeatWatch::start(NonZeroU64::new(5), 41)
         },
     };
     let json = serde_json::to_string(&state).unwrap();
@@ -99,7 +101,7 @@ fn regression_197_the_fault_record_round_trips() {
     }
     let restart = Event::Restart {
         record: None,
-        nonce: 3,
+        nonce: NonZeroU64::new(3),
     };
     let json = serde_json::to_string(&restart).unwrap();
     assert_eq!(json, r#"{"restart":{"record":null,"nonce":3}}"#);
@@ -123,4 +125,19 @@ fn regression_197_a_panel_token_never_deserialises() {
     let json = serde_json::to_string(&supervisor).unwrap();
     assert_eq!(json, r#"{"clear_fault":{"source":"supervisor"}}"#);
     assert_eq!(serde_json::from_str::<Event>(&json).unwrap(), supervisor);
+}
+
+/// A restart with no nonce encodes as `null`. A nonce of 0, which earlier
+/// builds accepted as "no nonce", no longer decodes at all: no sentinel value
+/// can stand in for a missing hardware nonce.
+#[test]
+fn a_restart_without_a_nonce_is_null_and_zero_is_refused() {
+    let restart = Event::Restart {
+        record: None,
+        nonce: None,
+    };
+    let json = serde_json::to_string(&restart).unwrap();
+    assert_eq!(json, r#"{"restart":{"record":null,"nonce":null}}"#);
+    assert_eq!(serde_json::from_str::<Event>(&json).unwrap(), restart);
+    assert!(serde_json::from_str::<Event>(r#"{"restart":{"record":null,"nonce":0}}"#).is_err());
 }

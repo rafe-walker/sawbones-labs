@@ -7,7 +7,12 @@
 # optional dependencies of wasmtime but are not built with its features.
 anyhow
 async-trait
+bare-metal
 clap_derive
+cortex-m
+cortex-m-macros
+cortex-m-rt
+cortex-m-rt-macros
 cpp_demangle
 cranelift-assembler-x64
 cranelift-codegen
@@ -23,6 +28,7 @@ multiversion_no_op
 proc-macro2
 pulley-macros
 quote
+rp235x-pac
 rustix
 rustversion
 serde
