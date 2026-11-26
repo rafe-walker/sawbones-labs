@@ -42,7 +42,7 @@ pub const MAX_POLICY_IDENT_BYTES: usize = 64;
 /// is a legal identifier. That is safe because the class depends on an
 /// identifier only through an exact lookup in the write map, so an
 /// identifier the write map does not list is refused as unknown.
-fn validate_policy_ident(s: &str) -> Result<(), PolicyIdentError> {
+pub(crate) fn validate_policy_ident(s: &str) -> Result<(), PolicyIdentError> {
     let bytes = s.as_bytes();
     let Some(first) = bytes.first() else {
         return Err(PolicyIdentError::Empty);
@@ -193,6 +193,18 @@ pub enum WriteValue {
     U32(u32),
     /// A signed 32-bit value (two registers).
     I32(i32),
+}
+
+impl WriteValue {
+    /// How many 16-bit registers this value would occupy on the wire. This
+    /// is the width of the value, not of any signal: the signal's width is
+    /// the write-map entry's (#214), and a write is refused if they differ.
+    pub const fn width(self) -> u8 {
+        match self {
+            WriteValue::Bool(_) | WriteValue::U16(_) | WriteValue::I16(_) => 1,
+            WriteValue::U32(_) | WriteValue::I32(_) => 2,
+        }
+    }
 }
 
 /// Write one value to one named signal of one unit on one port.

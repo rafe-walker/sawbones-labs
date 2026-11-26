@@ -188,9 +188,10 @@ how = "WriteEntry carries a name, class and kind but no address, width or alias 
 expected = "Overlap and neighbour shifts caught at load time; not possible today."
 severity = "high"
 sources = ["https://i.blackhat.com/USA-20/Wednesday/us-20-Balduzzi-Industrial-Protocol-Gateways-Under-Analysis-wp.pdf", "https://attack.mitre.org/techniques/T0836/"]
-status = "gap"
+status = "partial"
 test = "Once WriteEntry gains address, width, unit: WriteMap::new must reject overlapping spans on one port and unit with different classes or kinds. A U32 signal must occupy two registers and both must inherit its class. Property test: shift every encoded address by +1 and -1; the result must hit another mapped entry of equal or higher class, or be refused by the guard rules. Coil-versus-register overlap on devices that alias them is a recorded per-device fact tested in the driver."
 issue = 174
+note = "Entries carry a unit (#203), a register and now a width (#214). The width comes from the entry, not the value: the policy refuses a value of another width (WidthMismatch), the encoder refuses a register count that differs from it, and the guard passes only the approved action's frame (sawbones-redteam::redteam_bus_015_a_signal_width_comes_from_its_entry_and_policy_encoder_and_guard_agree). Open: WriteMap::new does not yet reject overlapping spans, aliased names or class mismatch across the registers of a two-register signal, and the +1/-1 neighbour property test is not written."
 
 [[attack]]
 id = "bus-016"
@@ -217,7 +218,7 @@ sources = ["https://attack.mitre.org/techniques/T0836/"]
 status = "partial"
 test = "Add per-entry value constraints (min, max, allowed set, width and signedness). Test: BusWrite U16(0xFFFF) to an entry limited to 0..=100 is refused (ValueOutOfRange); I16(-1) to a U16 entry is refused (WidthMismatch); Bool to a register entry refused; a command register permits only its listed values. Property test: class never decreases when the value changes."
 issue = 174
-note = "Research said gap. Policy value limits (#189) refuse out-of-range and wrong-type writes (regression_187_out_of_range_write_is_refused). Open: entries with no range accept any value, and no allowed-set for command registers."
+note = "Research said gap. Policy value limits (#189) refuse out-of-range and wrong-type writes (regression_187_out_of_range_write_is_refused). #214: a value of another register width than the entry states is refused with or without a range (sawbones-redteam::redteam_bus_017_a_value_of_the_wrong_width_is_refused_with_or_without_a_range). Open: an entry with no range still accepts any value of the right width, and there is no allowed-set for command registers."
 
 [[attack]]
 id = "bus-018"
@@ -254,9 +255,9 @@ expected = "Fact downgraded and requests refused; no such function exists."
 severity = "high"
 sources = ["https://millenia.cars.aps.anl.gov/software/epics/Modbus_over_serial_line_V1_02.pdf", "https://seqred-website.pages.dev/en/blog/modbus-rtu/"]
 status = "partial"
-test = "sawbones-busguard::regression_203_a_foreign_request_blocks_writes_until_a_new_allow_list + sawbones-busguard::regression_203_the_guards_own_echo_is_not_another_master"
+test = "sawbones-busguard::regression_203_a_foreign_request_blocks_writes_until_a_new_allow_list + sawbones-busguard::regression_203_the_guards_own_echo_is_not_another_master + sawbones-redteam::redteam_bus_020_a_foreign_master_invalidates_the_mastership_fact"
 issue = 147
-note = "Partly closed by #203: BusGuard::observe_line counts requests the guard did not send (own echo excluded) and blocks writes and grants until the trust root sends a new allow-list. Still open: reads are not blocked, the policy mastership fact is not downgraded, and a master using only unparsed function codes is not seen."
+note = "Partly closed by #203: BusGuard::observe_line counts requests the guard did not send (own echo excluded) and blocks writes and grants until the trust root sends a new allow-list. #110 adds the policy side: FactEvent::ForeignMasterObserved invalidates the port's mastership fact in the FactLedger, so preflight refuses every write and read on the port, naming the fact, until it is attested again; mastership facts must also expire (Validity::For). Still open: no host yet feeds the guard's observations or the listen-only pod into the ledger, and a master using only unparsed function codes is not seen."
 
 [[attack]]
 id = "bus-021"
@@ -267,9 +268,10 @@ how = "Inverters often have a second write path: a Wi-Fi or Bluetooth dongle, a 
 expected = "Stale-state writes refused; not possible today."
 severity = "medium"
 sources = ["https://www.cisa.gov/news-events/ics-advisories/icsa-25-219-07", "https://cisa.gov/news-events/ics-advisories/icsa-25-044-17", "https://attack.mitre.org/techniques/T0836/"]
-status = "gap"
-test = "Add an optional precondition to BusWrite (expected_current: WriteValue) that is part of canonical_bytes. Test: ActionDigest differs with and without precondition; the host refuses to execute when a fresh readback differs from the precondition. Bus-level test (gap): the host records a before/after readback pair for every leased write and flags change by an unknown writer."
+status = "partial"
+test = "sawbones-redteam::redteam_bus_021_a_change_between_preflight_and_action_voids_the_token + sawbones-policy::any_change_to_the_ledger_voids_a_token + sawbones-policy::a_firmware_change_after_preflight_voids_the_token"
 issue = 110
+note = "Was gap. #110 binds the check to the state: preflight returns a single-use token bound to the request bytes, the action digest, the fact versions, the ledger generation and the store's chain head, and confirm refuses it if any of them changed, if the write map was edited, or after PREFLIGHT_TTL_TICKS. Still open: the device's own value is not part of the state. Still to write: an optional expected_current precondition on BusWrite, part of canonical_bytes, refused when a fresh readback differs, and a before/after readback pair for every leased write that flags a change by an unknown writer. The MCP invoke tools that must present the token do not exist yet."
 
 [[attack]]
 id = "bus-022"
