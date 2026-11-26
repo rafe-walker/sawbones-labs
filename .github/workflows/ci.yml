@@ -106,6 +106,17 @@ jobs:
       - name: Scan the default firmware build for the test-key marker
         run: ci/no_test_keys_in_default_build.sh
 
+  build-artifacts:
+    name: no build output committed (#208)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: regression_208_no_build_artifacts
+        run: ci/no_build_artifacts.sh
+
   deny:
     name: cargo-deny (advisories, licences, bans, sources)
     runs-on: ubuntu-latest
