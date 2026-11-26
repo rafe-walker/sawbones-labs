@@ -432,6 +432,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sawbones-module-protocol"
+version = "0.0.0"
+dependencies = [
+ "ed25519-dalek",
+ "sawbones-approvals",
+ "sawbones-interlock",
+ "sawbones-module-protocol",
+ "sha2",
+]
+
+[[package]]
 name = "sawbones-policy"
 version = "0.0.0"
 dependencies = [
@@ -458,8 +469,10 @@ dependencies = [
 name = "sawbones-redteam"
 version = "0.0.0"
 dependencies = [
+ "ed25519-dalek",
  "sawbones-busguard",
  "sawbones-interlock",
+ "sawbones-module-protocol",
  "sawbones-policy",
  "sawbones-reading",
  "serde",
