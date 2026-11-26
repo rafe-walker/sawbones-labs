@@ -204,13 +204,39 @@ Added at the owner's direction: before anything is laid out or bought, the hardw
 | Circuits | Fault current through the protective resistor at a tap, the armed rail's current limit, front-end attenuator and filter, ground-loop error at the converter, converter ripple | Good, within component tolerance. Run with tolerances varied |
 | Wiring | Harness drawings and wire lists generated from the model | Exact |
 | Printed parts | Trays, bench plate and panel as code: fit, collisions between parts, printer bed size, a slicer run for time and filament | Exact for geometry. Strength is a rough guide |
-| Firmware | Module and interlock firmware on mocked hardware, and in an emulator where the chip is supported | Good for logic, blind to timing and analog |
+| Firmware | Module and interlock firmware on mocked hardware, plus a cross build | Good for logic, blind to timing and analog |
 | Spectrum ledger | Every emitter against every receiver: converter harmonics, clocks, USB, Wi-Fi, Bluetooth, LoRa | Finds collisions on paper. Says nothing about how strong they are |
 | Interference pipeline | Synthetic and public recordings with planted Wi-Fi bursts, Bluetooth hops, inverter combs and broadband noise, run through our detection code | Tests our software fully. Tests no hardware |
 | Antennas | Simple wire antennas for 433, 915 and 1090 MHz | Good for match and pattern |
-| Shielding, with and without | Aperture arithmetic first, full-wave runs for a short list of enclosure options | Ranks options. The numbers are not to be trusted until measured |
+| Shielding, with and without | Aperture arithmetic for every option, with an occasional coarse full-wave comparison | Ranks options only. The real answer is a measurement |
 | Heat | A thermal model of the case at 45 C | Ranks options, with a wide error band |
 | Sound | A simulated microphone array to test direction finding before one exists | Good for the algorithm, optimistic about the real room |
+
+The toolchain was checked on 25 November. Notes are in `research/round-4-review-checks/hardware_ci_toolchain.md`.
+
+| Job | Tool | Notes |
+| --- | --- | --- |
+| Schematic and board rule checks | KiCad's command line, in its official container | Fails the job on a violation. Also exports the netlist, parts list, drawings and 3D files |
+| Wiring drawings | WireViz | Renderer only. The model is ours |
+| Circuit simulation | ngspice with a Python test harness | Tolerance and worst-case runs with asserted limits |
+| Printed parts | build123d | Built-in collision check between parts, bed fit, mass, export |
+| Slicing | OrcaSlicer's command line | Print time and filament. Headless use on Linux still to confirm |
+| Antennas | A NEC2 engine driven from Python | Wire antennas only |
+| Heat, spectrum, budgets | Our own small checkers | Nothing light and open ties one system description to checks across electrical and mechanical, so we write it |
+| Signals and sound | Generated recordings in the SigMF format; a room simulator for the microphone array | Fixtures for our own detection code |
+| Firmware | Host-side tests on mocked hardware, plus a cross build | No complete open emulator for the RP2350 exists |
+
+The same check ranked what is worth simulating before hardware exists, and it changes three of the tracks above.
+
+| Worth it | What |
+| --- | --- |
+| High: real leverage | The pack model's checks with schematic rules and harness. Printed parts with collision, bed fit and slicing. Circuit simulation of the protection and interlock circuits. A simple thermal model with the fan's energy balance. Host-side firmware tests. Generated radio and audio fixtures. Spectrum arithmetic |
+| Medium: ranks options, confirm by measuring | Antenna models. Fan operating point and hot spots. Microphone-array simulation. The aperture estimate for shielding, and coarse comparisons of antenna coupling. Strength of printed parts |
+| Low: not worth it yet | Absolute shielding of the enclosure by full-wave simulation. Simulating how USB 3 or converter noise couples into a receiver, which is measure-only. Fluid-dynamics runs in CI. Terrain-aware propagation at this lot's size. Emulating the RP2350 |
+
+So the shielding track is aperture arithmetic plus an occasional coarse comparison, and the real "with and without" answer comes from the bench measuring its own enclosure. Interference is tested as software against recordings, and as arithmetic in the spectrum ledger, not as a field simulation.
+
+One early result from the thermal arithmetic: a sealed plastic case dissipating 30 W in 45 C air would settle at roughly 90 C inside. That is a rough figure, but it is far enough over every limit to settle the question. The portable pack needs forced ventilation.
 
 Two rules keep this honest.
 

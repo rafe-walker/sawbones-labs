@@ -53,8 +53,8 @@ Run on 25 November 2026 alongside the [review response](../docs/reviews/review-r
 | Evidence viewer options | [evidence_viewer_options.md](round-4-review-checks/evidence_viewer_options.md) | Rerun as the borrowed viewer, Lichtblick as fallback, MCAP stays the recording format. |
 | Analog capture and site port | [analog_capture_and_site_port.md](round-4-review-checks/analog_capture_and_site_port.md) | Analog capture splits into two bands because an RP2350 has only full-speed USB. A first site-port design with the protective resistors at the busbar. |
 | US-stock price check | [us_stock_prices.md](round-4-review-checks/us_stock_prices.md) | 31 lines priced at US sellers. Both hubs named earlier are discontinued. No Bluetooth meter has an independently confirmed safety rating. |
+| Hardware-in-software toolchain | [hardware_ci_toolchain.md](round-4-review-checks/hardware_ci_toolchain.md) | One tool per job for designing and testing hardware as files, and a ranking of which simulations are worth doing before hardware exists. |
 
-More lanes from this round are added as they finish.
 
 ## Notes written before later decisions
 
