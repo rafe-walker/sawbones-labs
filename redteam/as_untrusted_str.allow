@@ -1,0 +1,9 @@
+# Files that call WorldText::as_untrusted_str. Add a path only after review.
+# Apart from the definition, every call site is in a test or a test-only crate.
+crates/sawbones-policy/tests/regression_187.rs
+crates/sawbones-reading/src/reading.rs
+crates/sawbones-reading/src/world_text.rs
+crates/sawbones-redteam/tests/policy_and_reading.rs
+crates/sawbones-solar-assistant/src/discovery.rs
+crates/sawbones-solar-assistant/src/parser.rs
+crates/sawbones-solar-assistant/tests/fixture.rs
