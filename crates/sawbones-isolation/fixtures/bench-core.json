@@ -1,0 +1,99 @@
+{
+  "schema": "sawbones.isolation-map/0-provisional",
+  "nodes": [
+    { "id": "mains-earth", "role": "mains_earth", "label": "Protective earth at the bench's mains outlet" },
+    { "id": "pi", "role": "brain", "label": "Pi 5 ground" },
+    { "id": "hub", "label": "Switched USB hub ground" },
+    { "id": "hub-12v-adapter", "label": "Output negative of the hub's 12 V adapter" },
+    { "id": "trust-root", "label": "Trust root board ground" },
+    { "id": "rail-12v-adapter", "label": "Output negative of the armed rail's 12 V adapter" },
+    { "id": "debug-probe", "label": "Debug probe ground" },
+    { "id": "logic-analyzer", "label": "Logic analyzer ground, including its ground clip" },
+    { "id": "serial-adapter", "label": "Bought serial adapter, USB side" },
+    { "id": "serial-adapter-bus", "label": "Bought serial adapter, bus side" },
+    { "id": "module-1", "role": "measuring_module", "must_float": true, "label": "DC meter module ground" },
+    { "id": "module-2", "role": "measuring_module", "must_float": true, "label": "Comms pod ground" },
+    { "id": "dut", "label": "Device under test" },
+    { "id": "inverter-comms", "label": "Ground of the inverter's comms port" },
+    { "id": "laptop", "label": "Laptop chassis and USB ground" }
+  ],
+  "edges": [
+    {
+      "id": "pi-supply", "a": "mains-earth", "b": "pi",
+      "link": { "kind": "isolated", "rating_volts": 3000 },
+      "note": "27 W supply, taken as double insulated with a floating output. Rating assumed, not from the datasheet."
+    },
+    { "id": "pi-usb-hub", "a": "pi", "b": "hub", "link": { "kind": "bonded" }, "note": "USB cable" },
+    {
+      "id": "hub-adapter-barrier", "a": "mains-earth", "b": "hub-12v-adapter",
+      "link": { "kind": "isolated", "rating_volts": 3000 },
+      "note": "Taken as a floating output. Rating assumed. Some 12 V adapters tie output negative to earth: check with a meter."
+    },
+    { "id": "hub-adapter-plug", "a": "hub-12v-adapter", "b": "hub", "link": { "kind": "bonded" }, "note": "Barrel plug" },
+    { "id": "hub-usb-trust-root", "a": "hub", "b": "trust-root", "link": { "kind": "bonded" }, "note": "USB cable" },
+    { "id": "hub-usb-debug-probe", "a": "hub", "b": "debug-probe", "link": { "kind": "bonded" }, "note": "USB cable" },
+    { "id": "hub-usb-logic-analyzer", "a": "hub", "b": "logic-analyzer", "link": { "kind": "bonded" }, "note": "USB cable" },
+    { "id": "hub-usb-serial-adapter", "a": "hub", "b": "serial-adapter", "link": { "kind": "bonded" }, "note": "USB cable" },
+    {
+      "id": "serial-adapter-barrier", "a": "serial-adapter", "b": "serial-adapter-bus",
+      "link": { "kind": "isolated", "rating_volts": 1000 },
+      "note": "The adapter is sold as isolated. Rating assumed, not from the datasheet."
+    },
+    {
+      "id": "serial-adapter-to-inverter", "a": "serial-adapter-bus", "b": "inverter-comms",
+      "link": { "kind": "bonded" }, "switch": "serial-adapter-connected",
+      "note": "Patch lead from the bought adapter to the inverter's port"
+    },
+    {
+      "id": "usb-isolator-1", "a": "hub", "b": "module-1",
+      "link": { "kind": "isolated", "rating_volts": 1000 },
+      "note": "USB isolator board. Rating assumed: take the lower of the isolator chip and the board's isolated converter from the part in hand."
+    },
+    {
+      "id": "usb-isolator-2", "a": "hub", "b": "module-2",
+      "link": { "kind": "isolated", "rating_volts": 1000 },
+      "note": "USB isolator board. Rating assumed, as for usb-isolator-1."
+    },
+    {
+      "id": "module-1-to-dut", "a": "module-1", "b": "dut",
+      "link": { "kind": "bonded" }, "switch": "dut-connected",
+      "note": "Measurement leads"
+    },
+    {
+      "id": "module-2-to-inverter", "a": "module-2", "b": "inverter-comms",
+      "link": { "kind": "bonded" }, "switch": "inverter-connected",
+      "note": "Patch lead and breakout from the comms pod to the inverter's port"
+    },
+    {
+      "id": "rail-adapter-barrier", "a": "mains-earth", "b": "rail-12v-adapter",
+      "link": { "kind": "isolated", "rating_volts": 3000 },
+      "note": "Taken as a floating output. Rating assumed. Some 12 V adapters tie output negative to earth: check with a meter."
+    },
+    {
+      "id": "rail-negative", "a": "rail-12v-adapter", "b": "trust-root",
+      "link": { "kind": "bonded" },
+      "note": "The armed rail's negative is the trust root's ground"
+    },
+    {
+      "id": "laptop-ethernet", "a": "laptop", "b": "pi",
+      "link": { "kind": "isolated", "rating_volts": 1500 }, "switch": "laptop-ethernet",
+      "note": "Ethernet is transformer coupled at each port. 1500 V is the usual port figure. The network switch in between is not on the map."
+    },
+    {
+      "id": "laptop-usb", "a": "laptop", "b": "pi",
+      "link": { "kind": "bonded" }, "switch": "laptop-usb",
+      "note": "Any USB cable from the laptop to the brain or to a board on the hub"
+    },
+    {
+      "id": "laptop-charger", "a": "laptop", "b": "mains-earth",
+      "link": { "kind": "bonded" }, "switch": "laptop-charger",
+      "note": "On its charger the laptop is tied to mains earth. On battery it floats."
+    }
+  ],
+  "must_be_isolated": [
+    { "a": "module-1", "b": "pi" },
+    { "a": "module-2", "b": "pi" },
+    { "a": "module-1", "b": "module-2" }
+  ],
+  "closed_switches": ["dut-connected", "inverter-connected", "laptop-ethernet"]
+}

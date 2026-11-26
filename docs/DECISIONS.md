@@ -53,6 +53,12 @@ Decisions made by the project owner, newest round last. The design document carr
 | Buying | Amazon, from any seller. Watch the delivery estimate; nothing a month out. This replaces the US-stock question for the bench. |
 | Merging | Claude merges and deploys once it has reviewed the change and all checks pass. |
 | Reference meter | No meter bought for P1. The voltage reference module and the meter on hand cover the low-voltage Bench Core. A safety-rated meter waits for bank or mains work. |
+| Cooling | Designed, simulated and tested in P0: aluminium as a heat spreader, and a fan switched by a temperature sensor. |
+| Peak-heat charging | Not a design driver. The bench is rarely at peak ambient for long, and the pack can cool down and charge indoors. The thermal work targets running electronics, not charging at 45 C. |
+| Before ordering | Every part is cross-checked against the parts it connects to and the build as a whole. The table is `docs/bench-core-cross-reference.md`; the checks behind it are in `research/round-5-parts-cross-check/`. |
+| Work size | Agent work outside the cross-check is cut into small pieces, one crate or one check each, pushed early, so work can stop at any point without loss. |
+| Solar Assistant run | The first run of the ingest on the real unit moves to 27 November. |
+| Roadmap | P0 and P1 are cut into numbered stages, P0.1 to P0.8 and P1.1 to P1.7. Each stage is a milestone and ends in a check-in item: what the owner sees working and what he decides. No dates; order comes from what each stage needs first. See `docs/ROADMAP.md`. |
 
 ## Reversals and corrections
 

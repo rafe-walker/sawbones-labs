@@ -1,0 +1,16 @@
+[package]
+name = "sawbones-isolation"
+description = "PROVISIONAL isolation map for the Sawbones test bench: a typed graph of ground domains and a checker for unintended ground paths. The design is under review."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
