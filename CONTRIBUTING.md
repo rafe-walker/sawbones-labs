@@ -31,6 +31,14 @@ Every `uses:` in `.github/workflows/` is pinned to a full 40-character commit SH
 
 Never use a tag or branch (`@v4`, `@main`): tags can be moved. Look the SHA up with `git ls-remote https://github.com/OWNER/REPO 'refs/tags/vX*'` and use the peeled `^{}` SHA for annotated tags. Dependabot keeps the pins current. Workflows start with `permissions: contents: read` and widen per job only when needed.
 
+## Build scripts, proc macros and new dependencies
+
+A crate with a `build.rs` or a proc macro runs code on every build, so each one is reviewed by name.
+
+- **Allow-list.** `deny.toml` `[bans.build]` allows only the listed crates to have a `build.rs` (`cargo deny check` fails otherwise). cargo-deny does not see proc macros, so `ci/check_build_code.py` also checks every crate with a build script or proc-macro target against `ci/build-code-allowlist.txt`. To add a dependency that trips either check, read its `build.rs` or macro source, then add its name to the list(s) in the same PR and say in the description what you reviewed.
+- **Typosquats.** On pull requests, `ci/check_typosquat.py` compares each crate newly added to `Cargo.lock` with `ci/popular-crates.txt` and with the crates already in the tree. A name within edit distance 1 (2 for names of 6+ characters) of another crate fails. Check the crate on crates.io (owner, history), then fix the name or, if it is the right crate, add it to `ci/typosquat-allow.txt`.
+- Both run in `.github/workflows/supply-chain.yml`. These files are protected paths: label the PR `guards-change`.
+
 ## Before you push
 
 ```sh

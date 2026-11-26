@@ -1,0 +1,45 @@
+name: Supply chain
+
+# Build-time-code allow-list and typosquat check [#201].
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-code:
+    name: build scripts and proc macros are allow-listed
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Every crate with a build.rs or proc-macro target is in ci/build-code-allowlist.txt
+        run: python3 -I ci/check_build_code.py
+
+  typosquat:
+    name: new dependencies are not typosquats
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Unit-test the checker
+        run: python3 -I ci/test_check_typosquat.py
+      - name: Compare Cargo.lock with the base branch
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REPO: ${{ github.event.pull_request.base.repo.clone_url }}
+        run: |
+          git fetch --no-tags --depth=1 "$BASE_REPO" "$BASE_SHA"
+          git show "$BASE_SHA:Cargo.lock" > "$RUNNER_TEMP/base.Cargo.lock"
+          python3 -I ci/check_typosquat.py "$RUNNER_TEMP/base.Cargo.lock" Cargo.lock
