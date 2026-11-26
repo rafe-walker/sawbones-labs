@@ -272,6 +272,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sawbones-isolation"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "sawbones-reading"
 version = "0.0.0"
 dependencies = [
