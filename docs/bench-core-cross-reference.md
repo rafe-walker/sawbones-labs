@@ -1,6 +1,6 @@
 # Bench Core cross-reference
 
-Every part on the [Bench Core parts list](bench-core-parts.md), with why it is there, what it belongs to, how it works in the system, and what it has to agree with. Started 26 November 2026.
+Every part on the [Bench Core parts list](bench-core-parts.md), with why it is there, what it belongs to, how it works in the system, and what it has to agree with. Started 26 November 2026. Since the roadmap re-cut of 26 November, only the parts for rungs 1 to 4 and the bus-guard loopback are P1; the rest are P2 (see [ROADMAP.md](ROADMAP.md)).
 
 The "open check" column is what had to be confirmed for each part. The last column is what the check found. A summary of the changes this forces is [at the end](#what-the-check-found-26-november).
 

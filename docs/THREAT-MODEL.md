@@ -2,7 +2,7 @@
 
 Work item [#117](https://github.com/rafe-walker/sawbones-labs/issues/117). Status: first version, written during P0, before any hardware exists.
 
-This file says what Sawbones protects, who or what can hurt it, what stops each harm today, and what is not built yet. It ends with the hardware tests that Bench Core (P1) must pass. Where a defence is only planned, the table says so and names the item.
+This file says what Sawbones protects, who or what can hurt it, what stops each harm today, and what is not built yet. It ends with the hardware tests that the bench must pass: P1 for the trust root, the bus guard, the brain and ground truth; P2 for the modules. Where a defence is only planned, the table says so and names the item.
 
 Sawbones is an agent-operated test bench. The agent drives it over MCP. The agent is clever and fast, and it can be wrong or fooled. So the design never asks the agent to be safe. Limits live in hardware and in signed approvals, never in the prompt.
 
@@ -131,9 +131,9 @@ Keysight's write-up adds that the laser rig cost under 1000 euro to build and th
 
 ## 5. Bench Core acceptance checklist
 
-These are the hardware tests P1 must pass, from the P1 rung items [#142](https://github.com/rafe-walker/sawbones-labs/issues/142) to [#148](https://github.com/rafe-walker/sawbones-labs/issues/148) and the review findings. Each test runs on the real bench. A box is ticked only with a recording or a logic-analyzer capture saved in the session store. Each test names the P0 test it repeats on hardware, so the simulation and the bench can be compared.
+These are the hardware tests the bench must pass. The trust-root, bus-guard, brain and ground-truth tests are P1 (the six P1 exit tests are drawn from them, see [ROADMAP.md](ROADMAP.md)); the DC meter and comms pod tests are P2 (P2.2, P2.3). They come from the rung items [#142](https://github.com/rafe-walker/sawbones-labs/issues/142) to [#148](https://github.com/rafe-walker/sawbones-labs/issues/148) and the review findings. Each test runs on the real bench. A box is ticked only with a recording or a logic-analyzer capture saved in the session store. Each test names the P0 test it repeats on hardware, so the simulation and the bench can be compared.
 
-### Trust root ([#144](https://github.com/rafe-walker/sawbones-labs/issues/144))
+### Trust root (P1.3) ([#144](https://github.com/rafe-walker/sawbones-labs/issues/144))
 
 - [ ] **Outputs stay off through boot.** Power the controller with the arm switch on. Logic analyzer on both rail enables. Both stay off until the switch is seen off, then on. Repeat 20 times.
 - [ ] **Outputs stay off through reset.** Trigger a reset while rail A is on. Enables drop and stay off. The arm switch must cycle before rail A returns.
@@ -148,7 +148,7 @@ These are the hardware tests P1 must pass, from the P1 rung items [#142](https:/
 - [ ] **A stuck output is detected.** With the enable off, hold the output on through a bypass or a stuck switch. Feedback shows it and a fault latches.
 - [ ] **The panel shows what it approves.** The display shows the action and the short state code. Change the state after the request. The approval is void.
 
-### Bus guard and comms pod ([#147](https://github.com/rafe-walker/sawbones-labs/issues/147), [#169](https://github.com/rafe-walker/sawbones-labs/issues/169))
+### Bus guard (P1.5) and comms pod (P2.3) ([#147](https://github.com/rafe-walker/sawbones-labs/issues/147), [#169](https://github.com/rafe-walker/sawbones-labs/issues/169))
 
 - [ ] **The listen-only pod cannot transmit while disarmed.** Logic analyzer on the bus with rail A off. Drive the pod's UART in every way. Nothing reaches the line, and the driver stays unpowered.
 - [ ] **The bus guard blocks an unapproved frame.** With rail A armed, send a frame that is well-formed but not allow-listed, a write with no lease, a changed byte, a bad CRC and a broadcast. The analyzer sees none of them on the wire. This runs wherever a guard is fitted; P1 is listen-only, so run it against the guard firmware on a bench board if no write path exists.
@@ -162,7 +162,7 @@ These are the hardware tests P1 must pass, from the P1 rung items [#142](https:/
 - [ ] **The brain flashes and debugs an RP2350** and captures and decodes a serial line.
 - [ ] **The on-board voltage reference is characterised against the meter on hand,** with a stated uncertainty. The record says "self-test passed", never "calibrated".
 
-### Module 1, the DC meter ([#146](https://github.com/rafe-walker/sawbones-labs/issues/146))
+### Module 1, the DC meter (P2.2) ([#146](https://github.com/rafe-walker/sawbones-labs/issues/146))
 
 - [ ] **It agrees with the reference** within the stated uncertainty.
 - [ ] **It detects a disconnected, stale or out-of-range input.**

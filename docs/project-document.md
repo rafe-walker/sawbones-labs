@@ -37,6 +37,8 @@ The full point-by-point response, with every verdict and the checks behind it, i
 
 **P1: the Bench Core. Approved on 26 November.** Mains-powered, on the bench, read-only.
 
+**Re-cut, later on 26 November.** P1 is narrowed to rungs 1 to 4 plus an RS485 loopback for the bus guard: the bench proof of the Interlock. A funding and credits stage follows it. Rungs 5 to 7 and everything portable become P2, "Make it mobile". See [ROADMAP.md](ROADMAP.md) and [DECISIONS.md](DECISIONS.md).
+
 | Rung | Build | Verified by |
 | --- | --- | --- |
 | 1 | The brain: Pi 5, cooler, clock battery, NVMe, proper supply, switched hub | Its own health telemetry |
