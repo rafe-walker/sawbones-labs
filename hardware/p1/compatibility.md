@@ -8,12 +8,27 @@ Legend: **PASS** works as listed. **WARN** works with a condition, or relies on 
 
 ## Verdict up front
 
-- **COMPATIBILITY: PASS WITH CHANGES.** No part has to be thrown away. But nine items needed to build a safe bench are missing (5 V supply, low-value fuses, sense optocouplers, transistor/diode/capacitor stage parts, 3.3 V LDO for the watchdog, 5 V over-voltage clamp, barrel-to-terminal adapters, a micro-USB cable, an adjustable source for the brownout test). Three firmware placeholders also need moving (details in section 4).
+- **COMPATIBILITY: PASS WITH CHANGES.** No part has to be thrown away. But nine items needed to build a safe bench are missing, and the independent review adds more (SCR crowbar parts, a second relay module, keyed connectors; see "Revised after independent review" below) (5 V supply, low-value fuses, sense optocouplers, transistor/diode/capacitor stage parts, 3.3 V LDO for the watchdog, 5 V over-voltage clamp, barrel-to-terminal adapters, a micro-USB cable, an adjustable source for the brownout test). Three firmware placeholders also need moving (details in section 4).
 - The three findings that would have made the bench **fail unsafe** if built the obvious way (each is now a CI check, #294):
   1. **Driving the SunFounder relay input straight from an RP2350 pin is unsafe.** The module is active-low. The firmware's "off" level is low, so a direct connection turns the relay ON when the firmware means off. An unpowered RP2350 also leaks current backwards through its pin, which can energise the relay. Rule: a relay channel is driven only by the charge-pump transistor stage, never by a pin.
   2. **A failed 12 V→5 V converter puts 12 V on the logic rail.** The usual way a buck converter fails is with its high-side switch shorted. That 12 V reaches the RP2350, the ATtiny and the relay coils at the same moment, and all their outputs become undefined. This is a common-cause fault. Fix: a 1 A fuse ahead of the converter plus a 5.6 V zener crowbar on the 5 V rail, so that fault blows the fuse.
   3. **Clipping the logic-analyzer ground to a lamp terminal turns the lamp on.** The AOD4184 switches the negative side, so the lamp's negative terminal is not ground. The analyzer's ground is the system ground, so the clip bypasses the MOSFET. Rule: analyzer ground goes only to the star ground point, and probes go only on logic nets.
 - **Watchdog supervisor:** variant A (ATtiny85 BOD + its own watchdog + charge-pump hold) is enough for P1 on its own, **provided** the ATtiny fuses are set and read back (BOD is disabled at the factory). The MAX813L (owner decision: stays on the order) is fitted as variant B, an extra layer that can only cut. It can never close the relay, so it cannot make the bench less safe. It has real limits: a 5 V-only threshold, a 1.0–2.25 s timeout, VIH(WDI) 3.5 V, and a floating WDI disables its watchdog. Section 5.
+
+## Revised after independent review
+
+An independent clean-room review of this design ([`independent-review.md`](independent-review.md), tracked in #296) returned **APPROVE WITH CHANGES**. Five blocking findings and the non-blocking ones are folded into this file, the wiring mock and the data; each changed passage is marked *revised after independent review*. Each finding is also a rule or regression test in `ci/check_hardware.py` (tests `test_regression_296_*`).
+
+| Finding | Change | Check |
+|---|---|---|
+| B1 | ATtiny runaway that keeps toggling PB3 but stops toggling PB4 | *(revised after independent review)* WDO goes low after 1.00–2.25 s and MR pulls RESET high for 140–280 ms, Q63 clamps the Q61 base and Q64 resets the ATtiny. RESET is a pulse, not a latch (WDO to MR clears the timer): the RP2350 latches OutputMismatch on the VBUS loss and the cut becomes permanent until re-arm | OFF within ≤2.25 s, then latched | PASS |
+| B2 | The 1N5339B zener is replaced by an SCR crowbar (TL431A + BT151-500R, 12.0 k / 10.0 k 1 % divider, trips at 5.32 to 5.66 V) | HW-029, HW-013 |
+| B3 | Variant B: RESET is a 140 to 280 ms pulse, so Q64 resets the ATtiny and the RP2350 latches on VBUS loss; 1N4007 removed; R67 2.2 k; BAT43 diodes; R70 0 ohm on the Q61 base | HW-033 |
+| B4 | The SWD probe is hosted on the Mac only, behind a keyed lead that stays unplugged. The Pi has no path to SWD or ISP | HW-030 |
+| B5 | Two separate relay modules; keyed JST-XH or screw terminals on every safety signal; a per-cut self-test at arm time is mandatory | HW-020 |
+| E9 | Pull-downs are 4.7 k, not 10 k. The stepping that fixes E9 is A3 | HW-032 |
+
+Open owner decision: the recommended K0 seal-in relay (no restart on e-stop release, test 4c). It is not a must.
 
 ## 1. Sources
 
@@ -25,7 +40,7 @@ Every spec below cites one of these. Repo files are in this repository (main, re
 | S-ZERO-SCH | Waveshare RP2350-Zero schematic, https://files.waveshare.com/wiki/RP2350-Zero/RP2350_Zero.pdf (VBUS wired straight to the 5 V pin and the LDO, no diode; read in repo `research/round-5-parts-cross-check/02-trust-root.md` §5) |
 | S-ZERO-DTS | Zephyr board files for rp2350_zero: https://github.com/zephyrproject-rtos/zephyr/blob/main/boards/waveshare/rp2350_zero/rp2350_zero.dtsi (WS2812 on GPIO16; header map GP0–22, 26–29; UART0 GP0/GP1; I2C0 GP4/5, I2C1 GP6/7) |
 | S-ZERO-LDO | Core Electronics listing: https://core-electronics.com.au/waveshare-rp2350-zero-mini.html (ME6217C33M5G LDO, 800 mA max) |
-| S-RP-A4 | Raspberry Pi, "RP2350 A4": https://www.raspberrypi.com/news/rp2350-a4/ (A4 fixes E9 high-side leakage; officially 5 V tolerant only while IOVDD is powered; A2 withdrawn, rollout uneven) |
+| S-RP-A4 | Raspberry Pi, "RP2350 A4": https://www.raspberrypi.com/news/rp2350-a4/ (E9 high-side leakage is fixed in A3 and A4; officially 5 V tolerant only while IOVDD is powered; A2 withdrawn, rollout uneven) |
 | S-E9 | Hackaday on E9: https://hackaday.com/2024/09/20/raspberry-pi-rp2350-e9-erratum-redefined-as-input-mode-leakage-current |
 | S-RP-RST | EEVblog thread, "RP2350: GPIOs are pulled-down upon reset": https://www.eevblog.com/forum/microcontrollers/rp2350-gpios-are-pulled-down-upon-reset/ (pull-down on at reset, about 35–189 kΩ depending on IOVDD). Reading only, not the datasheet table: UNVERIFIED in detail |
 | S-FW | Repo [`firmware/trust-root/src/rp2350.rs`](../../firmware/trust-root/src/rp2350.rs) (pin placeholders GP2–GP17; outputs low then enabled then ISO released; inputs pulled to the safe reading) |
@@ -42,6 +57,7 @@ Every spec below cites one of these. Repo files are in this repository (main, re
 | S-PINEPWR | PINE64 PinePower Desktop: https://pine64.org/documentation/PinePower/Versions/PinePower_Desktop/ (USB-C PD 5/9/12/15/20 V, USB-A; **no user-adjustable output, no barrel output**) |
 | S-XB | Schneider XB4BG21 (the original the Shopcorp XB2-BG21 copies): https://www.se.com/us/en/product/XB4BG21/ (2 positions, stay put, 1 NO). Clone contact count and key-removal position: UNVERIFIED |
 | S-REPO | Repo: [`docs/ROADMAP.md`](../../docs/ROADMAP.md) (P1, P1.1–P1.6), issue #144, [`docs/THREAT-MODEL.md`](../../docs/THREAT-MODEL.md) §5, [`docs/bench-core-parts.md`](../../docs/bench-core-parts.md), [`docs/bench-core-cross-reference.md`](../../docs/bench-core-cross-reference.md), [`research/round-5-parts-cross-check/02-trust-root.md`](../../research/round-5-parts-cross-check/02-trust-root.md), [`crates/sawbones-interlock/src/lib.rs`](../../crates/sawbones-interlock/src/lib.rs), [`crates/sawbones-busguard/src/lib.rs`](../../crates/sawbones-busguard/src/lib.rs) |
+| S-IND | Independent review of this design: [`independent-review.md`](independent-review.md) |
 | S-WDR | Owner research note on the watchdog cut (ATtiny85 Q&A + charge pump + MAX813L proposal); not in this repo |
 
 ## 2. Interface matrix
@@ -56,7 +72,7 @@ One row per electrical interface. "Domain" names are the ones used in `data/netl
 | P2 | 12 V → load branch fuse | Fuse value vs wire | **FAIL as listed** | Nilight kit is 5–30 A only (BOM.md #14); the 40 fuses with the holders are unspecified. 22 AWG silicone is listed at 3 A (#7), so a 5 A fuse does not protect it. Need 1 A and 2 A ATC/ATO (M4). Repo set 2 A rail / 1 A trust root; for a pilot-lamp or ≤0.3 A load use **1 A** on both |
 | P3 | Inline holder (12 AWG leads) ↔ 22 AWG | Joint | WARN | Step-down splice: solder plus heat shrink (shrink comes with #7), or a 12-10→22-18 step-down butt splice. Not a screw-terminal squeeze of mismatched gauges |
 | P4 | 12 V → 5 V for RP2350, relay coils, ATtiny LDO, MAX813L | Source exists | **FAIL as listed** | No converter on the P1 list (the XL4015s were dropped). Must-have M1: 12→5 V buck, ≥1 A, set 5.05–5.10 V |
-| P5 | 5 V rail over-voltage (buck fails shorted) | Fail-safe | **FAIL as listed** | ME6217C33 and the ATtiny LDO see 12 V; every MCU output undefined at once. Fix: F2 1 A ahead of the buck + 1N5339B 5.6 V 5 W zener on the 5 V rail (crowbar, blows F2). M6 |
+| P5 | 5 V rail over-voltage (buck fails shorted) | Fail-safe | **FAIL as listed** | ME6217C33 and the ATtiny LDO see 12 V; every MCU output undefined at once. Fix: *(revised after independent review)* F2 1 A ahead of the buck + an SCR crowbar on the 5 V rail (TL431A + BT151-500R, trips at 5.32 to 5.66 V, blows F2). The 1N5339B zener first proposed can fail before the fuse and clamps above 6 V (B2). M6 |
 | P6 | 5 V budget | ≤80 % of source | PASS (with M1) | Relay 2×70 mA + LEDs ≈ 150 mA (S-RLY), RP2350-Zero + 3V3 loads ≈ 60 mA, ATtiny LDO ≈ 5 mA, MAX813L ≤0.35 mA (S-MAX) → ≈ 215 mA, i.e. 22 % of a 1 A buck |
 | P7 | RP2350-Zero 5 V pin + USB-C at the same time | Back-feed | **FAIL if done** | No diode between VBUS and the 5 V pin (S-ZERO-SCH). Rule: the trust root takes power only from the bench 5 V. Its USB-C stays unplugged; it is flashed over SWD. The PULSE link uses the Pi header UART, not USB |
 | P8 | RP2350-Zero 3V3 out → INA228, OLED, PC817 pull-ups, lease-LED base | Budget | PASS | ME6217C33 800 mA (S-ZERO-LDO); load about 40 mA |
@@ -83,7 +99,7 @@ One row per electrical interface. "Domain" names are the ones used in `data/netl
 | L10 | RP2350 GPIO → 12 V LED in the CB16AY button | Level | PASS with 2N3904 | The LED is a 12 V type (BOM.md #20). NPN low-side switch, 10 kΩ base resistor. LED current UNVERIFIED |
 | L11 | RP2350 GP16 | Free pin? | **WARN** | GP16 drives the on-board WS2812 (S-ZERO-DTS). The firmware placeholder puts `RAIL_B_ENABLE[3]` on GP16. Remap (section 4, #288) |
 | L12 | RP2350 GP17 | Edge pin? | **WARN** | GP17 is a solder pad, not an edge pin (S-ZERO, S-ZERO-DTS). The firmware's `CHARGE_PUMP` = GP17 needs a wire soldered to a pad. Remap to GP14 (#288) |
-| L13 | RP2350 input pull-downs (rail sense) | E9 | WARN | On A2 parts a pulled-down input can latch about 2.1 V (S-E9). A4 fixes it, but rollout is uneven and the stepping is printed on the package (S-RP-A4). Fit external 10 kΩ pull-downs on every "pulled low = safe" input regardless. Record the stepping as a fact |
+| L13 | RP2350 input pull-downs (rail sense) | E9 | WARN | On A2 parts a pulled-down input can latch about 2.1 V (S-E9). *(revised after independent review)* The fix arrived in stepping A3 (A2 is affected, A3 and A4 are fixed); the stepping is printed on the package (S-RP-A4). The erratum is overcome only by a pull-down of 8.2 kΩ or less, so fit **4.7 kΩ** pull-downs (not 10 kΩ) on every "pulled low = safe" input (HW-032). Record the stepping as a fact |
 
 ### 2.3 I2C
 
@@ -110,13 +126,13 @@ One row per electrical interface. "Domain" names are the ones used in `data/netl
 |---|---|---|---|---|
 | USB3 upper (blue) | HiLetgo logic analyzer | High speed 480 M required for 24 MHz | about 100 mA | PASS. **Never through the SH-G01A** (full speed only, S-SHG01A) |
 | USB3 lower (blue) | RP2350 #2 bus guard (USB-C cable, #3) | Full speed | about 30 mA + iiunius about 60 mA | PASS |
-| USB2 upper | Pico debug probe (micro-USB, M13) | Full speed | about 25 mA | PASS. Its ground is Pi ground |
+| USB2 upper | Unused. *(revised after independent review B4)* The Pico debug probe moved to the MacBook | | | PASS. The Pi has no path to SWD or ISP (HW-030) |
 | USB2 lower | Waveshare USB-RS485 | Full speed | about 50–80 mA | PASS |
 | — | Trust root RP2350 #1 | not connected | — | PASS (P7: no USB on the trust root) |
 | — | SH-G01A | not used in P1 | — | WARN: no P1 role. Anything you isolate with it gets re-grounded by the analyzer or SWD probe in every test. Keep it for P2 module 1 |
 | Total | | | ≈ 300 mA | PASS even at the 600 mA limit (S-PI5USB) |
 
-Four ports, four devices, no hub. The Phidgets hub was dropped from P1, so the P1.1 check-in item "power-cycles one hub port" cannot be shown, and "boots from NVMe" cannot be shown either: the NVMe board and drive are not on the P1 list. **Scope conflict with ROADMAP P1.1: flag to the owner (#291; also #142 and #159).**
+Three of the four ports are used, no hub. *(revised after independent review B4: the Pico probe is on the MacBook.)* The Phidgets hub was dropped from P1, so the P1.1 check-in item "power-cycles one hub port" cannot be shown, and "boots from NVMe" cannot be shown either: the NVMe board and drive are not on the P1 list. **Scope conflict with ROADMAP P1.1: flag to the owner (#291; also #142 and #159).**
 
 ### 2.6 Grounds and isolation domains
 
@@ -139,9 +155,9 @@ Four ports, four devices, no hub. The Phidgets hub was dropped from P1, so the P
 
 | # | Check | Result |
 |---|---|---|
-| A1 | All probed nets ≤5.25 V (S-LA) | PASS with rules: 3.3 V nets direct; relay IN nets at 5 V are direct only if the buck is set ≤5.10 V, otherwise use a 10 kΩ series resistor; never 12 V, never RS232 |
+| A1 | RP2350 frozen (hang, or halted by SWD) | GP12 and GP13 freeze at their last level (they may stay HIGH, MOSFET on). GP14 pump stops, so K1 drops after its pump drop-out, about 0.03–0.22 s at the real 50 Hz toggle. No answers reach the ATtiny, so PB3 stops and K2 drops within about 2 Q&A periods plus its own drop-out (about 115 ms). *(revised after independent review)* **K2, not K1, meets the 120 ms bound** (B1) | OFF | MID_SENSE, VBUS (if alive), ATtiny trip LED | PASS |
 | A2 | Thresholds VIH 2.0 V / VIL 0.8 V (S-LA) | PASS for 3.3 V logic. The PC817 outputs swing full 0–3.3 V with 10 kΩ |
-| A3 | Input buffer present | WARN: the sigrok page shows a 74LVC245A; some clones omit it. Check the board in hand |
+| A3 | RP2350 brownout | *(revised after independent review)* The brownout detector watches DVDD only. Between about 1.8 and 3.3 V on IOVDD the chip runs in spec, so outputs stay under firmware control; the partial-gate region only heats the AOD4184. Below that the internal reset applies, as A2 | OFF | — | PASS |
 
 ### 2.8 Panel parts
 
@@ -158,9 +174,9 @@ Four ports, four devices, no hub. The Phidgets hub was dropped from P1, so the P
 ### 3.1 The topology this review concludes is correct
 
 ```
-12V adapter ─ F0? none (3 A adapter) ─┬─ F2 1A ─ 5V buck ─ D_Z 5.6V ─ 5V rail (logic; BEFORE the e-stop, so the stop never kills the controller)
-                                      └─ F1 1A ─ ESTOP NC1 ─ ARM toggle ─ K1 (relay CH1, NO; held by RP2350 charge pump GP14)
-                                               ─ K2 (relay CH2, NO; held by ATtiny charge pump PB3 [+ MAX813L clamp in variant B])
+12V adapter ─ F0? none (3 A adapter) ─┬─ F2 1A ─ 5V buck ─ SCR crowbar (TL431A + BT151-500R, revised after independent review) ─ 5V rail (logic; BEFORE the e-stop, so the stop never kills the controller)
+                                      └─ F1 1A ─ ESTOP NC1 ─ ARM toggle ─ K1 (relay module 1, CH1, NO; held by RP2350 charge pump GP14 at 50 Hz)
+                                               ─ K2 (relay module 2, CH1, NO; a separate board; held by ATtiny charge pump PB3 [+ MAX813L clamp in variant B])
                                                ─ INA228 shunt (IN+ → IN−) ─ RAIL_BUS
 RAIL_BUS ─ Lamp A ─ AOD4184 #1 (rail A enable, GP12, low side) ─ GND
 RAIL_BUS ─ KEY NO ─ RAIL_B_HI ─ Lamp B ─ AOD4184 #2 (rail B port 0 enable, GP13, low side) ─ GND
@@ -201,7 +217,7 @@ The table assumes the bench is armed (K1, K2 closed, rail A commanded on) unless
 | A15 | Q_HOLD1 (K1 driver) collector-emitter short | K1 is held permanently; K2 and the MOSFET still cut | OFF | MID_SENSE (when commanded off) | PASS |
 | A16 | Q_HOLD2 short | K2 is held permanently; K1 and the MOSFET cut | OFF | Arm-time self-test only | WARN |
 | A17 | Pump series capacitor shorts (either pump) | DC on the pin becomes base drive, so that relay follows the pin level. A frozen-high pin then holds that relay. The other relay still cuts | OFF | Per-cut self-test | PASS |
-| A18 | Solder bridge between IN1 and IN2 (same module) | **Common cause:** the K1 stage also holds K2, so the ATtiny cut is defeated. A frozen RP2350 still drops both. A glitched RP2350 that keeps pumping but answers wrong is not cut by K2. Lamp lights only if the RP2350 also keeps GP12 on: two faults | OFF (single fault) | Arm-time self-test | WARN → split onto two relay modules (S1) |
+| A18 | Solder bridge between IN1 and IN2 (same module) | *(revised after independent review)* K1 and K2 are on **separate relay modules** (B5), with IN2 unused and tied to VCC through 1 kΩ, so a bridge on one module can hold only that module's channel 1. The other cut and the MOSFET still cut | OFF | Arm-time self-test | PASS |
 | A19 | E-stop NC1 fails to open | NC2 opens, so ESTOP_SENSE makes the firmware drop everything. A welded NC1 and a dead RP2350 together is two faults | OFF | ESTOP_SENSE vs VBUS | PASS |
 | A20 | E-stop wire off (power path) | Open circuit | OFF | VBUS 0, L_BUS dark | PASS |
 | A21 | ESTOP_SENSE wire off | Pull-up reads pressed, so a fault latches | OFF | Fault | PASS |
@@ -209,15 +225,30 @@ The table assumes the bench is armed (K1, K2 closed, rail A commanded on) unless
 | A23 | Any wire off in the series chain | Open circuit | OFF | VBUS / sense | PASS |
 | A24 | GP12 / GP13 wire off, or MOSFET logic GND off | Opto LED not driven | OFF | Sense: commanded on but dead, so a fault after OUTPUT_SETTLE | PASS |
 | A25 | Sense wire off (RAIL_x_SENSE) | Reads dead. A later stuck-on would be hidden: two faults. Commanded on but dead latches a fault at the next arm | OFF | Arm-time | PASS |
-| A26 | **5 V buck fails shorted (12 V on 5 V rail)** | Without M6: every MCU output undefined at once. That is a common cause across both brains, and relay coils at 12 V could pull in if any driver is on. With M6: the zener crowbar blows F2 (1 A), so all logic dies and the rail opens | OFF **only with M6** | — | FAIL as listed → PASS with M6 |
+| A26 | **5 V buck fails shorted (12 V on 5 V rail)** | *(revised after independent review)* With the SCR crowbar (TL431A + BT151-500R, trips at 5.32–5.66 V) the rail is pulled to about 1.2 V, all logic is unpowered, the coils release, and F2 blows (350 % or more clears within 0.5 s) or the adapter hiccups. The SCR survives the adapter's short-circuit current. The 1N5339B zener first proposed could fail before the fuse and clamps at 6.5–8 V, above the MAX813L (6.0 V) and MCP1700 (6.5 V) absolute maximums (B2) | OFF **only with M6** | — | FAIL as listed → PASS with M6 |
 | A27 | INA228 dead or NACK | No VBUS. The firmware must latch a fault (firmware gap) | OFF | I2C error | WARN |
-| A28 | Analyzer ground clipped to lamp-negative | Bypasses the MOSFET (G3) | **ON** | — | FAIL (procedure rule) |
-| A29 | 12 V adapter overvoltage (24 V class) | Lamps rated 12–24 V; buck input ≥24 V; ATtiny/RP2350 behind the 5 V crowbar | OFF / safe | — | PASS (buck rating UNVERIFIED) |
+| A28 | Tool ground clipped to lamp-negative, or a meter on a current range across the MOSFET or a lamp | Bypasses the MOSFET (G3). *(revised after independent review)* Procedure rule: the analyzer clip is cut or insulated and its ground is a soldered lead to a TB-GND post | **ON** | — | FAIL (procedure rule) |
+| A29 | 12 V adapter overvoltage (24 V class) or the buck trimpot bumped high | *(revised after independent review)* The SCR crowbar also catches a buck set above 5.66 V. Lamps rated 12–24 V; buck input ≥24 V | OFF / safe | — | PASS (buck rating UNVERIFIED) |
 | A30 | 5 V rail lost | Coils de-energise; RP2350 and ATtiny unpowered | OFF | — | PASS |
+
+Rows A31 to A40 *(added after independent review; A40 added by the design CI)*:
+
+| # | Single fault | What happens | Lamp | Detected by | Verdict |
+|---|---|---|---|---|---|
+| A31 | Relay IN shorted to GND (off-by-one Dupont housing, stray strand, solder splash) | That relay is held regardless of its pump | OFF | MID_SENSE (K1), arm-time self-test (K2) | WARN → PASS with keyed connectors and the self-test (B5) |
+| A32 | Relay module opto or driver transistor C-E short | Same as a welded relay (A11, A12) | OFF | MID_SENSE, arm-time self-test | PASS |
+| A33 | Relay coil open or module VCC lost | The relay is open, so the bench cannot arm | OFF | Arm-time check | PASS |
+| A34 | Debug or ISP channel connected to the supervisor host | All three electronic cuts defeated by code | OFF with B4 | Procedure, HW-030 | **FAIL** → PASS with B4 |
+| A35 | ATtiny PB3 driven by timer hardware | The pump survives a CPU hang until the WDT | OFF | Firmware rule | WARN until the CI grep exists |
+| A36 | E-stop pressed then released with a firmware sense fault | Re-energises on release unless K0 is fitted | OFF | ESTOP_SENSE, ARM_SENSE, test 4c | WARN → PASS with K0 (open owner decision) |
+| A37 | Buck trimpot bumped high (5.5–12 V) | As A26 | OFF | SCR crowbar | PASS only with the SCR |
+| A38 | Key switch contacts welded or shorted | Rail B gated by MOS-B and the lease only (as A13) | OFF | KEY_SENSE | PASS |
+| A39 | RP2350 answers the Q&A while the safety logic is stalled | K1, K2 and the MOSFET are all held. K2 is a liveness monitor: two cuts, one decision-maker | OFF | Firmware rules | WARN |
+| A40 | F1 too large for the wire, or fails to open | The 22 AWG wire (3 A) needs a 1 A fuse; do not upsize F1 above 2 A (a large fault current welds K1 and K2 together) | OFF | BOM check | WARN |
 
 ### 3.3 Single-fault table, variant B (variant A + MAX813L)
 
-Variant B changes only the K2 hold: a MAX813L in socket U4 (5 V domain) drives clamp transistor Q_CLAMP. Jumper J_B connects the clamp to the pump-2 hold node. Q_CLAMP can only **pull the hold node down**. Every row of table A still holds. These rows are added or changed:
+Variant B changes only the K2 hold: a MAX813L in socket U4 (5 V domain) drives clamp transistor Q_CLAMP. *(Revised after independent review B3:)* jumper J_B connects the clamp, through 0 Ω, to the **Q61 base**, and Q64 (behind J_B2) resets the ATtiny on a RESET pulse. WD 5 V comes straight from TB-5V (no 1N4007), R67 is 2.2 k, D63 and D64 are BAT43. Q_CLAMP can only **pull the hold stage down**. Every row of table A still holds. These rows are added or changed:
 
 | # | Single fault | What happens | Lamp | Verdict |
 |---|---|---|---|---|
@@ -226,11 +257,13 @@ Variant B changes only the K2 hold: a MAX813L in socket U4 (5 V domain) drives c
 | B3 | 5 V rail below 4.50–4.75 V | RESET goes high and clamps K2 | OFF | PASS |
 | B4 | Power-up | RESET is held for 140–280 ms after VCC > threshold, so K2 is held off during boot | OFF | PASS |
 | B5 (#293) | MAX813L counterfeit or wrong threshold | Layer B unreliable; layer A unchanged | per A | WARN → bench acceptance test (section 5.3) |
-| B6 | WDI wire off or level shifter dead-open | A floating WDI **disables the watchdog** (S-MAX); PFI and VCC monitoring still work | per A | WARN (latent; test with the test firmware) |
+| B6 | WDI wire broken (floating pin) | *(revised after independent review)* Only a broken wire floats WDI, which disables the MAX813L watchdog (PFI and VCC monitoring still work). An open Q62 is a cut: with R67 fitted it holds WDI high, so the watchdog times out | per A | WARN (latent; test with the test firmware) |
 | B7 | Q_CLAMP open, or J_B removed | Layer B is gone; variant A remains | per A | WARN (latent) |
 | B8 | Q_CLAMP shorted | K2 can never close: lost uptime, safe | OFF | PASS |
 | B9 | RESET stuck high | Same as B8 | OFF | PASS |
 | B10 | MAX813L pulled from the socket while J_B is fitted | Q_CLAMP base has a 100 kΩ pull-down, so it stays off and the circuit falls back to variant A | per A | PASS |
+| B12 | WDO to MR pulse train *(added after independent review)* | RESET pulses every 1.2–2.5 s instead of holding | OFF with Q64 and the RP2350 latch | PASS |
+| B13 | U4 VCC through the 1N4007 *(added after independent review)* | VCC about 4.2 V is below the threshold, so U4 stays in reset and K2 never closes: availability only. Diode deleted | OFF | PASS |
 | B11 | Can variant B add an unsafe single fault? | No: every output only sinks the hold node or asserts reset | — | PASS |
 
 ## 4. Firmware and design conflicts this review found (for the trust-root issue, not hardware)
@@ -243,8 +276,8 @@ Issue map: F1 to F3 are #288, F5 is #289, F6 is #290, F8 is #291. F4 and F7 are 
 | F2 (#288) | `RAIL_B_ENABLE[3] = 16` is the on-board WS2812 data pin | For P1, set `RAIL_B_PORTS = 1` (port 0 only), which frees GP9–11 and GP14–16 |
 | F3 (#288) | No pins for I2C (INA228/OLED), the Q&A link, MID_SENSE or the lease LED | Pin map in `wiring-mock.md` §3: I2C1 GP26/27, SPI1 slave GP8–11, MID_SENSE GP29, RAIL_B_SENSE[0] GP28, lease LED GP15 |
 | F4 | Firmware does not use INA228 VBUS or MID_SENSE for stuck-output detection, and has no arm-time per-cut self-test | Needed to close A11, A12, A16, A27 |
-| F5 (#289) | THREAT-MODEL test "Stop works with the Pi powered off … press the stop with rails on" contradicts the heartbeat rule: with the Pi off the rails are already off | Redefine as 4a (bypass fixture, Pi off) + 4b (armed, stop pressed, then Pi off). See `wiring-mock.md` §8 |
-| F6 (#290) | "Firmware cannot change without the jumper" | True only for the update path over the link. The BOOT button + USB, and SWD, bypass it (S-ZERO). For P1: the trust root has no USB lead, and the SWD lead goes through a removable connector that is out for the test. Otherwise, RP2350 OTP secure boot and debug disable (irreversible) is the only real fix: say so in the HWS row |
+| F5 (#289) | THREAT-MODEL test "Stop works with the Pi powered off … press the stop with rails on" contradicts the heartbeat rule: with the Pi off the rails are already off | Redefine as 4a (bypass fixture, Pi off) + 4b (armed, stop pressed, then Pi off) + 4c (stop pressed, Pi unplugged, stop released: nothing re-energises) *(4c added after independent review)*. See `wiring-mock.md` test 4 |
+| F6 (#290) | "Firmware cannot change without the jumper" | True only for the update path over the link. The BOOT button + USB, and SWD, bypass it (S-ZERO). For P1: the trust root has no USB lead, and the SWD lead goes through a removable connector that is out for the test. *(Revised after independent review B4:)* the debug probe is hosted on the MacBook only, the lead is a keyed JST-XH, and the Pi has no path to SWD or ISP at all (HW-030). Otherwise, RP2350 OTP secure boot and debug disable (irreversible) is the only real fix: say so in the HWS row |
 | F7 | #144 "hardware-limited armed rail": the XL4015 was dropped from P1 | The 1 A fuse is the only hard limit. Fine for the lamp proof; write it in the evidence |
 | F8 (#291) | ROADMAP P1.1 check-in: NVMe boot and hub-port power cycling | NVMe kit and Phidgets hub not on the P1 list: drop from P1.1 or add the parts |
 
@@ -307,25 +340,27 @@ Lot rule: if more than 2 of 10 chips fail any step, or any chip shows the wrong 
 | M3 | Female barrel jack → screw terminal adapters, ×2 | Land the 12 V adapter (P1) | 5.5×2.1 mm (fits 2.1 tip; 2.5 also fine for the female) | No | **Must** |
 | M4 | ATC/ATO blade fuses 1 A and 2 A, 5 each | F1, F2 (P2) | 32 V ATC | No (kit is 5–30 A) | **Must** |
 | M5 | 3.3 V LDO for the watchdog board | Independent ATtiny supply (P9) | MCP1700-3302E/TO (TO-92, 250 mA) or AMS1117-3.3 module; 1 µF in/out (MCP1700) or 10 µF (AMS1117) | No | **Must** |
-| M6 | 5 V rail crowbar | Buck-short fault (A26) | 1N5339B 5.6 V 5 W axial zener (with F2 1 A). Alt: 1N5338B 5.1 V if the buck is set ≤4.9 V (not recommended) | No | **Must** |
+| M6 | 5 V rail crowbar *(revised after independent review B2)* | Buck-short fault (A26) | **BT151-500R SCR** (TO-220) + **TL431A** (TO-92), anode to +5 V, cathode to GND; divider 12.0 kΩ 1 % to REF and 10.0 kΩ 1 % to GND, 1 nF REF to GND; gate 220 Ω + 10 nF. Trip 5.32–5.66 V; with F2 1 A. Replaces the 1N5339B zener | No | **Must** |
 | M7 | PC817 optocouplers (DIP-4) | Sense: arm, key, mid, rail A, rail B (L9) | ×5 + spares (10-pack); 4.7 kΩ ¼ W on the 12 V side; 10 kΩ on the logic side | No | **Must** |
 | M8 | 2N3904 NPN | Pump holds ×2, Q_CLAMP, WDI level shift, lease LED | ×5 used, buy a 50-pack | Unlikely | **Must** |
 | M9 | Schottky diodes BAT43/BAT85 or 1N5817 | Two per pump | ×4 + spares | No | **Must** |
 | M10 | Capacitors | Pumps and decoupling | 100 nF film/C0G ×4 (pump series; **not** Y5V); 1 µF film or X7R ×2 (store); 100 nF ceramic ×8; 10 µF electrolytic ×4 | No | **Must** |
 | M11 | 1N4148 ×4, 1N4007 ×2 | Diode-AND into MR (variant B); reverse protection on the watchdog 5 V input | — | No | **Must** (1N4148 for B) |
 | M12 | DIP-8 sockets ×4 | ATtiny (removable for off-board ISP), U4 MAX813L, spares | Turned-pin | No | **Must** |
-| M13 | Micro-USB data cable | Pico debug probe | USB-A to micro-B, data | Maybe | **Must** |
+| M13 | Micro-USB data cable | Pico debug probe, on the MacBook | USB-A to micro-B, data | Maybe | **Must** |
 | M14 | USB-A to USB-B cable | Waveshare adapter, if not in the box | — | Maybe | Must if missing |
 | M15 | Dummy load per rail | Real current for INA228 evidence (I4) | 47 Ω 5 W wirewound ×2 (255 mA, 3.1 W), or a 12 V 194/T10 bulb + socket ×2 | No | Should |
 | M16 | Mounting plate + 22 mm panel | Holds everything; 22.3 mm holes for e-stop, key, lamps; 16 mm for the button; 12 mm toggle (UNVERIFIED, measure) | Print on the A1 mini in PETG (180 mm bed: split panel and plate) | Printer owned, filament assumed | **Must** |
 | M17 | Ferrules 0.34 mm² (22 AWG) + crimper | Stranded silicone wire into screw terminals (do not tin it) | — | No | Should |
 | M18 | 2.54 mm jumper shunts | Firmware jumper, J_B, test-mode links | — | Maybe in header kits | Should |
 | M19 | Female header strips 2.54 mm | Socket the RP2350-Zero boards on perfboard | — | Maybe in Smraza kit (#8) | Should |
-| M20 | Second 2-ch relay module | One cut per board (A18 common cause) | Same SunFounder B00E0NTPP4 | No | Should |
+| M20 | Second 2-ch relay module *(now a Must, independent review B5)* | K1 and K2 on different boards | Same SunFounder B00E0NTPP4; each module's CH1 is one cut, IN2 tied to VCC through 1 kΩ | No | **Must** |
 | M21 | USB-C PD trigger board, 15 V | AD584 10 V output (P10) | ZY12PDN-class, set 15 V | No | Nice |
 | M22 | Extra NO contact block for the key switch | Dry key sense independent of rail A (X3) | ZB2-BE101 class | No | Nice |
 | M23 | Solder, flux | Everything | — | Assumed (repo says so) | Verify |
 | M24 | 2 × genuine MAX813LCPA+ (DigiKey/Mouser) | Reference and fallback for variant B | DIP-8 | No | Should (owner keeps B) |
+
+Added after independent review: **M25** resistors (1 % 12.0 k and 10.0 k, 220 Ω, 2.2 k, 4.7 k, 47 k, 0 Ω links; Must), **M26** JST-XH 2.54 mm connector kit with crimper (Must), **M27** SRD-12VDC-SL-C relay K0 with a 1N4007, a spare CB16AY from the pack as START and one more PC817 (Should: open owner decision). M9 is now BAT43 ×8 (pump and MR diodes), M10 gains 1 µF, 2.2 µF and 220 nF film capacitors and 10 µF and 22 µF electrolytics, and M11 loses the watchdog 1N4007. A genuine MAX813LCPA+ (M24) is available from DigiKey or Mouser only.
 
 ATtiny programming needs no new hardware. Program it **off-board** on the breadboard: pull it from its socket, program from the Pi 5 header with `avrdude -c linuxgpio` (avrdude ≥7.x with libgpiod; Pi 5 support UNVERIFIED), or with the Pico running an ArduinoISP-type sketch (UNVERIFIED on RP2040). Off-board programming means the Pi cannot reflash the watchdog in place, which suits its independence.
 
@@ -333,7 +368,7 @@ ATtiny programming needs no new hardware. Program it **off-board** on the breadb
 
 | Part | Swap? | Reason |
 |---|---|---|
-| SunFounder 2-ch low-level relay (#17) | **Keep, behind the transistor stage only.** Add a second board (M20) | With an open-collector driver, active-low is the right sense (it releases on everything). The hazard was only direct GPIO drive (L1). A high-level or jumper-selectable module is no safer behind a driver, and directly driven it still fails on a pin stuck high. No swap needed |
+| SunFounder 2-ch low-level relay (#17) | **Keep, behind the transistor stage only.** Add a second board (M20, now a Must: *revised after independent review B5*) | With an open-collector driver, active-low is the right sense (it releases on everything). The hazard was only direct GPIO drive (L1). A high-level or jumper-selectable module is no safer behind a driver, and directly driven it still fails on a pin stuck high. No swap needed |
 | MAX813L (#1, no-name) | Keep (owner), test per §5.3, back up with genuine parts (M24) | Counterfeit risk |
 | Nilight fuses 5–30 A (#14) | Add M4 | Too large for 22 AWG |
 | AOD4184 modules (#18) | Keep for P1 (lamp, no shared ground) | Low-side. Before any grounded load (P2 pods), move the controller's cut to the high side (S-REPO cross-ref) |
@@ -342,5 +377,8 @@ ATtiny programming needs no new hardware. Program it **off-board** on the breadb
 | 12 V 3 A adapter (#27) | Keep | Adequate for lamps and the logic branch |
 
 ## 8. Unverified facts to check with the part in hand (bring-up list)
+
+*Added after independent review:* relay module input current `I_IN` (picks the pump parameter set, B1); K1 drop-out (at most 0.25 s) and K2 drop-out (at most 25 ms) from the last pump edge; SCR crowbar trip voltage and no trip at 5.20 V for 10 minutes; U4 VCC at least 4.9 V; WDI high at least 4.5 V; MR low at most 0.5 V; ATtiny BOD trip point and the signature (the signature alone does not prove a genuine chip); RP2350 stepping (A2 is affected by E9, A3 and A4 are fixed); the MAX813L ICC limit for the grade you have (C 350 µA, E 500 µA).
+
 
 RP2350 stepping (A2/A4, printed on the package). SunFounder relay: input-chain resistor, flyback diode present, which relay part. AOD4184 module: gate voltage at 3.3 V input, "+" terminals joined. INA228 module: I2C default address, pull-ups, whether VBUS is tied to IN−, shunt value (R002). OLED address and pull-ups. E-stop contacts both NC and positive-opening. Key switch contact type and key-removal position. Toggle hole size. Button LED current. Lamp polarity. Waveshare: USB cable included, terminal names. iiunius: terminator and bias, TTL pin names. LA: 74LVC245 fitted. Pi kit PSU: 5 A negotiation. Every USB-C cable carries data. ATtiny85 authenticity (read the signature 0x1E 0x93 0x0B).

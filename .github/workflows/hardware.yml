@@ -1,6 +1,6 @@
 name: Hardware design
 
-# Runs the hardware design checker (ci/check_hardware.py, rules HW-001 to HW-028)
+# Runs the hardware design checker (ci/check_hardware.py, rules HW-001 to HW-033)
 # on hardware/*/data and then its unit tests. See hardware/p1/README.md.
 
 on:
@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   hardware:
-    name: hardware design checks (HW-001 to HW-028)
+    name: hardware design checks (HW-001 to HW-033)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -25,6 +25,8 @@ vil_max_v = 0.8          # WDI
 voh_min_v = 3.5          # RESET/WDO at 800 uA source: VCC-1.5
 vol_max_v = 0.4
 trigger_polarity = "RESET active-high; WDO active-low; PFO active-low; MR active-low"
+abs_max_supply_v = 6.0
+output_semantics = { RESET = "pulse", WDO = "pulse" }
 default_state = { power_up = "RESET high 140-280 ms after VCC > 4.50-4.75 V", reset = "n/a", brownout = "RESET high below 4.50-4.75 V", unpowered = "outputs low (Q_CLAMP off -> variant A behaviour)", wire_off = "WDI floating disables the watchdog" }
 interfaces = ["gpio"]
 isolation_domain = "GND_SYS"
@@ -34,10 +36,11 @@ verified = true
 verified_fields = ["supply_min_v", "supply_max_v", "supply_ma_max", "vih_min_v", "vil_max_v", "voh_min_v", "vol_max_v", "trigger_polarity", "pins", "default_state.power_up", "default_state.brownout", "default_state.wire_off"]
 counterfeit_risk = true
 acceptance_passed = false
-notes = "Thresholds 4.50/4.65/4.75 V; reset 140/200/280 ms; WDT 1.00/1.60/2.25 s; PFI 1.20/1.25/1.30 V; MR pull-up 100-600 uA. Counterfeit risk: bench acceptance test required (compatibility.md 5.3)."
+notes = "Outputs are pulses: WDO low resets the watchdog timer through MR, so RESET releases after 140-280 ms and the cycle repeats (independent review B3a). Abs max VCC 6.0 V. Thresholds 4.50/4.65/4.75 V; reset 140/200/280 ms; WDT 1.00/1.60/2.25 s; PFI 1.20/1.25/1.30 V; MR pull-up 100-600 uA. Counterfeit risk: bench acceptance test required (compatibility.md 5.3)."
 
 [[part]]
 id = "U3_ATTINY85"
+trust_root = true
 maker = "Microchip (Atmel)"
 model = "ATTINY85-20PU"
 asin = "B06W9JBJJ6"
@@ -60,7 +63,7 @@ trigger_polarity = "n/a (pump output is AC; any DC level = cut)"
 default_state = { power_up = "port B tri-state until code runs", reset = "port B tri-state", brownout = "held in reset by BOD (fuse 101: 2.5-2.9 V); BOD disabled at factory", unpowered = "no output", wire_off = "pump stops" }
 interfaces = ["usi-3wire", "isp"]
 isolation_domain = "GND_SYS"
-pins = [ { name = "1", function = "PB5/RESET" }, { name = "2", function = "PB3 pump2" }, { name = "3", function = "PB4 WD_TOGGLE" }, { name = "4", function = "GND" }, { name = "5", function = "PB0 DI/MOSI" }, { name = "6", function = "PB1 DO/MISO" }, { name = "7", function = "PB2 USCK/SCK" }, { name = "8", function = "VCC" } ]
+pins = [ { name = "1", function = "PB5/RESET", debug = true }, { name = "2", function = "PB3 pump2" }, { name = "3", function = "PB4 WD_TOGGLE" }, { name = "4", function = "GND" }, { name = "5", function = "PB0 DI/MOSI", debug = true }, { name = "6", function = "PB1 DO/MISO", debug = true }, { name = "7", function = "PB2 USCK/SCK", debug = true }, { name = "8", function = "VCC" } ]
 datasheet_url = "https://ece-classes.usc.edu/ee459/library/documents/Atmel-2586-AVR-8-bit-Microcontroller-ATtiny25-ATtiny45-ATtiny85_Datasheet.pdf"
 verified = true
 verified_fields = ["supply_min_v", "supply_max_v", "vih_frac", "vil_frac", "voh_min_v", "vol_max_v", "io_max_ma", "default_state.reset", "default_state.brownout", "pins"]
@@ -266,6 +269,7 @@ verified_fields = []
 [[part]]
 id = "F1"
 kind = "fuse"
+clearing = [ { multiple = 2.0, max_ms = 5000 }, { multiple = 3.5, max_ms = 500 }, { multiple = 6.0, max_ms = 150 } ]   # Littelfuse ATO 257 1 A, worst case (independent review V29)
 maker = "Anyongora holder + M4 fuse"
 model = "Inline ATC holder, 1 A fuse"
 asin = "B0CL7MLY6T"
@@ -283,6 +287,7 @@ notes = "Holder lead is 12 AWG; fuse value from M4."
 [[part]]
 id = "F2"
 kind = "fuse"
+clearing = [ { multiple = 2.0, max_ms = 5000 }, { multiple = 3.5, max_ms = 500 }, { multiple = 6.0, max_ms = 150 } ]   # Littelfuse ATO 257 1 A, worst case (independent review V29)
 maker = "Anyongora holder + M4 fuse"
 model = "Inline ATC holder, 1 A fuse"
 asin = "B0CL7MLY6T"
@@ -313,14 +318,14 @@ verified = false
 verified_fields = []
 
 [[part]]
-id = "RLY"
+id = "RLY1"
 maker = "SunFounder"
 model = "2-channel 5 V relay, opto, low-level trigger"
 asin = "B00E0NTPP4"
 qty = 1
 status = "on-list"
-role = "K1 (RP2350 dead-man) and K2 (ATtiny watchdog cut); COM-NO in series"
-board = "RLY"
+role = "K1 (RP2350 dead-man) on channel 1 of module 1; COM-NO in series. Channel 2 unused (revised after independent review B5)"
+board = "RLY1"
 supply_min_v = 4.75
 supply_max_v = 5.25
 supply_ma_max = 150.0
@@ -331,11 +336,36 @@ trigger_polarity = "active-low (IN low = energised)"
 default_state = { power_up = "IN floats high -> released", reset = "n/a", brownout = "coil may stay held down to ~10 % of 5 V once pulled in", unpowered = "released", wire_off = "IN open -> released; VCC/GND off -> released" }
 interfaces = ["gpio"]
 isolation_domain = "GND_SYS"
-pins = [ { name = "VCC", function = "input side" }, { name = "GND", function = "GND" }, { name = "IN1", function = "K1 drive" }, { name = "IN2", function = "K2 drive" }, { name = "JD-VCC", function = "coil supply" }, { name = "K1.COM", function = "contact" }, { name = "K1.NO", function = "contact" }, { name = "K1.NC", function = "unused" }, { name = "K2.COM", function = "contact" }, { name = "K2.NO", function = "contact" }, { name = "K2.NC", function = "unused" } ]
+pins = [ { name = "VCC", function = "input side supply" }, { name = "GND", function = "GND" }, { name = "IN1", function = "channel 1 drive" }, { name = "IN2", function = "channel 2 drive (unused, tied to VCC through 1 k)" }, { name = "JD-VCC", function = "coil supply" }, { name = "CH1.COM", function = "contact" }, { name = "CH1.NO", function = "contact" }, { name = "CH1.NC", function = "unused" }, { name = "CH2.COM", function = "contact (unused)" }, { name = "CH2.NO", function = "contact (unused)" }, { name = "CH2.NC", function = "contact (unused)" } ]
 datasheet_url = "https://components101.com/switches/5v-dual-channel-relay-module-pinout-features-applications-working-datasheet"
 verified = false
 verified_fields = []
-notes = "Reference design only. NEVER drive IN from a GPIO (back-feed and inverted sense); only from a 2N3904 open collector."
+notes = "Input current UNVERIFIED: measure I_IN (IN1 to GND through the meter at 5.05 V) before choosing the pump values (independent review B1). Reference design only. NEVER drive IN from a GPIO (back-feed and inverted sense); only from a 2N3904 open collector."
+
+[[part]]
+id = "RLY2"
+maker = "SunFounder"
+model = "2-channel 5 V relay, opto, low-level trigger"
+asin = "B00E0NTPP4"
+qty = 1
+status = "missing-must"
+role = "K2 (ATtiny watchdog cut) on channel 1 of module 2, a separate board from K1; COM-NO in series. Channel 2 unused (revised after independent review B5)"
+board = "RLY2"
+supply_min_v = 4.75
+supply_max_v = 5.25
+supply_ma_max = 150.0
+power_group = "5V"
+logic_v = 5.0
+input_current_ma = 3.0
+trigger_polarity = "active-low (IN low = energised)"
+default_state = { power_up = "IN floats high -> released", reset = "n/a", brownout = "coil may stay held down to ~10 % of 5 V once pulled in", unpowered = "released", wire_off = "IN open -> released; VCC/GND off -> released" }
+interfaces = ["gpio"]
+isolation_domain = "GND_SYS"
+pins = [ { name = "VCC", function = "input side supply" }, { name = "GND", function = "GND" }, { name = "IN1", function = "channel 1 drive" }, { name = "IN2", function = "channel 2 drive (unused, tied to VCC through 1 k)" }, { name = "JD-VCC", function = "coil supply" }, { name = "CH1.COM", function = "contact" }, { name = "CH1.NO", function = "contact" }, { name = "CH1.NC", function = "unused" }, { name = "CH2.COM", function = "contact (unused)" }, { name = "CH2.NO", function = "contact (unused)" }, { name = "CH2.NC", function = "contact (unused)" } ]
+datasheet_url = "https://components101.com/switches/5v-dual-channel-relay-module-pinout-features-applications-working-datasheet"
+verified = false
+verified_fields = []
+notes = "Input current UNVERIFIED: measure I_IN (IN1 to GND through the meter at 5.05 V) before choosing the pump values (independent review B1). Reference design only. NEVER drive IN from a GPIO (back-feed and inverted sense); only from a 2N3904 open collector."
 
 [[part]]
 id = "MOS_A"
@@ -463,6 +493,7 @@ notes = "DC rating and positive-opening action UNVERIFIED."
 [[part]]
 id = "RP_TR"
 trust_root = true
+erratum = { id = "RP2350-E9", affects_steppings = ["A2"], fixed_in = ["A3", "A4"], max_pulldown_ohm = 8200 }
 maker = "Waveshare"
 model = "RP2350-Zero (RP2350A)"
 asin = "B0DYTVCF2H"
@@ -483,7 +514,7 @@ vih_min_v = 2.0
 vil_max_v = 0.8
 abs_max_input_v = 5.5
 tolerance_condition = "powered"
-io_max_ma = 4.0           # default drive strength setting
+io_max_ma = 8.0           # firmware sets GP12/GP13/GP14 pad drive to 8 mA (independent review non-blocking 10)
 trigger_polarity = "n/a"
 default_state = { power_up = "pads isolated, pull-down on (~35-189 k); firmware drives outputs low before releasing ISO", reset = "pull-down, isolated", brownout = "chip reset -> as reset", unpowered = "pins ~0 V; ESD diodes conduct back-feed", wire_off = "n/a" }
 interfaces = ["gpio", "uart", "spi", "i2c", "swd", "usb"]
@@ -497,12 +528,12 @@ pins = [
   { name = "GP12", function = "RAIL_A_ENABLE" }, { name = "GP13", function = "RAIL_B_ENABLE[0]" }, { name = "GP14", function = "CHARGE_PUMP" },
   { name = "GP15", function = "LEASE_LED" }, { name = "GP16", function = "on-board WS2812 (reserved)" }, { name = "GP26", function = "I2C1 SDA" },
   { name = "GP27", function = "I2C1 SCL" }, { name = "GP28", function = "RAIL_B_SENSE[0]" }, { name = "GP29", function = "MID_SENSE" },
-  { name = "SWCLK", function = "pad" }, { name = "SWDIO", function = "pad" }, { name = "USB", function = "NOT CONNECTED (no VBUS diode)" }
+  { name = "SWCLK", function = "pad", debug = true }, { name = "SWDIO", function = "pad", debug = true }, { name = "USB", function = "NOT CONNECTED (no VBUS diode)" }
 ]
 datasheet_url = "https://www.waveshare.com/wiki/RP2350-Zero"
 verified = true
 verified_fields = ["supply_out_ma", "pins.GP16", "tolerance_condition", "default_state.reset"]
-notes = "GP16 = WS2812 and GP17+ on pads (Zephyr dtsi). 5 V tolerant only with IOVDD powered (RPi A4 note). E9 on A2 stepping: external pull-downs."
+notes = "GP16 = WS2812 and GP17+ on pads (Zephyr dtsi). 5 V tolerant only with IOVDD powered (RPi A4 note). E9 affects stepping A2 only (fixed in A3 and A4): leakage holds a pad near 2.2 V, so safe-low inputs need pull-downs of 8.2 kohm or less, fitted 4.7 kohm (independent review V4, V5)."
 
 [[part]]
 id = "RP_GUARD"
@@ -545,12 +576,14 @@ notes = "Needs USB high speed. Host on the Mac for exit test 4."
 
 [[part]]
 id = "PICO"
+kind = "probe"
+passthrough = true
 maker = "Bicool (Raspberry Pi)"
 model = "Pico RP2040, headers"
 asin = "B08X7HN2VG"
 qty = 1
 status = "on-list"
-role = "SWD debug probe (debugprobe firmware)"
+role = "SWD debug probe (debugprobe firmware), hosted on the Mac only, never on the Pi (independent review B4)"
 logic_v = 3.3
 interfaces = ["usb", "swd"]
 isolation_domain = "GND_SYS"
@@ -569,6 +602,7 @@ qty = 1
 status = "on-list"
 role = "Bench 12 V (load + logic branches)"
 supply_out_ma = 3000.0
+max_fault_a = 5.0         # UNVERIFIED adapter short-circuit current (independent review V29: about 2-5 A)
 power_group = "12V"
 pins = [ { name = "+", function = "barrel centre" }, { name = "-", function = "barrel sleeve" } ]
 datasheet_url = ""
@@ -589,6 +623,7 @@ verified_fields = []
 
 [[part]]
 id = "PI5"
+ai_host = true
 maker = "iRasptek (Raspberry Pi)"
 model = "Pi 5 4 GB kit"
 asin = "B0FL21867J"
@@ -613,8 +648,8 @@ id = "MAC"
 maker = "Apple"
 model = "MacBook Pro M3"
 status = "owned"
-role = "Analyzer host for exit test 4"
-pins = [ { name = "USB", function = "USB to the logic analyzer (exit test 4 host)" } ]
+role = "Analyzer host for exit test 4 and the only host of the SWD debug probe"
+pins = [ { name = "USBA", function = "USB to the logic analyzer" }, { name = "USBB", function = "USB to the Pico debug probe (SWD host, never the Pi)" } ]
 datasheet_url = ""
 verified = false
 verified_fields = []
@@ -696,6 +731,7 @@ status = "missing-must"
 role = "3V3_WD for the ATtiny (independent supply)"
 board = "WD"
 supply_out_ma = 250.0
+abs_max_supply_v = 6.5
 power_group = "3V3_WD"
 pins = [ { name = "IN", function = "WD 5 V" }, { name = "OUT", function = "3V3_WD" }, { name = "GND", function = "GND" } ]
 datasheet_url = ""
@@ -703,14 +739,28 @@ verified = false
 verified_fields = []
 
 [[part]]
-id = "M6_ZENER"
+id = "M6_SCR"
 kind = "crowbar"
-model = "1N5339B 5.6 V 5 W"
+maker = "WeEn"
+model = "BT151-500R SCR, TO-220, 12 A, IGT 15 mA max"
 status = "missing-must"
-role = "5 V rail crowbar (blows F2 on buck short)"
+role = "5 V rail crowbar (revised after independent review B2; replaces the 1N5339B zener): anode to +5V, cathode to GND, gate from the TL431A. Fires at 5.32-5.66 V and blows F2"
 board = "PWR"
-pins = [ { name = "K", function = "+5V" }, { name = "A", function = "GND" } ]
+pins = [ { name = "A", function = "+5V" }, { name = "K", function = "GND" }, { name = "G", function = "gate from M6B_TL431A" } ]
 datasheet_url = ""
+verified = false
+verified_fields = []
+notes = "Gate network: 220 ohm in series, 10 nF gate to cathode. Bench acceptance: fires at 5.32-5.66 V, does not fire at 5.20 V for 10 minutes."
+
+[[part]]
+id = "M6B_TL431A"
+maker = "TI"
+model = "TL431A adjustable shunt reference, TO-92"
+status = "missing-must"
+role = "SCR crowbar trigger: cathode to +5V, anode to the SCR gate, REF from 12.0 k / 10.0 k 1 % divider (trip 2.495 x 2.2 = 5.49 V nominal) with 1 nF REF to GND"
+board = "PWR"
+pins = [ { name = "K", function = "+5V" }, { name = "A", function = "SCR gate" }, { name = "REF", function = "divider midpoint" } ]
+datasheet_url = "https://www.ti.com/product/TL431A"
 verified = false
 verified_fields = []
 
@@ -729,7 +779,7 @@ verified_fields = []
 id = "M8_2N3904"
 model = "2N3904 NPN"
 status = "missing-must"
-role = "Q51, Q61 (pump holds), Q62 (WDI shift), Q63 (clamp), lease LED"
+role = "Q51, Q61 (pump holds), Q62 (WDI shift), Q63 (clamp), Q64 (ATtiny reset on a MAX813L timeout), lease LED. Buy a 50-pack"
 pins = [ { name = "E", function = "emitter" }, { name = "B", function = "base" }, { name = "C", function = "collector" } ]
 datasheet_url = ""
 verified = false
@@ -737,27 +787,27 @@ verified_fields = []
 
 [[part]]
 id = "M9_SCHOTTKY"
-model = "BAT43/BAT85/1N5817"
+model = "BAT43 (BAT85 acceptable), x8"
 status = "missing-must"
-role = "Pump diodes D51 D52 D61 D62"
+role = "Pump diodes D51 D52 D61 D62 and the MR diode-AND D63 D64 (revised after independent review: BAT43 replaces the 1N4148)"
 datasheet_url = ""
 verified = false
 verified_fields = []
 
 [[part]]
 id = "M10_CAPS"
-model = "100 nF film x4, 1 uF film x2, 100 nF ceramic x8, 10 uF x4"
+model = "Film (polyester or PP, 63 V): 1 uF x4, 2.2 uF x4, 220 nF x2. Electrolytic: 10 uF x4, 22 uF x4. Ceramic: 100 nF x8, 1 nF x2, 10 nF x2"
 status = "missing-must"
-role = "Pumps, decoupling"
+role = "Pumps and decoupling (revised after independent review B1: set 1 uses 1 uF film and 10 uF; set 2 uses 2.2 uF film and 22 uF; K2 pump uses 220 nF film)"
 datasheet_url = ""
 verified = false
 verified_fields = []
 
 [[part]]
 id = "M11_DIODES"
-model = "1N4148 x4, 1N4007 x2"
+model = "1N4007 x4 (1N4148 x4 for the opto LED reverse clamp)"
 status = "missing-must"
-role = "MR diode-AND (variant B), WD reverse protection, opto LED reverse clamp"
+role = "Opto LED reverse clamp and K0 coil. The WD reverse-protection 1N4007 is deleted (independent review B3b)"
 datasheet_url = ""
 verified = false
 verified_fields = []
@@ -775,7 +825,7 @@ verified_fields = []
 id = "M13_MICROUSB"
 model = "USB-A to micro-B data cable"
 status = "missing-must"
-role = "Pico probe"
+role = "Pico probe, on the Mac (independent review B4)"
 datasheet_url = ""
 verified = false
 verified_fields = []
@@ -835,16 +885,6 @@ verified = false
 verified_fields = []
 
 [[part]]
-id = "M20_RLY2"
-model = "SunFounder 2-ch relay (second board)"
-asin = "B00E0NTPP4"
-status = "missing-should"
-role = "Put K2 on its own board (common-cause split)"
-datasheet_url = ""
-verified = false
-verified_fields = []
-
-[[part]]
 id = "M21_PDTRIG"
 model = "USB-C PD trigger 15 V"
 status = "missing-nice"
@@ -869,5 +909,33 @@ model = "MAX813LCPA+ x2 (DigiKey/Mouser)"
 status = "missing-should"
 role = "Acceptance-test control and fallback for U4"
 datasheet_url = "https://www.analog.com/media/en/technical-documentation/data-sheets/MAX705-MAX813L.pdf"
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M25_RESISTORS"
+model = "1 % resistors: 12.0 k x2, 10.0 k x2, 220 ohm x2, 2.2 k, 4.7 k x10, 47 k x2, 0 ohm links x4 (plus the owner's assortment)"
+status = "missing-must"
+role = "SCR crowbar divider and gate, R67 2.2 k, sense pull-downs 4.7 k, pump values, R70 0 ohm. Check that the owner's assortment is 1 % before buying"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M26_JSTXH"
+model = "JST-XH 2.54 mm connector kit with crimper (2, 3 and 4 pin housings, headers)"
+status = "missing-must"
+role = "Keyed connectors on every safety signal: relay module headers, SWD lead, WD 5 V (independent review B5)"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M27_K0"
+maker = "generic"
+model = "SRD-12VDC-SL-C 12 V SPDT relay, bare"
+status = "missing-should"
+role = "K0 seal-in relay: no restart on e-stop release (independent review non-blocking 3). OPEN OWNER DECISION: recommended, not a must. Needs one more PC817 and a spare CB16AY as START"
+datasheet_url = ""
 verified = false
 verified_fields = []

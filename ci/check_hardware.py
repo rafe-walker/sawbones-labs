@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hardware design checker (HW-001 .. HW-028).
+"""Hardware design checker (HW-001 .. HW-033).
 
 Runs the script-checkable rules of hardware/p1/method.md against the
 machine-readable design in hardware/<stage>/data/{parts,netlist,safety_paths}.toml.
@@ -25,14 +25,16 @@ from pathlib import Path
 
 JOINTS = {
     "soldered-to-board", "wired-and-soldered", "screw-terminal", "dupont",
-    "crimp-spade", "barrel", "usb", "ribbon", "panel-terminal",
+    "crimp-spade", "barrel", "usb", "ribbon", "panel-terminal", "jst-xh",
 }
+UNKEYED_JOINTS = {"dupont"}  # a misplug can short a safety signal (independent review B5)
 VARIANTS = ("A", "B", "both")
 EXIT_TESTS = (1, 2, 3, 4, 5, 6)  # the six P1 exit tests (#279)
 STATES = ("power_up", "reset", "brownout", "unpowered", "wire_off")
 LOAD_STATES = {"off", "off-detected", "on-bounded", "on"}
 MARGIN_V = 0.3        # logic level margin (method.md C-04)
 BUDGET = 0.8          # share of a source's rating that may be used (C-09)
+PUMP_MARGIN_V = 0.1   # hold voltage above the base turn-on level (HW-031)
 BACKFEED_R_OHM = 1000  # series resistor that makes an unpowered back-feed safe (C-07)
 
 # Fault rows that may carry verdict FAIL / load_state "on". Each needs a reason.
@@ -72,6 +74,11 @@ RULE_NAMES = {
     "HW-026": "trust root has no USB lead and only removable debug leads",
     "HW-027": "no-name parts and fuse bytes have a bench or datasheet check",
     "HW-028": "datasheet provenance (information only)",
+    "HW-029": "rail clamp: voltage within every part's abs max, rating outlasts the fuse",
+    "HW-030": "no AI-controlled host has a path to a trust-root debug or programming pin",
+    "HW-031": "charge-pump hold voltage turns the driven stage on",
+    "HW-032": "pull-down values respect the part's erratum limit",
+    "HW-033": "a cut driven by a pulse output is latched, not assumed held",
 }
 
 POWER_RE = re.compile(r"\b(gnd|ground|vcc|supply|5v|3v3|vbus)\b", re.I)
@@ -106,6 +113,8 @@ class Model:
         self.nodes_list = data.get("netlist", {}).get("node", [])
         self.conns = data.get("netlist", {}).get("connection", [])
         self.paths = data.get("paths", {}).get("path", [])
+        self.pumps = data.get("paths", {}).get("pump", [])
+        self.clamps = data.get("paths", {}).get("clamp", [])
         self.faults = data.get("paths", {}).get("fault", [])
         self.parts, self.nets, self.nodes = {}, {}, {}
         for p in self.parts_list:
@@ -537,6 +546,10 @@ def rule_converters(m, rep, view, v):
                             stack.append(n)
             if not found:
                 rep.add("HW-013", "FAIL", f"{p['id']}: no crowbar on the output rail, so a shorted buck is not forced to blow its fuse", (p["id"],), v)
+            else:
+                crows = {pp["id"] for pp in m.parts_list if pp.get("kind") == "crowbar"}
+                if crows and not any(c.get("part") in crows for c in m.clamps):
+                    rep.add("HW-013", "FAIL", f"{p['id']}: the crowbar has no [[clamp]] record, so its voltage and rating are not checked (HW-029)", (p["id"],), v)
     rep.count("HW-012", n12, v)
     rep.count("HW-013", n13, v)
 
@@ -827,9 +840,17 @@ def rule_independence(m, rep):
             rep.add("HW-020", "FAIL", f"path {p['id']}: no two controlled series elements have independent controllers", (p["id"],))
             continue
         for a, b in pairs:
-            shared = [k for k in ("board", "supply_net") if a.get(k) and a.get(k) == b.get(k)]
-            if shared:
-                rep.add("HW-020", "WARN", f"path {p['id']}: {a['id']} and {b['id']} have independent controllers but share {' and '.join(shared)} (common cause)", (p["id"], a["id"], b["id"]))
+            if a.get("part") == b.get("part"):
+                rep.add("HW-020", "FAIL", f"path {p['id']}: {a['id']} and {b['id']} have independent controllers but are on the same module {a['part']}: one slip on its header or one shorted input holds both cuts (common cause)", (p["id"], a["id"], b["id"]))
+            elif a.get("board") and a.get("board") == b.get("board"):
+                rep.add("HW-020", "FAIL", f"path {p['id']}: {a['id']} and {b['id']} share board {a['board']} (common cause)", (p["id"], a["id"], b["id"]))
+            elif a.get("supply_net") and a.get("supply_net") == b.get("supply_net"):
+                rep.add("HW-020", "WARN", f"path {p['id']}: {a['id']} and {b['id']} share supply {a['supply_net']}: safe only while the rail clamp (HW-029) holds", (p["id"], a["id"], b["id"]))
+        for e in els:
+            for c in m.conns:
+                for ep in (c.get("from"), c.get("to")):
+                    if m.part_of(ep) is not None and m.part_of(ep)["id"] == e.get("part") and c.get("joint") in UNKEYED_JOINTS:
+                        rep.add("HW-020", "FAIL", f"{c['id']}: {c['joint']} connector on {ep}, a signal of controlled element {e['id']} on path {p['id']}: use a keyed connector or a screw terminal", (c["id"], p["id"]), c.get("variant", "both"))
         rep.count("HW-020")
 
 
@@ -850,14 +871,149 @@ def rule_provenance(m, rep):
     rep.count("HW-028", len(ps))
 
 
+
+def rule_clamps(m, rep):
+    for c in m.clamps:
+        cid = c.get("id", "?")
+        part, net = m.parts.get(c.get("part")), m.nets.get(c.get("rail"))
+        if part is None or net is None:
+            rep.add("HW-029", "FAIL", f"clamp {cid}: part {c.get('part')!r} or rail {c.get('rail')!r} is not declared", (cid,))
+            continue
+        if num(c.get("trip_min_v")) and num(net.get("max_v")) and c["trip_min_v"] <= net["max_v"] + 1e-9:
+            rep.add("HW-029", "FAIL", f"clamp {cid}: it can fire at {c['trip_min_v']} V, inside the rail's normal range up to {net['max_v']} V", (cid,))
+        unknown = []
+        for pid in c.get("protects", []):
+            lim = (m.parts.get(pid) or {}).get("abs_max_supply_v")
+            if not num(lim):
+                unknown.append(pid)
+            elif c.get("clamp_v_max", 0) > lim + 1e-9:
+                rep.add("HW-029", "FAIL", f"clamp {cid}: the rail can reach {c['clamp_v_max']} V before it acts, over the {lim} V absolute maximum of {pid}", (cid, pid))
+        if unknown:
+            rep.add("HW-029", "WARN", f"clamp {cid}: no abs_max_supply_v recorded for {', '.join(unknown)}; the clamp level is not checked against them", (cid,))
+        fuse, src = m.parts.get(c.get("fuse")), m.parts.get(c.get("source"))
+        if not fuse or not src or not num(src.get("max_fault_a")) or not num(fuse.get("rating_a")):
+            rep.add("HW-029", "FAIL", f"clamp {cid}: needs a fuse with rating_a and a source with max_fault_a", (cid,))
+            continue
+        mult = src["max_fault_a"] / fuse["rating_a"]
+        table = sorted(fuse.get("clearing", []), key=lambda r: r["multiple"])
+        usable = [r for r in table if r["multiple"] <= mult + 1e-9]
+        if not usable:
+            rep.add("HW-029", "FAIL", f"clamp {cid}: fault current {src['max_fault_a']} A is only {mult:.1f} x the {fuse['id']} rating, so the fuse may never clear", (cid, fuse["id"]))
+            continue
+        clear_ms = usable[-1]["max_ms"]
+        if num(c.get("rated_a")) and c["rated_a"] < src["max_fault_a"] - 1e-9:
+            rep.add("HW-029", "FAIL", f"clamp {cid}: rated {c['rated_a']} A, below the {src['max_fault_a']} A the source can deliver", (cid,))
+        elif c.get("rated_ms", 0) and c["rated_ms"] < clear_ms:
+            rep.add("HW-029", "FAIL", f"clamp {cid}: rated for {c['rated_ms']} ms but {fuse['id']} can take up to {clear_ms} ms to clear at {src['max_fault_a']} A: the clamp can fail before the fuse blows", (cid, fuse["id"]))
+    rep.count("HW-029", len(m.clamps))
+
+
+def rule_ai_host_debug(m, rep, view, v):
+    adj = {}
+    for c in view:
+        if m.nets.get(c.get("net"), {}).get("domain") == "GND":
+            continue
+        a, b = c.get("from"), c.get("to")
+        if isinstance(a, str) and isinstance(b, str):
+            adj.setdefault(a, set()).add(b)
+            adj.setdefault(b, set()).add(a)
+    hosts = [p for p in m.parts_list if p.get("ai_host")]
+    for h in hosts:
+        starts = [f"{h['id']}:{x['name']}" for x in h.get("pins", [])]
+        seen, stack = set(starts), list(starts)
+        while stack:
+            ep = stack.pop()
+            e = m.endpoint(ep)
+            nxt = set(adj.get(ep, ()))
+            part = m.parts.get(e[1]) if e and e[0] == "pin" else None
+            if part is not None and e[1] != h["id"]:
+                if part.get("trust_root") and any(x.get("name") == e[2] and x.get("debug") for x in part.get("pins", [])):
+                    rep.add("HW-030", "FAIL", f"{h['id']} (AI-controlled host) reaches debug or programming pin {ep} of trust-root part {part['id']}: code on the host could defeat every electronic cut", (h["id"], part["id"]), v)
+                if part.get("passthrough"):
+                    nxt |= {f"{part['id']}:{x['name']}" for x in part.get("pins", [])}
+            for n in nxt:
+                if n not in seen:
+                    seen.add(n)
+                    stack.append(n)
+    rep.count("HW-030", len(hosts), v)
+
+
+def solve_hold(pump, i_in_ma):
+    f = 1e6 / (2.0 * pump["toggle_period_us"])
+    a = pump["vpp_v"] - 2 * pump["diode_vf_v"]
+    import math
+    k = 1 - math.exp(-(1 / (2 * f)) / (pump["r_series_ohm"] * pump["c_series_f"]))
+    fc = f * pump["c_series_f"] * k
+    hold = (fc * a + pump["vbe_v"] / pump["r_base_ohm"]) / (fc + 1 / pump["r_bleed_ohm"] + 1 / pump["r_base_ohm"])
+    need = pump["vbe_v"] + pump["r_base_ohm"] * (i_in_ma / 1000.0) / pump["hfe_min"] + PUMP_MARGIN_V
+    return f, hold, need
+
+
+def rule_pumps(m, rep):
+    for pu in m.pumps:
+        pid = pu.get("id", "?")
+        relay = m.parts.get(pu.get("relay"))
+        try:
+            i_in = pu["load_ma"] if num(pu.get("load_ma")) else relay["input_current_ma"]
+            f, hold, need = solve_hold(pu, i_in)
+        except (KeyError, TypeError, ZeroDivisionError):
+            rep.add("HW-031", "FAIL", f"pump {pid}: incomplete data (needs toggle_period_us, vpp_v, c_series_f, r_series_ohm, diode_vf_v, r_bleed_ohm, r_base_ohm, vbe_v, hfe_min and the relay's input_current_ma)", (pid,))
+            continue
+        if hold < need:
+            rep.add("HW-031", "FAIL", f"pump {pid} ({pu.get('element')}): at {f:g} Hz the hold node settles at {hold:.2f} V, below the {need:.2f} V needed to drive {i_in:g} mA through the relay input (base turn-on, hfe {pu['hfe_min']:g}, margin {PUMP_MARGIN_V} V): the relay never pulls in", (pid,))
+    rep.count("HW-031", len(m.pumps))
+
+
+def rule_erratum_pulldowns(m, rep, view, v):
+    n = 0
+    for c in view:
+        for ep in (c.get("from"), c.get("to")):
+            part = m.part_of(ep)
+            err = (part or {}).get("erratum")
+            if not err or not num(err.get("max_pulldown_ohm")):
+                continue
+            pd = c.get("pulldown_ohm")
+            if pd is not None:
+                n += 1
+                if num(pd) and pd > err["max_pulldown_ohm"] + 1e-9:
+                    rep.add("HW-032", "FAIL", f"{c['id']}: {pd:g} ohm pull-down on {ep} is above the {err['max_pulldown_ohm']:g} ohm that overcomes erratum {err.get('id')} on stepping(s) {', '.join(err.get('affects_steppings', []))}", (c["id"],), v)
+            elif c.get("safe_state") == "low":
+                rep.add("HW-032", "WARN", f"{c['id']}: {ep} is read as safe when low but declares no pulldown_ohm (erratum {err.get('id')})", (c["id"],), v)
+    rep.count("HW-032", n, v)
+
+
+def rule_cut_semantics(m, rep):
+    n = 0
+    for p in m.paths:
+        for e in p.get("series_elements", []):
+            srcs = e.get("cut_sources")
+            if not srcs:
+                continue
+            n += 1
+            claim = e.get("cut_claim")
+            for src in srcs:
+                ep = m.endpoint(src)
+                part = m.parts.get(ep[1]) if ep and ep[0] == "pin" else None
+                sem = ((part or {}).get("output_semantics") or {}).get(ep[2] if ep else "")
+                if part is None or sem is None:
+                    rep.add("HW-033", "FAIL", f"path {p['id']}: cut source {src} of {e['id']} has no output_semantics in the part record", (p["id"], e["id"]))
+                elif sem == "pulse" and claim == "held":
+                    rep.add("HW-033", "FAIL", f"path {p['id']}: {e['id']} is assumed held off by {src}, but that output is a pulse (a watchdog timeout clears itself through MR and RESET releases after a delay)", (p["id"], e["id"]))
+                elif sem == "pulse" and claim == "pulse-latched" and not str(e.get("latch", "")).strip():
+                    rep.add("HW-033", "FAIL", f"path {p['id']}: {e['id']} relies on pulse output {src} but names no latch that makes the cut permanent", (p["id"], e["id"]))
+                elif claim not in ("held", "pulse-latched"):
+                    rep.add("HW-033", "FAIL", f"path {p['id']}: {e['id']} cut_claim {claim!r} is not 'held' or 'pulse-latched'", (p["id"], e["id"]))
+    rep.count("HW-033", n)
+
+
 # ---------------------------------------------------------------- driver
 
 PER_VIEW = (rule_joints, rule_declared, rule_levels, rule_overvoltage, rule_backfeed, rule_drive_current,
             rule_converters, rule_i2c, rule_isolation, rule_usb_ports, rule_pins, rule_trust_root,
-            rule_probes, rule_safety_observed)
+            rule_probes, rule_safety_observed, rule_ai_host_debug, rule_erratum_pulldowns)
 GLOBAL = (rule_structure, rule_paths, rule_rail_budget, rule_fuse_wire, rule_exit_tests, rule_failsafe,
           rule_active_low, rule_fault_coverage, rule_fault_rows, rule_independence, rule_acceptance,
-          rule_provenance)
+          rule_provenance, rule_clamps, rule_pumps, rule_cut_semantics)
 
 
 def check(data):

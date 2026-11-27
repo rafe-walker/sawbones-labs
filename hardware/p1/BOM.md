@@ -22,7 +22,7 @@ The parts the P1 bench is built from, with the manufacturer, model, ASIN, quanti
 | 14 | Nilight | 50029R 5-30 A | B07Q9PL4R6 | 1 (120 fuses, 5-30 A) | Spares only: too large for the 22 AWG load path (FUSE_KIT) | none recorded |
 | 15 | Anyongora holder + M4 fuse | Inline ATC holder, 1 A fuse | B0CL7MLY6T | 1 (4 holders + 40 fuses) | Load branch fuse; Logic branch fuse (taken before the e-stop); blown by the M6 crowbar (F1, F2) | none recorded |
 | 16 | Gebildet | AD16-22D/S 12-24 V 20 mA | B0816FMP9B | 1 (12 pcs) | Loads (lamp A, lamp B) and indicators (L_PWR, L_BUS) (LAMP) | none recorded |
-| 17 | SunFounder | 2-channel 5 V relay, opto, low-level trigger | B00E0NTPP4 | 1 | K1 (RP2350 dead-man) and K2 (ATtiny watchdog cut); COM-NO in series; Put K2 on its own board (common-cause split) (RLY, M20_RLY2) | https://components101.com/switches/5v-dual-channel-relay-module-pinout-features-applications-working-datasheet |
+| 17 | SunFounder | 2-channel 5 V relay, opto, low-level trigger | B00E0NTPP4 | 1 | K1 (RP2350 dead-man) and K2 (ATtiny watchdog cut); COM-NO in series; K2 is on its own module (RLY2, M20), a must (RLY1; K2 is on the second module M20, RLY2) | https://components101.com/switches/5v-dual-channel-relay-module-pinout-features-applications-working-datasheet |
 | 18 | DIYables | AOD4184 opto MOSFET module | B0G5NNG1VZ | 1 (5 modules) | Rail A enable (low side), GP12; Rail B port 0 enable (low side), GP13 (MOS_A, MOS_B) | https://protosupplies.com/product/d4184-mosfet-control-module/ |
 | 19 | Hosyond | 0.96 in SSD1306 I2C | B09T6SJBV5 | 1 (5 pcs) | Trusted panel display (OLED) | none recorded |
 | 20 | mxuteuk | CB16AY-11D-DC12V | B086SPXGTS | 1 (5 pcs) | Lease (panel approval) button; 12 V LED (BTN_LEASE) | none recorded |
@@ -45,24 +45,27 @@ The parts the P1 bench is built from, with the manufacturer, model, ASIN, quanti
 | M3 | Female 5.5x2.1 barrel to screw terminal, x2 | must | Land the 12 V adapter |  | none recorded |
 | M4 | ATC 1 A and 2 A, 5 each | must | F1, F2 |  | none recorded |
 | M5 | MCP1700-3302E/TO or AMS1117-3.3 module | must | 3V3_WD for the ATtiny (independent supply) |  | none recorded |
-| M6 | 1N5339B 5.6 V 5 W | must | 5 V rail crowbar (blows F2 on buck short) |  | none recorded |
+| M6 | BT151-500R SCR (TO-220) x2 and TL431A (TO-92) x2, 12.0 k and 10.0 k 1 % resistors, 220 ohm, 1 nF and 10 nF ceramics | must | SCR crowbar, trips at 5.32 to 5.66 V (blows F2 on buck short); replaces the 1N5339B zener |  | none recorded |
 | M7 | PC817 DIP-4 x5 (+spares) | must | U-ARM, U-KEY, U-MID, U-RA, U-RB sense |  | none recorded |
-| M8 | 2N3904 NPN | must | Q51, Q61 (pump holds), Q62 (WDI shift), Q63 (clamp), lease LED |  | none recorded |
-| M9 | BAT43/BAT85/1N5817 | must | Pump diodes D51 D52 D61 D62 |  | none recorded |
-| M10 | 100 nF film x4, 1 uF film x2, 100 nF ceramic x8, 10 uF x4 | must | Pumps, decoupling |  | none recorded |
-| M11 | 1N4148 x4, 1N4007 x2 | must | MR diode-AND (variant B), WD reverse protection, opto LED reverse clamp |  | none recorded |
+| M8 | 2N3904 NPN, 50 pack | must | Q51, Q61 (pump holds), Q62 (WDI shift), Q63 (clamp), Q64 (variant B ATtiny reset), lease LED |  | none recorded |
+| M9 | BAT43 x8 | must | Pump diodes D51 D52 D61 D62 and MR diode-AND D63 D64 (BAT43 required, 1N4148 leaves too little margin) |  | none recorded |
+| M10 | Film caps 1 uF x4, 2.2 uF x4, 220 nF x2 (63 V); electrolytics 10 uF x4, 22 uF x4; 100 nF ceramic x8 | must | Pumps (set 1 and set 2 by measured relay input current), decoupling |  | none recorded |
+| M11 | 1N4007 x4 | must | Opto LED reverse clamp and K0 flyback; not in series with the WD supply |  | none recorded |
 | M12 | DIP-8 turned-pin socket x4 | must | U3 ATtiny (off-board ISP), U4 MAX813L |  | none recorded |
-| M13 | USB-A to micro-B data cable | must | Pico probe |  | none recorded |
+| M13 | USB-A to micro-B data cable | must | Pico probe, on the Mac only |  | none recorded |
 | M14 | USB-A to USB-B cable | must | Waveshare adapter (if not in the box) |  | none recorded |
 | M15 | 47 ohm 5 W wirewound x2 (or 12 V 194 bulb + socket x2) | should | Real current for INA228 evidence |  | none recorded |
 | M16 | Printed PETG plate + 22 mm panel | must | Mounting |  | none recorded |
 | M17 | 0.34 mm2 ferrules + crimper | should | Stranded wire into screw terminals |  | none recorded |
 | M18 | 2.54 mm jumper shunts | should | Firmware jumper, J_B |  | none recorded |
 | M19 | 2.54 mm female header strips | should | Socket the RP2350-Zero boards |  | none recorded |
-| M20 | SunFounder 2-ch relay (second board) | should | Put K2 on its own board (common-cause split) | B00E0NTPP4 | none recorded |
+| M20 | SunFounder 2-ch relay (second module) | must | K2 on its own module (common-cause split, independent review B5) | B00E0NTPP4 | none recorded |
 | M21 | USB-C PD trigger 15 V | nice | AD584 10 V output |  | none recorded |
 | M22 | ZB2-BE101 NO contact block | nice | Dry key sense |  | none recorded |
-| M24 | Analog Devices MAX813LCPA+ x2 (DigiKey/Mouser) | should | Acceptance-test control and fallback for U4 |  | https://www.analog.com/media/en/technical-documentation/data-sheets/MAX705-MAX813L.pdf |
+| M24 | Analog Devices MAX813LCPA+ x2 (genuine, DigiKey or Mouser only; not sold by marketplace resellers) | should | Acceptance-test control and fallback for U4 |  | https://www.analog.com/media/en/technical-documentation/data-sheets/MAX705-MAX813L.pdf |
+| M25 | Resistors: 4.7 k x10, 47 k x2, 2.2 k x1, 1 k x2, 0 ohm links x4 (1 % where stated) | must | E9 pull-downs, pump networks, R67, R70, IN2 tie-up |  | none recorded |
+| M26 | JST-XH 2.54 mm kit with crimper | must | Keyed connectors on every safety signal and the SWD lead |  | none recorded |
+| M27 | K0 seal-in kit: SRD-12VDC-SL-C, 1N4007, spare CB16AY (START), extra PC817 | nice | Restart-on-release protection (test 4c); recommended, open owner decision |  | none recorded |
 
 ## Owned
 

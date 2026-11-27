@@ -1,6 +1,6 @@
 # Bench build compatibility and safety review: the method
 
-A repeatable checklist for any Sawbones bench build. A script ([`ci/check_hardware.py`](../../ci/check_hardware.py), rules HW-001 to HW-028, see the [README](README.md)) runs the mechanical checks against `data/parts.toml`, `data/netlist.toml` and `data/safety_paths.toml`. An agent or a person does the judgement checks. The P1 review (`compatibility.md`, `wiring-mock.md`) was produced with this procedure.
+A repeatable checklist for any Sawbones bench build. A script ([`ci/check_hardware.py`](../../ci/check_hardware.py), rules HW-001 to HW-033, see the [README](README.md)) runs the mechanical checks against `data/parts.toml`, `data/netlist.toml` and `data/safety_paths.toml`. An agent or a person does the judgement checks. The P1 review (`compatibility.md`, `wiring-mock.md`) was produced with this procedure.
 
 Field names in the data files are stable. The CI checker is written against them; renaming a field is a breaking change.
 
@@ -68,6 +68,7 @@ Also mechanical:
 | C-16 | HW-021, HW-022, HW-023 | |
 | C-17 | HW-028 | information only |
 | C-18 | HW-024 | host port used twice |
+| J-06, J-07 (mechanical part) | HW-029 to HW-033 | clamp vs abs max and fuse clearing, AI-host path to debug pins, charge-pump hold voltage at the real toggle rate, pull-down vs erratum maximum, reset-output semantics (added after the independent review, #296) |
 | J-06, J-08, J-09 (partly) | HW-025, HW-026, HW-027 | reserved pins, trust-root bypass paths, no-name parts and fuse bytes |
 
 ## 2. Judgement checks (agent or human)
@@ -127,7 +128,10 @@ For every no-name IC on a safety path:
 The checker also reads these optional fields, added with the CI (renaming any of them is a breaking change too):
 parts: `kind` (`adapter`, `fuse`, `buck`, `ldo`, `crowbar`, `wire`, `terminal`, `analyzer`), `supply_out_group`, `trust_root`, `off_in_tests`, `counterfeit_risk`, `acceptance_passed`, `fuse_bytes`;
 connections: `removable`;
-series elements: `pins`.
+series elements: `pins`, `cut_sources`, `cut_claim` (`held` or `pulse-latched`), `latch`;
+parts (added after the independent review): `abs_max_supply_v`, `output_semantics`, `ai_host`, `passthrough`, `max_fault_a`, `clearing` (fuse clearing time table), `erratum` {`id`, `max_pulldown_ohm`, `affects`, `fixed_in`}, pin flag `debug`;
+connections: `pulldown_ohm`, `safe_state`, joint type `jst-xh` (keyed);
+safety_paths: `[[pump]]` (charge-pump values and toggle period) and `[[clamp]]` records.
 A fault row's `path` is a glob on path ids, and `variant = "both"` means the row holds in variant A and in variant B.
 
 
