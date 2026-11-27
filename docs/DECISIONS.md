@@ -101,6 +101,14 @@ Tracked in #166. The plugin and store index design itself is written up after th
 | Panel request for class 3 | The agent may light the panel to ask for the key and press on a class 3 job. The light only invites; nothing happens without the physical press. |
 | Field toolkit | Catalogue the Kali Linux and other open-source tools per module (RF, Wi-Fi and Bluetooth, network capture, serial, CAN and OBD-II, Modbus, firmware and hardware debugging, audio, vision, thermal) and decide per tool family how it runs (native and sandboxed on the Pi, wrapped, or ported to Rust), its hazard class and how T.R.I.A.G.E. exposes it. Own systems and property only. #250. |
 
+## 26 November 2026, S.C.R.U.B. and the C.H.A.R.T. notebook
+
+| Topic | Decision |
+| --- | --- |
+| Taint latch name | S.C.R.U.B. (Stop Commands Read from Untrusted Bytes). Readings our own code wrote travel the "sterile field" and do not trip it; re-arming after it trips is "scrubbing back in". |
+| Agent notes in C.H.A.R.T. | The agent may write notes and findings into C.H.A.R.T. without asking. They are always labelled at the agent-inferred tier, never measured. |
+| Helper reader | Wanted, risk-based rather than all-or-nothing: a tool-less helper model reads outside text and hands the agent only typed fields from a closed vocabulary. Whether that trips S.C.R.U.B. is decided per hazard class by a deterministic risk rule in C.O.R.T.E.X.; free text always trips it; class 3 keeps its per-action press; class 4 never. Built behind a flag and benchmarked against latch-only before it is turned on. #266. |
+
 ## Reversals and corrections
 
 | Was | Now | Why |
