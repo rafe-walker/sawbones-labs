@@ -591,7 +591,7 @@ fn cfg_attr_ignored() {}
                 sha=c.unit_hash(c.source_unit(DESIGN, "The latch starts tripped")))]))
         return t.run("--bless", "--rust-tests", os.path.join(t.d, "l.json"))
 
-    def test_regression_271_a_dead_file_cannot_borrow_an_inline_modules_test_or_a_childs(self):
+    def test_regression_271_a_dead_file_cannot_borrow_an_inline_modules_test_or_a_child_module(self):
         files = {
             "crates/tiny/Cargo.toml": '[package]\nname = "tiny"\n',
             "crates/tiny/src/lib.rs": "mod a {\n    #[test]\n    fn borrowed() {}\n    mod sub;\n}\nmod b;\n",

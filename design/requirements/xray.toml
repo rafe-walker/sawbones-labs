@@ -94,7 +94,7 @@ acceptance = [
   { id = "a12", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_forged_test_list_cannot_add_tests_or_clear_ignores" },
   { id = "a13", kind = "test", ref = "ci/test_conformance.py::test_regression_271_examples_and_benches_are_not_listed" },
   { id = "a14", kind = "test", ref = "ci/test_conformance.py::test_regression_271_class_level_skips_are_honoured" },
-  { id = "a15", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_dead_file_cannot_borrow_an_inline_modules_test_or_a_childs" },
+  { id = "a15", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_dead_file_cannot_borrow_an_inline_modules_test_or_a_child_module" },
   { id = "a16", kind = "test", ref = "ci/test_conformance.py::test_regression_271_harness_false_targets_are_skipped" },
   { id = "a17", kind = "test", ref = "ci/test_conformance.py::test_regression_271_spaced_and_macro_added_ignores_are_ignores" },
   { id = "a18", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_last_definition_wins_and_skips_cannot_hide" },
