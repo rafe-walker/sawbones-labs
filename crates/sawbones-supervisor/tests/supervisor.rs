@@ -411,8 +411,9 @@ fn assert_refused_and_unarmed(b: &mut Bench) {
 }
 
 #[test]
-fn a_grounded_clip_on_a_floating_bus_is_refused_through_the_built_plan() {
-    // Known-bad plan 1 (#111): the pod's clip is on mains earth; the pack
+fn a_stop_isolation_finding_refuses_arming() {
+    // Known-bad plan 1 (#111): a grounded scope clip on a floating bus. The
+    // pod's clip is on mains earth; the pack
     // bus floats.
     let mut b = available_bench();
     let plan = [Connection::new("pod/clip", "pack-bus")];
