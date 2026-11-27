@@ -1,0 +1,32 @@
+[[requirement]]
+id = "SAW-PULSE-HB-1"
+rev = 1
+level = "MUST"
+title = "A wrong, stale, early, repeated, missing or cross-boot heartbeat reply, or a stalled loop, latches a fault; rails drop within two periods"
+source = "docs/THREAT-MODEL.md"
+anchor = "Agent keeps going after it hangs"
+source_sha = "33cb8bd90656df9d"
+tracks = [198, 100, 114, 161]
+hws = ["HWS-HBT-1", "HWS-HBT-2"]
+acceptance = [
+  { id = "a1", kind = "test", ref = "sawbones-interlock::regression_198_*" },
+  { id = "a2", kind = "test", ref = "sawbones-interlock::regression_231_interlock_stall_limit_is_exactly_two_periods" },
+  { id = "a3", kind = "test", ref = "sawbones-interlock::random_sequences_keep_the_invariants" },
+  { id = "a4", kind = "test", ref = "sawbones-supervisor::a_missed_heartbeat_drops_the_rails_within_the_interlocks_budget" },
+  { id = "a5", kind = "test", ref = "a Pi frozen on the real bench loses the rails within the stated limit", pending = 161 },
+]
+
+[[requirement]]
+id = "SAW-PULSE-FW-1"
+rev = 1
+level = "MUST"
+title = "The trust-root firmware builds for the RP2350 in CI"
+source = "docs/ROADMAP.md"
+anchor = "The firmware core builds for the RP2350"
+source_sha = "625300da5c6772ae"
+tracks = [114, 144]
+acceptance = [
+  { id = "a1", kind = "file", ref = "ci/build_trust_root_fw.sh" },
+  { id = "a2", kind = "test", ref = "sawbones-trust-root::boot_reads_the_record_and_restarts_with_the_hardware_nonce" },
+  { id = "a3", kind = "test", ref = "the firmware persists its fault record in a durable store and is flashed on a board", pending = 144 },
+]

@@ -1,0 +1,100 @@
+[[requirement]]
+id = "SAW-CORTEX-LATCH-1"
+rev = 1
+level = "MUST"
+title = "Once outside text enters a turn, class 2 and 3 actions are refused until a fresh approval; a new turn inherits the latch"
+source = "docs/DECISIONS.md"
+anchor = "Taint latch (#210)"
+source_sha = "119fe094b4f17e0c"
+tracks = [210, 103]
+hws = ["HWS-TXT-2"]
+acceptance = [
+  { id = "a1", kind = "test", ref = "crates/sawbones-supervisor/tests/latch.rs::it_starts_tripped_and_the_first_arm_seen_clears_it" },
+  { id = "a2", kind = "test", ref = "crates/sawbones-supervisor/tests/latch.rs::class_2_and_3_are_refused_while_tainted" },
+  { id = "a3", kind = "test", ref = "crates/sawbones-supervisor/tests/latch.rs::class_0_still_passes_while_tainted" },
+  { id = "a4", kind = "test", ref = "crates/sawbones-supervisor/tests/latch.rs::a_new_turn_inherits_the_latch" },
+  { id = "a5", kind = "test", ref = "crates/sawbones-supervisor/tests/latch.rs::a_lease_granted_after_the_taint_lets_one_class_3_action_through" },
+  { id = "a6", kind = "test", ref = "sawbones-redteam::redteam_inj_031_*" },
+  { id = "a7", kind = "test", ref = "sawbones-redteam::redteam_inj_031_every_tool_reports_module_content_to_the_latch_before_returning" },
+  { id = "a8", kind = "test", ref = "sawbones-redteam::redteam_inj_031_hostile_manifest_text_is_fenced_and_trips_the_latch" },
+]
+
+[[requirement]]
+id = "SAW-CORTEX-APPROVE-1"
+rev = 1
+level = "MUST"
+title = "Approvals are matched to hazard class, signed, and a class 3 action spends one lease"
+source = "docs/DECISIONS.md"
+anchor = "| Approvals | Matched to danger"
+source_sha = "2a9cfa0e68501db9"
+tracks = [172, 137]
+hws = ["HWS-APR-1", "HWS-CLS-1"]
+acceptance = [
+  { id = "a1", kind = "test", ref = "sawbones-approvals::the_policy_table" },
+  { id = "a2", kind = "test", ref = "sawbones-approvals::an_owner_phone_lease_is_refused_even_with_a_valid_phone_signature" },
+  { id = "a3", kind = "test", ref = "sawbones-supervisor::a_class_3_write_needs_a_panel_granted_lease_and_spends_it" },
+  { id = "a4", kind = "test", ref = "approvals scaled by risk across every action kind", pending = 172 },
+]
+
+[[requirement]]
+id = "SAW-CORTEX-TEXT-1"
+rev = 1
+level = "MUST"
+title = "Outside text is typed, escaped and fenced, and never becomes an identifier"
+source = "docs/THREAT-MODEL.md"
+anchor = "Prompt injection through outside text"
+source_sha = "7afa3bf357fb3f5c"
+tracks = [105, 187, 202]
+hws = ["HWS-TXT-1"]
+acceptance = [
+  { id = "a1", kind = "test", ref = "sawbones-reading::fence_cannot_be_closed_from_inside" },
+  { id = "a2", kind = "test", ref = "sawbones-reading::regression_202_*" },
+  { id = "a3", kind = "test", ref = "sawbones-policy::regression_187_world_text_cannot_become_an_identifier" },
+  { id = "a4", kind = "test", ref = "every ingest path wraps outside text in WorldText", pending = 105 },
+]
+
+[[requirement]]
+id = "SAW-CORTEX-FACTS-1"
+rev = 1
+level = "MUST"
+title = "A write rests only on facts with scope, invalidated on reflash, rewiring or change"
+source = "docs/THREAT-MODEL.md"
+anchor = "| Lying or reflashed module | `sawbones-policy`"
+source_sha = "b7214dc26a050c1a"
+tracks = [110]
+hws = ["HWS-PRV-5"]
+acceptance = [
+  { id = "a1", kind = "test", ref = "sawbones-policy::a_firmware_change_refuses_every_dependent_write" },
+  { id = "a2", kind = "test", ref = "sawbones-policy::a_rewired_port_refuses_writes_and_reads" },
+  { id = "a3", kind = "test", ref = "sawbones-policy::a_firmware_change_after_preflight_voids_the_token" },
+  { id = "a4", kind = "test", ref = "sawbones-policy::a_reflash_falls_through_every_module_qualified_against_it" },
+  { id = "a5", kind = "test", ref = "a reflashed module's facts re-earn trust against an independent reference", pending = 110 },
+]
+
+[[requirement]]
+id = "SAW-CORTEX-REC-1"
+rev = 1
+level = "MUST"
+title = "A session recorder keeps start, annotate, pause, stop and replay, with a visible gap event for a dropped sample"
+source = "docs/project-document.md"
+anchor = "| 5 | Session recorder"
+source_sha = "1ccfcb3030e729e8"
+tracks = [106]
+acceptance = [
+  { id = "a1", kind = "test", ref = "a session recorded from the simulator replays identically", pending = 106 },
+  { id = "a2", kind = "test", ref = "a deliberately dropped sample shows up as a gap event", pending = 106 },
+]
+
+[[requirement]]
+id = "SAW-CORTEX-THERMAL-1"
+rev = 1
+level = "MUST"
+title = "The supervisor reads its own temperatures and sheds load"
+source = "docs/project-document.md"
+anchor = "The supervisor reads its own temperatures"
+source_sha = "92c3857c29233611"
+tracks = [248]
+acceptance = [
+  { id = "a1", kind = "test", ref = "load is shed least essential first above a threshold, with hysteresis", pending = 248 },
+  { id = "a2", kind = "test", ref = "the interlock is never shed", pending = 248 },
+]

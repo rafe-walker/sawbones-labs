@@ -1,0 +1,48 @@
+[[requirement]]
+id = "SAW-INTERLOCK-FAULT-1"
+rev = 1
+level = "MUST"
+title = "A latched fault survives restart, and only a panel token clears it"
+source = "docs/THREAT-MODEL.md"
+anchor = "Supervisor clears a latched fault"
+source_sha = "b799dd211156981f"
+tracks = [197, 144]
+hws = ["HWS-ISF-4"]
+acceptance = [
+  { id = "a1", kind = "test", ref = "sawbones-interlock::regression_197_a_supervisor_clear_is_refused_in_every_state" },
+  { id = "a2", kind = "test", ref = "sawbones-interlock::regression_197_a_restart_is_never_cleaner_than_ram_or_record" },
+  { id = "a3", kind = "test", ref = "sawbones-interlock::regression_197_a_panel_token_never_deserialises" },
+  { id = "a4", kind = "test", ref = "a latched fault survives a power cut through a durable store", pending = 144 },
+]
+
+[[requirement]]
+id = "SAW-INTERLOCK-BUSGUARD-1"
+rev = 1
+level = "MUST"
+title = "Only the approved action's Modbus frame passes the bus guard"
+source = "docs/THREAT-MODEL.md"
+anchor = "An armed rail lets any frame out"
+source_sha = "4607165d2f9933b9"
+tracks = [203, 169]
+hws = ["HWS-BUS-1"]
+acceptance = [
+  { id = "a1", kind = "test", ref = "sawbones-busguard::regression_203_exactly_the_approved_actions_frame_passes" },
+  { id = "a2", kind = "test", ref = "sawbones-busguard::regression_203_another_action_never_spends_the_lease" },
+  { id = "a3", kind = "test", ref = "sawbones-busguard::random_bytes_never_pass" },
+  { id = "a4", kind = "test", ref = "sawbones-modbus-encode::regression_203_decode_refuses_every_non_canonical_form" },
+  { id = "a5", kind = "test", ref = "the guard runs on a real RP2350 in the transmit path", pending = 169 },
+]
+
+[[requirement]]
+id = "SAW-INTERLOCK-LED-1"
+rev = 1
+level = "MUST"
+title = "The status light strip is driven by the interlock microcontroller, not the Pi"
+source = "docs/project-document.md"
+anchor = "| Interlock | Arm switch on the panel"
+source_sha = "79c51d653fb93028"
+tracks = [249]
+acceptance = [
+  { id = "a1", kind = "test", ref = "a pure state-to-colour mapping is unit-tested on the host", pending = 249 },
+  { id = "a2", kind = "test", ref = "the strip shows a dead supervisor as a lost heartbeat", pending = 249 },
+]

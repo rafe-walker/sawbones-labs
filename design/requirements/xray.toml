@@ -1,0 +1,174 @@
+[[requirement]]
+id = "SAW-XRAY-STATUS-1"
+rev = 1
+level = "MUST"
+title = "Status is computed from the code and never typed into a record"
+source = "CONTRIBUTING.md"
+anchor = "**Statuses.**"
+source_sha = "0f5766555ae66dd1"
+tracks = [269]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_built_when_every_check_resolves" },
+  { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_partial_when_some_are_pending" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_not_built_is_allowed" },
+  { id = "a4", kind = "test", ref = "ci/test_conformance.py::test_regression_a_hand_typed_status_is_refused" },
+  { id = "a5", kind = "test", ref = "ci/test_conformance.py::test_regression_268_a_waived_record_does_not_fail_on_missing_checks" },
+]
+
+[[requirement]]
+id = "SAW-XRAY-DRIFT-1"
+rev = 1
+level = "MUST"
+title = "Prose that changes without its record is flagged by paragraph hash"
+source = "CONTRIBUTING.md"
+anchor = "**Records.**"
+source_sha = "a793c25854f86dfb"
+tracks = [269]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_drifted_when_the_design_prose_changes" },
+  { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_regression_drifted_when_the_anchor_paragraph_is_removed" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_drift_outranks_a_waiver" },
+  { id = "a4", kind = "test", ref = "ci/test_conformance.py::test_hash_ignores_whitespace_only" },
+  { id = "a5", kind = "test", ref = "ci/test_conformance.py::test_regression_271_sub_bullets_are_part_of_a_pinned_bullet" },
+]
+
+[[requirement]]
+id = "SAW-XRAY-MALFORMED-1"
+rev = 1
+level = "MUST"
+title = "Malformed records, duplicate or unknown ids and checks naming missing tests fail"
+source = "CONTRIBUTING.md"
+anchor = "**Tags.**"
+source_sha = "644f2cc7b77eb898"
+tracks = [269, 271]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_malformed_records_fail" },
+  { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_regression_duplicate_id_fails" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_regression_missing_test_fails" },
+  { id = "a4", kind = "test", ref = "ci/test_conformance.py::test_regression_unknown_id_in_an_impl_tag_fails" },
+  { id = "a5", kind = "test", ref = "ci/test_conformance.py::test_regression_ignored_commented_and_helper_fns_do_not_count" },
+  { id = "a6", kind = "test", ref = "ci/test_conformance.py::test_regression_271_wrong_field_types_are_clean_errors" },
+  { id = "a7", kind = "test", ref = "ci/test_conformance.py::test_regression_271_only_toml_files_belong_in_the_requirements_dir" },
+  { id = "a8", kind = "test", ref = "ci/test_conformance.py::test_regression_271_file_kind_wants_a_regular_file_inside_the_repo" },
+  { id = "a9", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_source_outside_the_repo_is_refused" },
+  { id = "a10", kind = "test", ref = "ci/test_conformance.py::test_hws_ids_are_validated_against_the_standard" },
+  { id = "a11", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_directory_where_a_file_belongs_is_a_clean_error" },
+]
+
+[[requirement]]
+id = "SAW-XRAY-STALE-1"
+rev = 1
+level = "MUST"
+title = "A stale design/STATUS.md fails the check and --bless regenerates it"
+source = "CONTRIBUTING.md"
+anchor = "**The table.**"
+source_sha = "292f7ca319ace5c5"
+tracks = [269, 271]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_stale_status_file_fails_and_bless_fixes_it" },
+  { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_the_repository_is_conformant_and_its_status_is_current" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_whole_status_file_is_stale_checked" },
+]
+
+[[requirement]]
+id = "SAW-XRAY-REAL-1"
+rev = 1
+level = "MUST"
+title = "Only tests that compile, are not ignored and are written in reachable source count as built; a hostile PR can still forge the list"
+source = "CONTRIBUTING.md"
+anchor = "**Real tests only.**"
+source_sha = "338d6a6942542013"
+tracks = [269, 271]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_271_source_fallback_drops_comments_never_cfg_macros_and_cfg_attr_ignore" },
+  { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_test_missing_from_cargos_list_does_not_count" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_regression_271_an_ignored_test_in_cargos_list_does_not_count" },
+  { id = "a4", kind = "test", ref = "ci/test_conformance.py::test_regression_271_cargo_list_keys_by_crate_and_path" },
+  { id = "a5", kind = "test", ref = "ci/test_conformance.py::test_regression_271_globs_need_a_literal_prefix_a_crate_and_no_ignored_match" },
+  { id = "a6", kind = "test", ref = "ci/test_conformance.py::test_regression_271_real_cargo_rejects_every_trick" },
+  { id = "a7", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_tests_are_what_unittest_runs" },
+  { id = "a8", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_refs_resolve_only_in_ci_test_files" },
+  { id = "a9", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_malformed_cargo_list_fails_cleanly" },
+  { id = "a10", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_dead_file_cannot_borrow_a_live_tests_name" },
+  { id = "a11", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_non_glob_ref_must_match_exactly_one_test" },
+  { id = "a12", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_forged_test_list_cannot_add_tests_or_clear_ignores" },
+  { id = "a13", kind = "test", ref = "ci/test_conformance.py::test_regression_271_examples_and_benches_are_not_listed" },
+  { id = "a14", kind = "test", ref = "ci/test_conformance.py::test_regression_271_class_level_skips_are_honoured" },
+  { id = "a15", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_dead_file_cannot_borrow_an_inline_modules_test_or_a_child_module" },
+  { id = "a16", kind = "test", ref = "ci/test_conformance.py::test_regression_271_harness_false_targets_are_skipped" },
+  { id = "a17", kind = "test", ref = "ci/test_conformance.py::test_regression_271_spaced_and_macro_added_ignores_are_ignores" },
+  { id = "a18", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_last_definition_wins_and_skips_cannot_hide" },
+  { id = "a19", kind = "test", ref = "ci/test_conformance.py::test_regression_271_directory_form_refs_are_refused" },
+  { id = "a20", kind = "test", ref = "ci/test_conformance.py::test_regression_271_harness_false_examples_and_benches_are_skipped_and_refused" },
+  { id = "a21", kind = "test", ref = "ci/test_conformance.py::test_regression_271_dead_or_ambiguous_module_declarations_earn_no_credit" },
+  { id = "a22", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_modules_with_side_effects_are_not_counted" },
+  { id = "a23", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_last_binding_and_decorators_decide" },
+  { id = "a24", kind = "test", ref = "ci/test_conformance.py::test_regression_271_module_declarations_survive_spacing_raw_names_and_inline_scopes" },
+  { id = "a25", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_file_with_an_unparsed_mod_or_an_include_credits_nothing" },
+  { id = "a26", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_modules_are_fail_closed" },
+  { id = "a27", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_classes_that_change_what_runs_are_not_counted" },
+  { id = "a28", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_real_ci_test_files_count" },
+  { id = "a29", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_runtime_list_must_agree_with_the_static_scan" },
+  { id = "a30", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_workflow_builds_and_uses_the_python_list" },
+  { id = "a31", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_macro_that_declares_a_module_refuses_every_rust_credit" },
+  { id = "a32", kind = "test", ref = "ci/test_conformance.py::test_regression_271_generator_and_misplaced_async_tests_never_run" },
+  { id = "a33", kind = "test", ref = "ci/test_conformance.py::test_regression_271_any_include_identifier_taints_the_file" },
+  { id = "a34", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_hazard_scan_covers_every_rust_file_in_the_repo" },
+  { id = "a35", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_proc_macro_crate_refuses_every_rust_credit" },
+  { id = "a36", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_lister_survives_a_proc_macro_test_binary_and_the_judge_refuses_it" },
+  { id = "a37", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_failed_lister_fails_both_gates_instead_of_skipping_them" },
+  { id = "a38", kind = "test", ref = "ci/test_conformance.py::test_regression_271_only_the_root_target_and_git_are_skipped" },
+  { id = "a39", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_manifest_target_that_is_not_a_rs_file_refuses_every_rust_credit" },
+  { id = "a40", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_build_script_or_any_include_is_a_workspace_wide_hazard" },
+  { id = "a41", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_symlink_leaving_the_repo_refuses_every_rust_credit" },
+]
+
+[[requirement]]
+id = "SAW-XRAY-CLOSURE-1"
+rev = 1
+level = "MUST"
+title = "A PR that closes an issue while a requirement tracking it is not built fails"
+source = "CONTRIBUTING.md"
+anchor = "**Closure gate.**"
+source_sha = "c09840b11501f654"
+tracks = [269, 271]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_closing_an_issue_with_an_unbuilt_requirement_fails" },
+  { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_an_unrelated_or_foreign_or_unclosing_reference_is_fine" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_pr_text_is_data_never_executed" },
+  { id = "a4", kind = "test", ref = "ci/test_conformance.py::test_closing_keyword_parse" },
+  { id = "a5", kind = "test", ref = "ci/test_conformance.py::test_regression_271_non_ascii_digits_do_not_close_an_issue" },
+  { id = "a6", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_closure_gate_reads_commit_messages" },
+  { id = "a7", kind = "test", ref = "ci/test_regression_guard.py::test_regression_271_non_ascii_digits_do_not_close_an_issue" },
+]
+
+[[requirement]]
+id = "SAW-XRAY-JUDGE-1"
+rev = 1
+level = "MUST"
+title = "The judge runs from the base branch with read-only permissions, pinned actions and no secrets"
+source = "CONTRIBUTING.md"
+anchor = "**Guarded.**"
+source_sha = "a2a1a8a743c9c724"
+tracks = [269, 271]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_the_workflow_judges_from_the_base_branch_and_holds_no_privilege" },
+  { id = "a2", kind = "file", ref = ".github/workflows/conformance.yml" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_judge_fails_closed_once_it_is_on_the_base_branch" },
+  { id = "a4", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_unit_tests_run_after_the_judge" },
+]
+
+[[requirement]]
+id = "SAW-XRAY-FEEDBACK-1"
+rev = 1
+level = "MUST"
+title = "Every finding says what to update, and STATUS.md lists drifted and needs-an-issue items first"
+source = "CONTRIBUTING.md"
+anchor = "Every finding names what to update"
+source_sha = "154438d09b484f02"
+tracks = [269]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_findings_say_what_to_update" },
+  { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_regression_a_requirement_with_no_issue_needs_one" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_status_lists_needs_an_issue_and_drifted_at_the_top" },
+]

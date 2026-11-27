@@ -31,7 +31,7 @@ jobs:
           BASE_REF: origin/${{ github.base_ref }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: |
-          protected='^(\.github/|ci/|deny\.toml$|_typos\.toml$|rust-toolchain\.toml$|CLAUDE\.md$|CONTRIBUTING\.md$|docs/REGRESSIONS\.md$|redteam/catalog/|standards/)'
+          protected='^(\.github/|ci/|deny\.toml$|_typos\.toml$|rust-toolchain\.toml$|CLAUDE\.md$|CONTRIBUTING\.md$|docs/REGRESSIONS\.md$|redteam/catalog/|standards/|design/)'
           changed="$(git diff --name-only --no-renames "${BASE_REF}...HEAD" | grep -E "${protected}" || true)"
           {
             echo "## Protected paths"

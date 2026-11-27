@@ -1,0 +1,30 @@
+[[requirement]]
+id = "SAW-NERVE-RPC-1"
+rev = 1
+level = "MUST"
+title = "The core RPC carries identify, describe, health, selftest, time, config, log, update with rollback, reset and safe_state"
+source = "docs/project-document.md"
+anchor = "| 3. Core RPC"
+source_sha = "d284abf960d2175b"
+tracks = [98]
+acceptance = [
+  { id = "a1", kind = "test", ref = "sawbones-module-protocol::every_request_round_trips" },
+  { id = "a2", kind = "test", ref = "sawbones-module-protocol::a_simulated_module_and_the_host_talk_through_every_call" },
+  { id = "a3", kind = "test", ref = "an update that fails its own self-test rolls back", pending = 98 },
+]
+
+[[requirement]]
+id = "SAW-NERVE-ID-1"
+rev = 1
+level = "MUST"
+title = "Module identity is a signed challenge plus a manifest digest, and the manifest is an agent-readable datasheet"
+source = "docs/project-document.md"
+anchor = "| 2. Identity, mandatory"
+source_sha = "efde991e852211dd"
+tracks = [98, 120]
+acceptance = [
+  { id = "a1", kind = "test", ref = "sawbones-module-protocol::a_signed_identity_verifies_for_its_module_challenge_and_session" },
+  { id = "a2", kind = "test", ref = "sawbones-module-protocol::a_module_cannot_claim_another_modules_identity" },
+  { id = "a3", kind = "test", ref = "sawbones-module-protocol::the_manifest_digest_covers_every_page_in_order" },
+  { id = "a4", kind = "test", ref = "a manifest schema every module's datasheet validates against", pending = 120 },
+]
