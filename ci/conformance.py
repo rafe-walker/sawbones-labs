@@ -273,8 +273,8 @@ def check_shape(rec, where, comp):
         if f in rec and (not isinstance(rec[f], str) or not rec[f].strip()):
             errs.append(f"{where}: {f} must be a non-empty string")
     tracks = rec.get("tracks")
-    if not (isinstance(tracks, list) and tracks and all(isinstance(t, int) and not isinstance(t, bool) and t > 0 for t in tracks)):
-        errs.append(f"{where}: tracks must be a non-empty list of issue numbers")
+    if not (isinstance(tracks, list) and all(isinstance(t, int) and not isinstance(t, bool) and t > 0 for t in tracks)):
+        errs.append(f"{where}: tracks must be a list of issue numbers (empty only for a built requirement)")
         tracks = []
     if "waiver" in rec:
         w = rec["waiver"]
@@ -383,11 +383,16 @@ def evaluate(root, rec, index, errors):
         try:
             unit = source_unit(src, rec["anchor"])
             if unit_hash(unit) != rec["source_sha"]:
-                drift.append(f"source paragraph changed (now {unit_hash(unit)}); update the record and its rev")
+                drift.append(
+                    f"the design paragraph in {rec['source']} (anchor '{rec['anchor']}') changed since the record was written. "
+                    f"Re-read it, then either revert the design change, or update the record in {rec['_file']} "
+                    f"(title and acceptance, bump rev, set source_sha = \"{unit_hash(unit)}\")")
         except Problem as e:
-            drift.append(f"source {rec['source']}: {e}")
+            drift.append(
+                f"{rec['source']}: {e} for anchor '{rec['anchor']}'. Restore the paragraph, or point the record's anchor in "
+                f"{rec['_file']} at its new wording and re-pin it with `python3 ci/conformance.py hash {rec['source']} '<anchor>'`")
     except (OSError, UnicodeDecodeError):
-        drift.append(f"source file {rec['source']} is missing")
+        drift.append(f"source file {rec['source']} is missing. Restore it, or update `source` in {rec['_file']}")
 
     resolved, pending, missing = [], [], []
     for a in rec["acceptance"]:
@@ -404,8 +409,11 @@ def evaluate(root, rec, index, errors):
             pending.append(f"{a['ref']} (#{a['pending']})")
         else:
             missing.append(f"{a['id']}: {problem}")
-    for m in missing:
-        errors.append(f"{rid}: acceptance {m}")
+    if "waiver" not in rec:  # a waiver records that the requirement was dropped, so its checks may be gone
+        for m in missing:
+            errors.append(
+                f"{rid}: acceptance {m}. Write the test, correct the ref in {rec['_file']}, "
+                f"or mark the item `pending = <issue>` (open an issue first and add it to tracks)")
 
     if drift:
         status = DRIFTED
@@ -419,7 +427,10 @@ def evaluate(root, rec, index, errors):
         status = PARTIAL
     else:
         status = NOT_BUILT
-    return status, {"resolved": resolved, "pending": pending, "drift": drift}
+    needs_issue = status in (PARTIAL, NOT_BUILT) and not rec["tracks"]
+    if needs_issue:
+        errors.append(f"{rid}: {status} but tracked by no issue. Open an issue for it and add the number to tracks in {rec['_file']}")
+    return status, {"resolved": resolved, "pending": pending, "drift": drift, "needs_issue": needs_issue}
 
 
 def run_check(root):
@@ -437,12 +448,13 @@ def run_check(root):
             if rev is not None and rev != rec["rev"]:
                 status = DRIFTED
                 detail["drift"].append(f"{path}:{line} tags rev {rev}, the record is rev {rec['rev']}")
-                errors.append(f"{rec['id']}: drifted: {path}:{line} tags rev {rev}, the record is rev {rec['rev']}")
+                errors.append(f"{rec['id']}: drifted: {path}:{line} tags rev {rev}, the record is rev {rec['rev']}. "
+                              f"Update the tag if the code was brought up to the new rev, or the record's rev if the meaning changed")
         rows.append({"rec": rec, "status": status, "detail": detail, "tags": len(tags.get(rec["id"], []))})
     for tid, where in sorted(tags.items()):
         if tid not in known:
             path, line, _ = where[0]
-            errors.append(f"unknown id {tid} in an impl tag at {path}:{line}")
+            errors.append(f"unknown id {tid} in an impl tag at {path}:{line}. Add a record with that id under {REQ_DIR}/, or fix the tag")
     return rows, errors
 
 
@@ -463,7 +475,19 @@ def cell(text):
 def render_table(rows):
     c = counts(rows)
     total = len(rows)
+    needs = [r for r in rows if r["detail"]["needs_issue"]]
+    drifted = [r for r in rows if r["status"] == DRIFTED]
     lines = [
+        "### Needs an issue",
+        "",
+        *([f"- `{r['rec']['id']}` ({r['status']}): open an issue and add it to `tracks` in `{r['rec']['_file']}`." for r in needs] or ["None."]),
+        "",
+        "### Drifted",
+        "",
+        *([f"- `{r['rec']['id']}`: update the record in `{r['rec']['_file']}` or revert the design paragraph in `{r['rec']['source']}`." for r in drifted] or ["None."]),
+        "",
+        "### All requirements",
+        "",
         f"**{total} requirements:** " + ", ".join(f"{c[s]} {s}" for s in ORDER if c[s] or s in (BUILT, PARTIAL, NOT_BUILT)) + ".",
         "",
         "| ID | Requirement | Status | Tracking | Still to prove |",

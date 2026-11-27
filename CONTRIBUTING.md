@@ -34,6 +34,15 @@ The X-ray shows whether the bones match the blueprint. A requirement may be "not
 
 Run it locally with `python3 -I ci/conformance.py`.
 
+### How a conformance finding flows back into docs and issues
+
+Every finding names what to update, and `design/STATUS.md` lists the open ones at the top under "Needs an issue" and "Drifted".
+
+- **Drifted** (the design paragraph changed, or its anchor vanished): decide which side is right. If the design change is intended, update the record (title, acceptance, bump `rev`, new `source_sha`) in the same PR and say so; if not, revert the paragraph. The output prints the new hash and the file to edit.
+- **Needs an issue** (partial or not built, tracked by nothing): open an issue, add its number to `tracks`, and give each unwritten check `pending = <issue>`.
+- **A check does not resolve** (a test was renamed or deleted): restore it, correct the `ref`, or mark it `pending`; dropping a requirement on purpose is a `waiver` with a reason, reviewed under `guards-change`.
+- **A bug in the X-ray itself** (a miss or a false result): open an issue first, then fix it with a `regression_<issue>_<name>` test in `ci/test_conformance.py` and a row in `docs/REGRESSIONS.md`, as for any bug. The X-ray's own rules are requirement records in `design/requirements/xray.toml`, so it checks itself.
+
 ## GitHub Actions are pinned
 
 Every `uses:` in `.github/workflows/` is pinned to a full 40-character commit SHA, with the version in a comment:

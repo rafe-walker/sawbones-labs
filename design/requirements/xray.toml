@@ -1,0 +1,108 @@
+[[requirement]]
+id = "SAW-XRAY-STATUS-1"
+rev = 1
+level = "MUST"
+title = "Status is computed from the code and never typed into a record"
+source = "CONTRIBUTING.md"
+anchor = "**Statuses.**"
+source_sha = "0f5766555ae66dd1"
+tracks = [252]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_built_when_every_check_resolves" },
+  { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_partial_when_some_are_pending" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_not_built_is_allowed" },
+  { id = "a4", kind = "test", ref = "ci/test_conformance.py::test_regression_a_hand_typed_status_is_refused" },
+  { id = "a5", kind = "test", ref = "ci/test_conformance.py::test_regression_268_a_waived_record_does_not_fail_on_missing_checks" },
+]
+
+[[requirement]]
+id = "SAW-XRAY-DRIFT-1"
+rev = 1
+level = "MUST"
+title = "Prose that changes without its record is flagged by paragraph hash"
+source = "CONTRIBUTING.md"
+anchor = "**Records.**"
+source_sha = "d31005cf8dc66f37"
+tracks = [252]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_drifted_when_the_design_prose_changes" },
+  { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_regression_drifted_when_the_anchor_paragraph_is_removed" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_drift_outranks_a_waiver" },
+  { id = "a4", kind = "test", ref = "ci/test_conformance.py::test_hash_ignores_whitespace_only" },
+]
+
+[[requirement]]
+id = "SAW-XRAY-MALFORMED-1"
+rev = 1
+level = "MUST"
+title = "Malformed records, duplicate or unknown ids and checks naming missing tests fail"
+source = "CONTRIBUTING.md"
+anchor = "**Tags.**"
+source_sha = "644f2cc7b77eb898"
+tracks = [252]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_malformed_records_fail" },
+  { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_regression_duplicate_id_fails" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_regression_missing_test_fails" },
+  { id = "a4", kind = "test", ref = "ci/test_conformance.py::test_regression_unknown_id_in_an_impl_tag_fails" },
+  { id = "a5", kind = "test", ref = "ci/test_conformance.py::test_regression_ignored_commented_and_helper_fns_do_not_count" },
+]
+
+[[requirement]]
+id = "SAW-XRAY-STALE-1"
+rev = 1
+level = "MUST"
+title = "A stale design/STATUS.md fails the check and --bless regenerates it"
+source = "CONTRIBUTING.md"
+anchor = "**The table.**"
+source_sha = "292f7ca319ace5c5"
+tracks = [252]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_stale_status_file_fails_and_bless_fixes_it" },
+  { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_the_repository_is_conformant_and_its_status_is_current" },
+]
+
+[[requirement]]
+id = "SAW-XRAY-CLOSURE-1"
+rev = 1
+level = "MUST"
+title = "A PR that closes an issue while a requirement tracking it is not built fails"
+source = "CONTRIBUTING.md"
+anchor = "**Closure gate.**"
+source_sha = "e82b32f4bb6da284"
+tracks = [252]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_closing_an_issue_with_an_unbuilt_requirement_fails" },
+  { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_an_unrelated_or_foreign_or_unclosing_reference_is_fine" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_pr_text_is_data_never_executed" },
+  { id = "a4", kind = "test", ref = "ci/test_conformance.py::test_closing_keyword_parse" },
+]
+
+[[requirement]]
+id = "SAW-XRAY-JUDGE-1"
+rev = 1
+level = "MUST"
+title = "The judge runs from the base branch with read-only permissions, pinned actions and no secrets"
+source = "CONTRIBUTING.md"
+anchor = "**Guarded.**"
+source_sha = "2bcdcc58863583d3"
+tracks = [252]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_the_workflow_judges_from_the_base_branch_and_holds_no_privilege" },
+  { id = "a2", kind = "file", ref = ".github/workflows/conformance.yml" },
+]
+
+[[requirement]]
+id = "SAW-XRAY-FEEDBACK-1"
+rev = 1
+level = "MUST"
+title = "Every finding says what to update, and STATUS.md lists drifted and needs-an-issue items first"
+source = "CONTRIBUTING.md"
+anchor = "Every finding names what to update"
+source_sha = "154438d09b484f02"
+tracks = [252]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_findings_say_what_to_update" },
+  { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_regression_a_requirement_with_no_issue_needs_one" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_status_lists_needs_an_issue_and_drifted_at_the_top" },
+]

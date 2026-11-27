@@ -222,7 +222,7 @@ class FailureModes(Base):
             record(id="CORTEX-1"),
             record(id="SAW-NERVE-X-1"),
             record(rev=0),
-            record(tracks="[]"),
+            record(tracks="[]", acc=[("a1", "test", "sup::it_starts_tripped", 5)]),
             record(acc=[]),
             record(acc=[("a1", "magic", "x", None)]),
             record(acc=[("a1", "test", "sup::it_starts_tripped", 99)]),
@@ -259,6 +259,85 @@ class FailureModes(Base):
         rc, out = t.run("--bless")
         self.assertNotEqual(rc, 0)
         self.assertIn("matches 2 lines", out)
+
+
+class Feedback(Base):
+    def test_regression_a_hand_typed_status_is_refused(self):
+        t = self.tree(recs=[record(extra='status = "built"')], bless=False)
+        rc, out = t.run("--bless")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("unknown fields", out)
+
+    def test_regression_268_a_waived_record_does_not_fail_on_missing_checks(self):
+        t = self.tree(recs=[record(acc=[("a1", "test", "gone", None)], extra='waiver = { reason = "owner dropped it" }')], bless=False)
+        rc, out = t.run("--bless")
+        self.assertEqual(rc, 0, out)
+        self.assertIn("1 waived", out)
+
+    def test_regression_findings_say_what_to_update(self):
+        t = self.tree(recs=[record(anchor="The latch")])
+        t.write("docs/D.md", DESIGN.replace("tripped", "clear"))
+        out = t.run()[1]
+        self.assertIn("source_sha =", out)
+        self.assertIn("design/requirements/cortex.toml", out)
+        self.assertIn("revert the design change", out)
+        t.write("docs/D.md", "# Design\n\nnothing\n")
+        self.assertIn("hash docs/D.md", t.run()[1])
+        t = self.tree(recs=[record(acc=[("a1", "test", "sup::no_such_test", None)])], bless=False)
+        self.assertIn("pending = <issue>", t.run("--bless")[1])
+        t = self.tree(extra={"crates/sup/src/lib.rs": "// [impl->SAW-CORTEX-NOPE-1]\n"})
+        self.assertIn("Add a record with that id", t.run()[1])
+
+    def test_regression_a_requirement_with_no_issue_needs_one(self):
+        t = self.tree(recs=[record(tracks="[]", acc=[("a1", "test", "later", None)], extra='waiver = { reason = "x" }')])
+        self.assertEqual(t.run()[0], 0)  # waived: nothing to track
+        t = self.tree(recs=[record(tracks="[]", acc=[("a1", "test", "sup::it_starts_tripped", None), ("a2", "test", "later", 7)])], bless=False)
+        rc, out = t.run("--bless")
+        self.assertNotEqual(rc, 0)  # pending #7 is not in tracks: malformed
+        t = self.tree(recs=[record(tracks="[]")])
+        self.assertEqual(t.run()[0], 0)  # built needs no issue
+        with open(os.path.join(t.d, "design/requirements/cortex.toml")) as fh:
+            text = fh.read()
+        t.write("crates/sup/tests/t.rs", "")
+        self.assertNotEqual(t.run()[0], 0)
+
+    def test_status_lists_needs_an_issue_and_drifted_at_the_top(self):
+        # A record whose only check is missing is not built; give it no issue and no pending item.
+        t = self.tree(recs=[record(tracks="[]", acc=[("a1", "test", "sup::it_starts_tripped", None)])])
+        t.write("docs/D.md", DESIGN.replace("starts tripped", "starts clear"))
+        t.run("--bless")
+        with open(os.path.join(t.d, "design/STATUS.md")) as fh:
+            text = fh.read()
+        self.assertLess(text.index("### Drifted"), text.index("### All requirements"))
+        self.assertLess(text.index("### Needs an issue"), text.index("### Drifted"))
+        drifted = text[text.index("### Drifted"):text.index("### All requirements")]
+        self.assertIn("SAW-CORTEX-LATCH-1", drifted)
+        # A partial record with no tracking issue is listed under "Needs an issue".
+        t = self.tree(recs=[record(tracks="[]", acc=[("a1", "test", "sup::it_starts_tripped", None), ("a2", "test", "later", None)])], bless=False)
+        t.run("--bless")
+        with open(os.path.join(t.d, "design/STATUS.md")) as fh:
+            text = fh.read()
+        needs = text[text.index("### Needs an issue"):text.index("### Drifted")]
+        self.assertIn("SAW-CORTEX-LATCH-1", needs)
+        self.assertIn("tracked by no issue", t.run()[1])
+
+    def test_the_workflow_judges_from_the_base_branch_and_holds_no_privilege(self):
+        with open(os.path.join(ROOT, ".github/workflows/conformance.yml")) as fh:
+            wf = fh.read()
+        self.assertEqual(wf.count('git show "${BASE_REF}:ci/conformance.py"'), 2)
+        self.assertIn("permissions:\n  contents: read", wf)
+        self.assertNotIn("pull_request_target", wf)
+        self.assertNotIn("secrets.", wf)
+        uses = [l for l in wf.splitlines() if "uses:" in l]
+        self.assertTrue(uses)
+        for l in uses:
+            self.assertRegex(l, r"@[0-9a-f]{40} # v\d")
+        # PR text goes through env vars only, never into a run script.
+        import re
+        run_blocks = re.findall(r"run: \|\n((?: {10}.*\n|\n)+)", wf)
+        self.assertEqual(len(run_blocks), 2)
+        for b in run_blocks:
+            self.assertNotIn("github.event.pull_request", b)
 
 
 class StatusFile(Base):

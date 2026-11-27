@@ -14,5 +14,6 @@ The owner-approved names, one line each. The machine-readable copy is [`design/n
 | plugins | Sandboxed decoders | `sawbones-plugin-host`, `sawbones-regmap` | Zero-import WebAssembly decoders. |
 | S.A.W. | Sensory Agent Workstation | none | The portable pack. |
 | T.A.B.L.E. | Test, Assembly, Build & Lab Environment | none | The home bench. |
+| X-ray | Design conformance CI | none (`ci/conformance.py`) | Checks that the code matches the design records, including its own rules. |
 
 The crate columns for Interlock, modules, plugins and the extra CORTEX crates are the working mapping and can change; the owner approved the names and the first five crate mappings.
