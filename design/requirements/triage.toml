@@ -1,0 +1,26 @@
+[[requirement]]
+id = "SAW-TRIAGE-SURF-1"
+rev = 1
+level = "MUST"
+title = "The MCP surface is a few fixed meta-tools, not one tool per instrument function"
+source = "docs/project-document.md"
+anchor = "The MCP surface is a few fixed"
+source_sha = "37375373d438a054"
+tracks = [103, 204]
+acceptance = [
+  { id = "a1", kind = "test", ref = "golden tool definitions list exactly the six meta-tools", pending = 204 },
+  { id = "a2", kind = "test", ref = "adding simulated modules leaves tools/list byte-identical", pending = 103 },
+]
+
+[[requirement]]
+id = "SAW-TRIAGE-CAP-1"
+rev = 1
+level = "MUST"
+title = "Tool results are a summary plus a link, capped at 25,000 tokens"
+source = "docs/project-document.md"
+anchor = "Tool results are capped"
+source_sha = "cb2cc7803d0808d4"
+tracks = [103]
+acceptance = [
+  { id = "a1", kind = "test", ref = "no tool result exceeds the cap and none carries raw samples", pending = 103 },
+]

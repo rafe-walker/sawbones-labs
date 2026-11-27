@@ -1,0 +1,16 @@
+[[requirement]]
+id = "SAW-PLUGINS-HOST-1"
+rev = 1
+level = "MUST"
+title = "Plugins run zero-import in their own process and must pass a conformance suite"
+source = "docs/THREAT-MODEL.md"
+anchor = "Malicious or buggy plugin runs wild"
+source_sha = "c42848b1868545d0"
+tracks = [173, 176]
+acceptance = [
+  { id = "a1", kind = "test", ref = "sawbones-plugin-host::plugin_with_an_import_is_refused" },
+  { id = "a2", kind = "test", ref = "sawbones-plugin-host::a_crash_in_the_plugin_does_not_take_down_the_host" },
+  { id = "a3", kind = "test", ref = "sawbones-plugin-host::every_fixture_in_the_repo_passes_the_suite" },
+  { id = "a4", kind = "test", ref = "plugin host v0 complete: logs, health counters and reports", pending = 173 },
+  { id = "a5", kind = "test", ref = "conformance suite v0 closed out against every plugin kind", pending = 176 },
+]

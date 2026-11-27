@@ -1,0 +1,71 @@
+name: Design conformance
+
+# The X-ray: does the code match the design? Requirement records in
+# design/requirements/ pin the design paragraph they came from and name the
+# tests that prove them. `conformance` fails on a malformed record, an unknown
+# or duplicate id, a missing test, a drifted record or a stale design/STATUS.md.
+# `closure-gate` fails a PR that says Fixes/Closes #N while a requirement
+# tracking #N is not built. See CONTRIBUTING.md, "Design conformance".
+#
+# For a PR the judge is the copy of ci/conformance.py on the base branch, so a
+# PR cannot edit the checker to pass itself. Its own unit tests run from the PR
+# copy. No secrets, no write token, and PR text reaches only environment
+# variables that the script parses with a strict regex.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: conformance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    name: design conformance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Unit-test the checker
+        run: python3 -I -m unittest discover -s ci -p 'test_conformance.py' -v
+      - name: Check the records with the base branch copy of the checker
+        env:
+          BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+        run: |
+          judge="${RUNNER_TEMP}/conformance.py"
+          if [ -n "${BASE_REF}" ]; then
+            git show "${BASE_REF}:ci/conformance.py" > "${judge}" 2>/dev/null || cp ci/conformance.py "${judge}"
+          else
+            cp ci/conformance.py "${judge}"
+          fi
+          python3 -I "${judge}" --root "${GITHUB_WORKSPACE}"
+
+  closure-gate:
+    name: closing an issue needs its requirements built
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Judge the closing keywords with the base branch copy of the checker
+        env:
+          REPO: ${{ github.repository }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_REF: origin/${{ github.base_ref }}
+        run: |
+          judge="${RUNNER_TEMP}/conformance.py"
+          git show "${BASE_REF}:ci/conformance.py" > "${judge}" 2>/dev/null || cp ci/conformance.py "${judge}"
+          python3 -I "${judge}" --root "${GITHUB_WORKSPACE}" closure

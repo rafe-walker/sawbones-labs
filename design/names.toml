@@ -1,0 +1,75 @@
+# Owner-approved component names. `key` is the lower-case component code used in
+# requirement ids (SAW-<KEY>-<AREA>-<n>) and in design/requirements/<key>.toml.
+# `crates` must exist in crates/; `crates_pending` are named but not on main yet.
+# Checked by ci/conformance.py; explained in docs/NAMES.md.
+
+[[component]]
+key = "cortex"
+name = "C.O.R.T.E.X."
+expansion = "Coordinator Of Readings, Tools & EXperiments"
+meaning = "The supervisor: decides what the agent may do, tracks facts and approvals, and keeps outside text fenced."
+crates = ["sawbones-supervisor", "sawbones-policy", "sawbones-approvals", "sawbones-isolation", "sawbones-reading"]
+
+[[component]]
+key = "nerve"
+name = "N.E.R.V.E."
+expansion = "Node Exchange: Reliable, Verified, Enrolled"
+meaning = "The module protocol: how the supervisor and each module identify, describe and talk to each other."
+crates = ["sawbones-module-protocol"]
+
+[[component]]
+key = "pulse"
+name = "P.U.L.S.E."
+expansion = "Panel-Unlocked Liveness & Safety Exchange"
+meaning = "The heartbeat challenge between the supervisor and the trust root: no correct reply, no power."
+crates = ["sawbones-trust-root"]
+
+[[component]]
+key = "chart"
+name = "C.H.A.R.T."
+expansion = "Chain of Hashed, Attested Readings & Tests"
+meaning = "The knowledge store: a hash chain of typed facts about the bench and the gear. Not built yet (#109)."
+crates = []
+
+[[component]]
+key = "triage"
+name = "T.R.I.A.G.E."
+expansion = "Tools Routed by Interlock And Gated Effects"
+meaning = "The MCP server: the few fixed tools the agent sees. In PR #245, not on main yet."
+crates = []
+crates_pending = ["sawbones-mcp"]
+
+[[component]]
+key = "interlock"
+name = "Interlock"
+expansion = "The physical-safety layer"
+meaning = "The trust root's rule table, rails, leases and bus guard: the hardware says no even when the software says yes."
+crates = ["sawbones-interlock", "sawbones-busguard", "sawbones-modbus-encode"]
+
+[[component]]
+key = "modules"
+name = "modules"
+expansion = "Instruments and pods"
+meaning = "Anything with a manifest that plugs into the pack or bench: meters, pods, simulated modules."
+crates = ["sawbones-sim-modules"]
+
+[[component]]
+key = "plugins"
+name = "plugins"
+expansion = "Sandboxed decoders"
+meaning = "Zero-import WebAssembly decoders that run in their own process."
+crates = ["sawbones-plugin-host", "sawbones-regmap"]
+
+[[component]]
+key = "saw"
+name = "S.A.W."
+expansion = "Sensory Agent Workstation"
+meaning = "The portable pack."
+crates = []
+
+[[component]]
+key = "table"
+name = "T.A.B.L.E."
+expansion = "Test, Assembly, Build & Lab Environment"
+meaning = "The home bench."
+crates = []

@@ -1,0 +1,13 @@
+[[requirement]]
+id = "SAW-SAW-PACKMODEL-1"
+rev = 1
+level = "MUST"
+title = "One pack model file everything is generated from, with budget checks in CI"
+source = "docs/ROADMAP.md"
+anchor = "One model file that every"
+source_sha = "57df1a7bde11d6ef"
+tracks = [120, 121]
+acceptance = [
+  { id = "a1", kind = "test", ref = "changing one module's entry regenerates every derived output and re-runs every check", pending = 120 },
+  { id = "a2", kind = "test", ref = "budget checks for ports, power by mode, data and cost run in CI", pending = 121 },
+]

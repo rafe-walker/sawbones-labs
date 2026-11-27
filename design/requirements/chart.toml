@@ -1,0 +1,12 @@
+[[requirement]]
+id = "SAW-CHART-STORE-1"
+rev = 1
+level = "MUST"
+title = "The equipment knowledge store is a ground-up Rust hash chain built for the agent first"
+source = "docs/DECISIONS.md"
+anchor = "| Knowledge store |"
+source_sha = "eb00c2166b92b402"
+tracks = [109]
+acceptance = [
+  { id = "a1", kind = "test", ref = "facts from the Solar Assistant ingest append to a chain that verifies", pending = 109 },
+]
