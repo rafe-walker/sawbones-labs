@@ -143,7 +143,7 @@ class Statuses(Base):
         self.assertNotEqual(t.run()[0], 0)
 
     def test_bare_name_and_path_forms_resolve(self):
-        for ref in ("it_starts_tripped", "crates/sup/tests/t.rs::it_starts_tripped", "crates/sup::it_starts_tripped"):
+        for ref in ("it_starts_tripped", "crates/sup/tests/t.rs::it_starts_tripped", "sup::it_starts_tripped"):
             t = self.tree(recs=[record(acc=[("a1", "test", ref, None)])])
             self.assertEqual(self.status_of(t)[0], c.BUILT, ref)
 
@@ -344,6 +344,15 @@ class Feedback(Base):
 
 
 
+def need_cargo(case):
+    """Real-cargo probes skip locally without cargo but must fail in CI, so the
+    checks cannot silently vanish there."""
+    if not shutil.which("cargo"):
+        if os.environ.get("CI"):
+            case.fail("cargo is required in CI for the real-cargo probes")
+        case.skipTest("needs cargo")
+
+
 def cargo_list(path, tests):
     """Write a --rust-tests file. tests: (package, src, name[, ignored])."""
     rows = [{"package": t[0], "src": t[1], "target": "t", "name": t[2], "ignored": bool(t[3]) if len(t) > 3 else False} for t in tests]
@@ -455,8 +464,7 @@ fn cfg_attr_ignored() {}
             self.assertNotIn("Traceback", out)
 
     def test_regression_271_real_cargo_rejects_every_trick(self):
-        if not shutil.which("cargo"):
-            self.skipTest("needs cargo")
+        need_cargo(self)
         refs = ["real_test", "in_nested_comment", "cfg_never_fn", "in_cfg_never_mod", "in_uninvoked_macro", "cfg_attr_ignored", "in_orphan_file"]
         t = self.tree(recs=[record(acc=[("a1", "test", "tiny::" + refs[0], None)])], bless=False)
         t.write("Cargo.toml", '[workspace]\nmembers = ["crates/*"]\nresolver = "2"\n')
@@ -482,9 +490,9 @@ fn cfg_attr_ignored() {}
             self.assertEqual(rc == 0, ref == "real_test", (ref, out))
 
     def test_regression_271_a_dead_file_cannot_borrow_a_live_tests_name(self):
-        lib = "#[test]\nfn shared() {}\n"
+        lib = "#[test]\nfn shared() {}\nmod live;\nmod sub;\n"
         files = {"crates/tiny/Cargo.toml": '[package]\nname = "tiny"\n', "crates/tiny/src/lib.rs": lib,
-                 "crates/tiny/src/dead.rs": lib, "crates/tiny/src/live.rs": "#[test]\nfn in_live_mod() {}\n",
+                 "crates/tiny/src/dead.rs": "#[test]\nfn shared() {}\n", "crates/tiny/src/live.rs": "#[test]\nfn in_live_mod() {}\n",
                  "crates/tiny/src/sub/mod.rs": "#[test]\nfn in_sub_mod() {}\n"}
         tests = [("tiny", "crates/tiny/src/lib.rs", "shared"), ("tiny", "crates/tiny/src/lib.rs", "live::in_live_mod"),
                  ("tiny", "crates/tiny/src/lib.rs", "sub::in_sub_mod")]
@@ -523,8 +531,7 @@ fn cfg_attr_ignored() {}
             src = fh.read()
         cmd = [l for l in src.splitlines() if l.strip().startswith("cmd = [")][0]
         self.assertNotIn("--all-targets", cmd)  # ci.yml runs `cargo test --workspace --locked`
-        if not shutil.which("cargo"):
-            self.skipTest("needs cargo")
+        need_cargo(self)
         t = self.tree(bless=False)
         shutil.rmtree(os.path.join(t.d, "crates/sup"))
         t.write("Cargo.toml", '[workspace]\nmembers = ["crates/*"]\nresolver = "2"\n')
@@ -563,6 +570,123 @@ fn cfg_attr_ignored() {}
             rc, out = t.run()
             self.assertNotIn("Traceback", out, rel)
             self.assertNotEqual(rc, 0, rel)
+
+    def scratch_tiny(self, lib, extra=None, manifest_extra=""):
+        t = self.tree(bless=False)
+        shutil.rmtree(os.path.join(t.d, "crates/sup"))
+        t.write("design/names.toml", NAMES.replace('["sup"]', '["tiny"]'))
+        t.write("Cargo.toml", '[workspace]\nmembers = ["crates/*"]\nresolver = "2"\n')
+        t.write("crates/tiny/Cargo.toml", '[package]\nname = "tiny"\nversion = "0.0.0"\nedition = "2021"\n' + manifest_extra)
+        t.write("crates/tiny/src/lib.rs", lib)
+        for path, text in (extra or {}).items():
+            t.write(path, text)
+        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "rust_test_list.py"), os.path.join(t.d, "l.json"), "--unlocked",
+                            "--root", t.d], capture_output=True, text=True, env=dict(os.environ, CARGO_TARGET_DIR=os.path.join(t.d, "tgt")))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        with open(os.path.join(t.d, "l.json")) as fh:
+            return t, json.load(fh)
+
+    def judge(self, t, ref):
+        t.write("design/requirements/cortex.toml", toml_of([record(acc=[("a1", "test", ref, None)],
+                sha=c.unit_hash(c.source_unit(DESIGN, "The latch starts tripped")))]))
+        return t.run("--bless", "--rust-tests", os.path.join(t.d, "l.json"))
+
+    def test_regression_271_a_dead_file_cannot_borrow_an_inline_modules_test_or_a_childs(self):
+        files = {
+            "crates/tiny/Cargo.toml": '[package]\nname = "tiny"\n',
+            "crates/tiny/src/lib.rs": "mod a {\n    #[test]\n    fn borrowed() {}\n    mod sub;\n}\nmod b;\n",
+            "crates/tiny/src/a.rs": "#[test]\nfn borrowed() {}\n#[test]\nfn deep() {}\n",  # dead: `mod a` is inline
+            "crates/tiny/src/a/sub.rs": "#[test]\nfn deep() {}\n",
+            "crates/tiny/src/b.rs": "mod c;\n#[cfg(feature = \"never\")]\n#[test]\nfn deep2() {}\n",
+            "crates/tiny/src/b/c.rs": "#[test]\nfn deep2() {}\n",
+        }
+        lib = "crates/tiny/src/lib.rs"
+        tests = [("tiny", lib, "a::borrowed"), ("tiny", lib, "a::sub::deep"), ("tiny", lib, "b::c::deep2")]
+        for ref, ok in ((f"{lib}::a::borrowed", True), ("crates/tiny/src/a.rs::borrowed", False), ("crates/tiny/src/a.rs::deep", False),
+                        ("crates/tiny/src/a/sub.rs::deep", True), ("crates/tiny/src/b.rs::deep2", False),
+                        ("crates/tiny/src/b/c.rs::deep2", True), ("crates/tiny/src/a.rs::a::borrowed", False)):
+            t = self.tree(recs=[self.rec(ref)], extra=files, bless=False)
+            rc, out = t.run("--bless", "--rust-tests", cargo_list(os.path.join(t.d, "l.json"), tests))
+            self.assertEqual(rc == 0, ok, (ref, out))
+
+    def test_regression_271_harness_false_targets_are_skipped(self):
+        need_cargo(self)
+        forge = ("fn main() {\n    let a: Vec<String> = std::env::args().collect();\n"
+                 "    if a.iter().any(|x| x == \"--list\") && !a.iter().any(|x| x == \"--ignored\") {\n"
+                 "        println!(\"ghost: test\");\n    }\n}\n#[test]\nfn ghost() {}\n")
+        t, listed = self.scratch_tiny("#[test]\nfn real() {}\n", {"crates/tiny/tests/forge.rs": forge},
+                                      '\n[[test]]\nname = "forge"\npath = "tests/forge.rs"\nharness = false\n')
+        self.assertEqual({x["name"] for x in listed["tests"]}, {"real"})
+        self.assertEqual(listed["skipped_harness_false"], ["tiny:forge"])
+        self.assertNotEqual(self.judge(t, "tiny::ghost")[0], 0)
+        self.assertEqual(self.judge(t, "tiny::real")[0], 0)
+
+    def test_regression_271_spaced_and_macro_added_ignores_are_ignores(self):
+        need_cargo(self)
+        for src in ("# [ignore]\n#[test]\nfn x() {}\n", "#[test]\n#  [ ignore ]\nfn x() {}\n", "# [test]\n# [ignore = \"r\"]\nfn x() {}\n"):
+            self.assertEqual(c.rust_tests(src), (set(), {"x"}), src)
+        self.assertEqual(c.rust_tests("#  [ test ]\nfn x() {}\n"), ({"x"}, set()))
+        lib = ("# [ignore]\n#[test]\nfn spaced_ignored() {}\n"
+               "macro_rules! ig { ($i:item) => { #[ignore] $i }; }\nig! {\n    #[test]\n    fn macro_ignored() {}\n}\n")
+        t, listed = self.scratch_tiny(lib)
+        ignored = {x["name"]: x["ignored"] for x in listed["tests"]}
+        self.assertEqual(ignored, {"spaced_ignored": True, "macro_ignored": True})  # cargo knows the macro-added one
+        self.assertNotEqual(self.judge(t, "tiny::spaced_ignored")[0], 0)
+        self.assertNotEqual(self.judge(t, "tiny::macro_ignored")[0], 0)
+        # A forged list that clears the flag cannot clear the source-visible ignore.
+        forged = cargo_list(os.path.join(t.d, "f.json"), [("tiny", "crates/tiny/src/lib.rs", "spaced_ignored", False)])
+        t.write("design/requirements/cortex.toml", toml_of([record(acc=[("a1", "test", "tiny::spaced_ignored", None)],
+                sha=c.unit_hash(c.source_unit(DESIGN, "The latch starts tripped")))]))
+        self.assertNotEqual(t.run("--bless", "--rust-tests", forged)[0], 0)
+
+    def test_regression_271_sub_bullets_are_part_of_a_pinned_bullet(self):
+        doc = "- Parent bullet that is pinned.\n  continuation line\n  - child one\n    - grandchild\n- Sibling.\n\nnext paragraph\n"
+        base = c.unit_hash(c.source_unit(doc, "Parent bullet"))
+        for edited in (doc.replace("  - child one\n", "  - child one\n  - Except in test mode, it may be skipped.\n"),
+                       doc.replace("grandchild", "grandchild edited"), doc.replace("continuation line", "continuation line 2")):
+            self.assertNotEqual(c.unit_hash(c.source_unit(edited, "Parent bullet")), base)
+        self.assertEqual(c.unit_hash(c.source_unit(doc.replace("- Sibling.", "- Sibling, changed."), "Parent bullet")), base)
+        self.assertEqual(c.unit_hash(c.source_unit(doc.replace("next paragraph", "other"), "Parent bullet")), base)
+        # A pinned child is just the child.
+        self.assertEqual(c.source_unit(doc, "child one"), "  - child one\n    - grandchild")
+        # Blank lines inside a bullet keep deeper-indented text, and stop at shallower text.
+        loose = "- Pinned.\n\n  more text under it\n\nafter\n"
+        self.assertEqual(c.source_unit(loose, "Pinned"), "- Pinned.\n\n  more text under it")
+
+    def test_regression_271_python_last_definition_wins_and_skips_cannot_hide(self):
+        src = (
+            "import unittest\nimport unittest as ut\nfrom unittest import TestCase as TC\n"
+            "off = unittest.skip('x')\n"
+            "class A(unittest.TestCase):\n"
+            "    def test_redefined_live(self): pass\n"
+            "    @unittest.skip('x')\n    def test_redefined_live(self): pass\n"   # last definition is skipped
+            "    @unittest.skip('x')\n    def test_revived(self): pass\n"
+            "    def test_revived(self): pass\n"                                   # last definition is live
+            "    def test_deleted(self): pass\n    del test_deleted\n"
+            "    def test_reassigned(self): pass\n    test_reassigned = None\n"
+            "    @off\n    def test_alias_skipped(self): pass\n"
+            "    def test_plain(self): pass\n"
+            "class B(unittest.TestCase):\n    __unittest_skip__ = True\n    def test_in_flagged_class(self): pass\n"
+            "@some.decorator\nclass C(unittest.TestCase):\n    def test_in_decorated_class(self): pass\n"
+            "class D(ut.TestCase):\n    def test_via_alias_import(self): pass\n"
+            "class E(TC):\n    def test_via_from_import(self): pass\n"
+            "class F(A):\n    def test_subclass_of_a_counted_class(self): pass\n"
+        )
+        self.assertEqual(c.python_tests(src), {"test_revived", "test_plain", "test_via_alias_import", "test_via_from_import",
+                                               "test_subclass_of_a_counted_class"})
+        self.assertEqual(c.python_tests("import unittest\ndef load_tests(l, t, p): return t\nclass A(unittest.TestCase):\n    def test_x(self): pass\n"), set())
+        # TestCase must come from unittest, not from anywhere named TestCase.
+        self.assertEqual(c.python_tests("from other import TestCase\nclass A(TestCase):\n    def test_x(self): pass\n"), set())
+        self.assertEqual(c.python_tests("class A(other.TestCase):\n    def test_x(self): pass\n"), set())
+
+    def test_regression_271_directory_form_refs_are_refused(self):
+        for ref in ("crates/sup::it_starts_tripped", "crates/sup/tests::it_starts_tripped", "crates/sup/::it_starts_tripped"):
+            t = self.tree(recs=[self.rec(ref)], bless=False)
+            lst = cargo_list(os.path.join(t.d, "l.json"), [("sup", "crates/sup/tests/t.rs", "it_starts_tripped")])
+            for args in ((), ("--rust-tests", lst)):
+                rc, out = t.run("--bless", *args)
+                self.assertNotEqual(rc, 0, (ref, args))
+                self.assertIn("not a directory", out)
 
     def test_regression_271_python_tests_are_what_unittest_runs(self):
         src = (

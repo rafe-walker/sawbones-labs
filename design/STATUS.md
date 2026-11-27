@@ -41,7 +41,7 @@ None.
 | `SAW-XRAY-FEEDBACK-1` | Every finding says what to update, and STATUS.md lists drifted and needs-an-issue items first | built | #269 | - |
 | `SAW-XRAY-JUDGE-1` | The judge runs from the base branch with read-only permissions, pinned actions and no secrets | built | #269, #271 | - |
 | `SAW-XRAY-MALFORMED-1` | Malformed records, duplicate or unknown ids and checks naming missing tests fail | built | #269, #271 | - |
-| `SAW-XRAY-REAL-1` | Only tests that compile, are not ignored and really run count as built | built | #269, #271 | - |
+| `SAW-XRAY-REAL-1` | Only tests that compile, are not ignored and are written in reachable source count as built; a hostile PR can still forge the list | built | #269, #271 | - |
 | `SAW-XRAY-STALE-1` | A stale design/STATUS.md fails the check and --bless regenerates it | built | #269, #271 | - |
 | `SAW-XRAY-STATUS-1` | Status is computed from the code and never typed into a record | built | #269 | - |
 

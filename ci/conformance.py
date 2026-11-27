@@ -131,10 +131,27 @@ def source_unit(text, anchor):
     while start > 0 and not _BULLET.match(lines[start]) and lines[start - 1].strip() \
             and not lines[start - 1].lstrip().startswith("|"):
         start -= 1
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    bullet = bool(_BULLET.match(lines[start]))
     end = i
-    while end + 1 < len(lines) and lines[end + 1].strip() and not _BULLET.match(lines[end + 1]) \
-            and not lines[end + 1].lstrip().startswith("|"):
-        end += 1
+    j = end + 1
+    while j < len(lines):
+        line = lines[j]
+        if not line.strip():  # a blank line belongs to the item only if deeper-indented text follows
+            k = j
+            while k < len(lines) and not lines[k].strip():
+                k += 1
+            if bullet and k < len(lines) and len(lines[k]) - len(lines[k].lstrip()) > indent:
+                end, j = k, k + 1
+                continue
+            break
+        deeper = len(line) - len(line.lstrip()) > indent
+        if bullet and deeper:  # continuation lines and nested sub-bullets are part of the item
+            end, j = j, j + 1
+        elif not _BULLET.match(line) and not line.lstrip().startswith("|"):
+            end, j = j, j + 1  # the rest of a paragraph, or a lazy continuation line of a bullet
+        else:
+            break
     return "\n".join(lines[start:end + 1])
 
 
@@ -146,20 +163,26 @@ def unit_hash(unit):
 # ------------------------------------------------------------ test discovery
 #
 # Two sources of truth for Rust tests:
-#   * cargo's own list (--rust-tests FILE, made by ci/rust_test_list.py from
-#     `cargo test --workspace --all-targets` binaries run with --list, with and
-#     without --ignored). A test that does not compile, is cfg'd out, sits in an
-#     unreachable file or an uninvoked macro is simply not in that list.
-#   * a pure-source scan, used for local runs without cargo (labelled as a
-#     fallback, it can still be fooled) and to attribute cargo's tests to files.
+#   * cargo's own list (--rust-tests FILE, made by ci/rust_test_list.py from the
+#     libtest binaries `cargo test --workspace` runs, each run with --list, with and
+#     without --ignored). A test that does not compile, is cfg'd out, sits in a file
+#     no `mod` reaches or in an uninvoked macro is simply not in that list.
+#   * a source scan. It must also agree: a cargo-listed test only counts if a
+#     `#[test] fn` with exactly that module path is written in a file that `mod`
+#     declarations really reach from the binary's root (inline mods included). A
+#     test binary, build.rs or proc macro in a hostile PR can still print or add
+#     what it likes, so against a hostile PR the guarantee is this scan plus review.
+#   * with no cargo list (a local run) the scan alone is the labelled fallback.
 # Python tests are parsed with `ast`.
 
 GLOB_CHARS = "*?["
-_FN = re.compile(r"((?:#\[[^\]]*\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+|const\s+|unsafe\s+)*fn\s+(\w+)")
-_MOD = re.compile(r"((?:#\[[^\]]*\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{")
+_ATTRS = r"((?:#\s*\[[^\]]*\]\s*)*)"
+_FN = re.compile(_ATTRS + r"(?:pub(?:\([^)]*\))?\s+)?(?:async\s+|const\s+|unsafe\s+)*fn\s+(\w+)")
+_MODDECL = re.compile(_ATTRS + r"(?:pub(?:\([^)]*\))?\s+)?(?<!\w)mod\s+(\w+)\s*([;{])")
 _MACRO = re.compile(r"macro_rules\s*!\s*\w+\s*[{(\[]")
-_TEST_ATTR = re.compile(r"#\[\s*(?:\w+::)*test\b")
-_IGNORE_ATTR = re.compile(r"#\[\s*ignore\b|cfg_attr\s*\([^\]]*\bignore\b")
+_TEST_ATTR = re.compile(r"#\s*\[\s*(?:\w+::)*test\b")
+_IGNORE_ATTR = re.compile(r"#\s*\[\s*ignore\b|cfg_attr\s*\([^\]]*\bignore\b")
+_PATH_ATTR = re.compile(r"#\s*\[\s*path\b")
 _NEVER_CFG = re.compile(r"cfg\s*\(\s*(?:any\s*\(\s*\)|false|not\s*\(\s*(?:all\s*\(\s*\)|true)\s*\))\s*\)")
 _CHAR = re.compile(r"'(?:\\.[^']*|[^\\'])'")
 _RAW = re.compile(r'b?r(#*)"')
@@ -234,10 +257,11 @@ def _blank_span(s, a, b):
     return s[:a] + re.sub(r"[^\n]", " ", s[a:b]) + s[b:]
 
 
-def rust_tests(src):
-    """(live, ignored): names of `#[test]` fns found by a source scan, with
-    nested comments, strings, `macro_rules!` bodies and modules or fns behind a
-    never-true cfg removed. A fallback only: cargo's list is the authority."""
+def scan_rust(src):
+    """What a source scan sees in one Rust file, with nested comments, strings,
+    `macro_rules!` bodies and modules or fns behind a never-true cfg removed:
+      tests: [(inline module path, fn name, ignored)]
+      mods:  [(inline module path, name, attrs)] for out-of-line `mod name;`."""
     code = blank_rust(src)
     for m in list(_MACRO.finditer(code)):
         code_open = m.end() - 1
@@ -247,19 +271,32 @@ def rust_tests(src):
             close = {"(": ")", "[": "]"}[code[code_open]]
             end = code.find(close, code_open)
             code = _blank_span(code, m.start(), len(code) if end == -1 else end + 1)
-    for m in list(_MOD.finditer(code)):
-        if _NEVER_CFG.search(m.group(1)):
+    for m in list(_MODDECL.finditer(code)):
+        if m.group(3) == "{" and _NEVER_CFG.search(m.group(1)):
             code = _blank_span(code, m.start(), _match_brace(code, m.end() - 1))
-    live, ignored = set(), set()
+    spans = sorted((m.start(), _match_brace(code, m.end() - 1), m.group(2)) for m in _MODDECL.finditer(code) if m.group(3) == "{")
+
+    def inline_at(p):
+        return [name for a, b, name in spans if a <= p < b]
+
+    tests = []
     for m in _FN.finditer(code):
         attrs = m.group(1)
-        if not _TEST_ATTR.search(attrs) or _NEVER_CFG.search(attrs):
-            continue
-        (ignored if _IGNORE_ATTR.search(attrs) else live).add(m.group(2))
-    return live, ignored
+        if _TEST_ATTR.search(attrs) and not _NEVER_CFG.search(attrs):
+            tests.append((inline_at(m.start()), m.group(2), bool(_IGNORE_ATTR.search(attrs))))
+    mods = [(inline_at(m.start()), m.group(2), m.group(1)) for m in _MODDECL.finditer(code)
+            if m.group(3) == ";" and not _NEVER_CFG.search(m.group(1))]
+    return {"tests": tests, "mods": mods}
+
+
+def rust_tests(src):
+    """(live, ignored) fn names found by a source scan (module paths dropped)."""
+    info = scan_rust(src)
+    return ({n for _, n, ign in info["tests"] if not ign}, {n for _, n, ign in info["tests"] if ign})
 
 
 _SKIP_DECORATORS = {"skip", "skipIf", "skipUnless", "expectedFailure"}
+_TESTCASE_NAMES = {"TestCase", "IsolatedAsyncioTestCase"}
 
 
 def _decorator_name(d):
@@ -272,35 +309,70 @@ def _decorator_name(d):
     return ""
 
 
-def _base_name(b):
-    return b.attr if isinstance(b, ast.Attribute) else b.id if isinstance(b, ast.Name) else ""
+def _is_skip_expr(node):
+    """Is `node` a (call of a) unittest skip decorator, as in `unittest.skip('x')`?"""
+    return _decorator_name(node) in _SKIP_DECORATORS
 
 
 def python_tests(src):
-    """Names of `test_*` methods that `unittest` discovery would really run:
-    defined directly in the body of a module-level TestCase subclass, not skipped
-    or expected to fail, and not nested in `if`, strings or comments. A module-level
-    `def test_x` is never collected by unittest, so it does not count."""
+    """Names of the `test_*` methods that `unittest` discovery would really run:
+    defined in the body of a module-level class that derives from `unittest.TestCase`
+    (imported from unittest), where the last definition of a name wins, and not
+    skipped (decorator, alias of a skip decorator, `__unittest_skip__`), deleted or
+    reassigned. A class with any decorator, and a module that defines `load_tests`,
+    are not counted: either can change which tests run. Nothing in strings, comments
+    or `if` blocks counts, and a module-level `def test_x` is never collected."""
     try:
         tree = ast.parse(src)
     except (SyntaxError, ValueError):
         return set()
-    testcase = {"TestCase", "IsolatedAsyncioTestCase"}
-    skipped, found = set(), set()
+    unittest_names, testcase_names = set(), set()
+    aliases = set()  # names bound to a skip decorator, e.g. `off = unittest.skip("x")`
     for node in tree.body:
-        if not isinstance(node, ast.ClassDef):
+        if isinstance(node, ast.Import):
+            unittest_names |= {a.asname or a.name for a in node.names if a.name == "unittest"}
+        elif isinstance(node, ast.ImportFrom) and node.module == "unittest" and node.level == 0:
+            testcase_names |= {a.asname or a.name for a in node.names if a.name in _TESTCASE_NAMES}
+        elif isinstance(node, ast.FunctionDef) and node.name == "load_tests":
+            return set()
+        elif isinstance(node, ast.Assign) and _is_skip_expr(node.value):
+            aliases |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+
+    def is_base(b):
+        if isinstance(b, ast.Attribute):
+            return isinstance(b.value, ast.Name) and b.value.id in unittest_names and b.attr in _TESTCASE_NAMES
+        return isinstance(b, ast.Name) and b.id in testcase_names | local_cases
+
+    def skipping(d):
+        return _is_skip_expr(d) or (isinstance(d, ast.Name) and d.id in aliases) \
+            or (isinstance(d, ast.Call) and isinstance(d.func, ast.Name) and d.func.id in aliases)
+
+    local_cases, skipped_cases, found = set(), set(), set()
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef) or not any(is_base(b) for b in node.bases):
             continue
-        if not any(_base_name(b) in testcase for b in node.bases):
+        local_cases.add(node.name)
+        if node.decorator_list or any(isinstance(b, ast.Name) and b.id in skipped_cases for b in node.bases):
+            skipped_cases.add(node.name)  # unittest.skip is inherited; other decorators are not trusted
             continue
-        testcase.add(node.name)  # later classes may derive from this one
-        if any(_decorator_name(d) in _SKIP_DECORATORS for d in node.decorator_list) \
-                or any(_base_name(b) in skipped for b in node.bases):
-            skipped.add(node.name)  # unittest.skip on a class is inherited by its subclasses
+        defs, class_skipped = {}, False
+        for item in node.body:  # in order, so the last definition of a name wins
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defs[item.name] = not any(skipping(d) for d in item.decorator_list)
+            elif isinstance(item, ast.Assign):
+                for t in item.targets:
+                    if isinstance(t, ast.Name):
+                        if t.id == "__unittest_skip__" and isinstance(item.value, ast.Constant) and item.value.value:
+                            class_skipped = True
+                        defs[t.id] = False  # reassigned: no longer the function
+            elif isinstance(item, ast.Delete):
+                for t in item.targets:
+                    if isinstance(t, ast.Name):
+                        defs.pop(t.id, None)
+        if class_skipped:
+            skipped_cases.add(node.name)
             continue
-        for item in node.body:
-            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name.startswith("test_"):
-                if not any(_decorator_name(d) in _SKIP_DECORATORS for d in item.decorator_list):
-                    found.add(item.name)
+        found |= {n for n, ok in defs.items() if ok and n.startswith("test_")}
     return found
 
 
@@ -322,39 +394,25 @@ class TestIndex:
     def __init__(self, root, cargo=None):
         self.root = root
         self.cargo = cargo
-        self.decl = {}       # rel .rs path -> live names found by the source scan
-        self.decl_ign = {}   # rel .rs path -> ignored names found by the source scan
-        self.entries = []    # {"lang", "package", "dir", "src", "name", "leaf", "ignored"}
-        for rel in walk(root, ("crates", "firmware", "plugins", "fuzz"), (".rs",)):
-            try:
-                live, ign = rust_tests(read(root, rel))
-            except (OSError, UnicodeDecodeError):
-                continue
-            if live:
-                self.decl[rel] = live
-            if ign:
-                self.decl_ign[rel] = ign
+        self.entries = []   # {"lang", "package", "src", "files", "name", "leaf", "ignored"}
+        self._scans = {}
         if cargo is None:
-            for rel, names in self.decl.items():
-                self._add("rust", self._fallback_package(rel), pkg_dir(root, rel), rel, names, False)
-            for rel, names in self.decl_ign.items():
-                self._add("rust", self._fallback_package(rel), pkg_dir(root, rel), rel, names, True)
+            for rel in walk(root, ("crates", "firmware", "plugins", "fuzz"), (".rs",)):
+                info = self._scan(rel)
+                for _, name, ign in (info["tests"] if info else []):
+                    self._add("rust", self._fallback_package(rel), rel, {rel}, name, name, ign)
         else:
-            # Cargo's list is the authority on what compiles and runs, but a test binary
-            # (harness = false, build.rs, a proc macro) can print any --list it likes. So
-            # an entry also needs a `#[test] fn <name>` written in its package's source,
-            # and a test the source marks ignored is ignored whatever cargo's list says.
-            pkg_live, pkg_ign = {}, {}
-            for rel, names in self.decl.items():
-                pkg_live.setdefault(pkg_dir(root, rel), set()).update(names)
-            for rel, names in self.decl_ign.items():
-                pkg_ign.setdefault(pkg_dir(root, rel), set()).update(names)
+            reach = {}
             for t in cargo["tests"]:
-                d = pkg_dir(root, t["src"])
-                leaf = t["name"].rsplit("::", 1)[-1]
-                if leaf not in pkg_live.get(d, set()) | pkg_ign.get(d, set()):
-                    continue
-                self._add("rust", t["package"], d, t["src"], [t["name"]], bool(t["ignored"]) or leaf in pkg_ign.get(d, set()))
+                if t["src"] not in reach:
+                    reach[t["src"]] = self._reach(t["src"])
+                # Cargo's list says what compiles and runs. The source must also declare
+                # a test with exactly this module path in a file that `mod` really
+                # reaches from the binary's root; a source #[ignore] wins over the list.
+                files = {f for f, names in reach[t["src"]].items() if t["name"] in names}
+                if files:
+                    ign = bool(t["ignored"]) or any(reach[t["src"]][f][t["name"]] for f in files)
+                    self._add("rust", t["package"], t["src"], files, t["name"], t["name"].rsplit("::", 1)[-1], ign)
         # Only files `unittest discover -s ci -p 'test_*.py'` collects.
         for rel in walk(root, ("ci",), (".py",)):
             base = os.path.basename(rel)
@@ -364,46 +422,59 @@ class TestIndex:
                 names = python_tests(read(root, rel))
             except (OSError, UnicodeDecodeError):
                 continue
-            self._add("python", None, "ci", rel, names, False)
+            for n in names:
+                self._add("python", None, rel, {rel}, n, n, False)
+
+    def _scan(self, rel):
+        if rel not in self._scans:
+            try:
+                self._scans[rel] = scan_rust(read(self.root, rel))
+            except (OSError, UnicodeDecodeError):
+                self._scans[rel] = None
+        return self._scans[rel]
+
+    def _reach(self, root_rel):
+        """{file: {full test name: ignored}} for the files `mod` declarations reach
+        from the crate root `root_rel`. A test's module path must equal its file's
+        module path plus the inline modules around it; `#[path]` and never-true cfg
+        declarations are not followed."""
+        out = {}
+
+        def visit(rel, modpath, child_dir):
+            if rel in out:
+                return
+            info = self._scan(rel)
+            if info is None:
+                return
+            out[rel] = {}
+            for inline, name, ign in info["tests"]:
+                out[rel]["::".join(modpath + inline + [name])] = ign
+            for inline, name, attrs in info["mods"]:
+                if _PATH_ATTR.search(attrs):
+                    continue
+                base = [p for p in child_dir + inline if p]
+                for cand, kid_dir in ((base + [name + ".rs"], base + [name]), (base + [name, "mod.rs"], base + [name])):
+                    path = "/".join(cand)
+                    if os.path.isfile(os.path.join(self.root, path)):
+                        visit(path, modpath + inline + [name], kid_dir)
+                        break
+
+        visit(root_rel, [], [p for p in os.path.dirname(root_rel).split("/") if p])
+        return out
 
     @staticmethod
     def _fallback_package(rel):
         parts = rel.split("/")
         return parts[1] if len(parts) > 2 and parts[0] in ("crates", "firmware", "plugins", "fuzz") else parts[0]
 
-    def _add(self, lang, package, d, src, names, ignored):
-        for n in names:
-            self.entries.append({"lang": lang, "package": package, "dir": d, "src": src, "name": n,
-                                 "leaf": n.rsplit("::", 1)[-1], "ignored": ignored})
-
-    def _in_file(self, e, f):
-        """Is entry `e` declared in file `f`?"""
-        if e["src"] == f:
-            return True
-        if e["lang"] != "rust" or self.cargo is None:
-            return False
-        # Cargo names a test binary by its root file; attribute it to the file
-        # in the same package whose source declares a test of that name.
-        if pkg_dir(self.root, f) != e["dir"]:
-            return False
-        if e["leaf"] not in self.decl.get(f, set()) | self.decl_ign.get(f, set()):
-            return False
-        # A dead file must not borrow a live test's name: the test's module path has to
-        # be the one `mod` declarations would give this file under the binary's root.
-        base = os.path.dirname(e["src"])
-        rel = os.path.relpath(f, base) if f.startswith(base + "/") or not base else None
-        if rel is None:
-            return False
-        parts = rel[:-3].split("/") if rel.endswith(".rs") else []
-        if parts and parts[-1] == "mod":
-            parts.pop()
-        stem = os.path.basename(e["src"])[:-3]
-        paths = [parts] + ([parts[1:]] if parts and parts[0] == stem else [])  # tests/x.rs owns tests/x/*.rs
-        return any(p and e["name"].startswith("::".join(p) + "::") for p in paths)
+    def _add(self, lang, package, src, files, name, leaf, ignored):
+        self.entries.append({"lang": lang, "package": package, "src": src, "files": files, "name": name,
+                             "leaf": leaf, "ignored": ignored})
 
     def resolve(self, ref):
-        """Return (matching test names, problem or None) for `path::pattern`,
-        `crate::pattern` or a bare `pattern`."""
+        """Return (matching test names, problem or None) for `path/file.rs::pattern`,
+        `crate::pattern` or a bare `pattern`. A pattern may carry a module path
+        (`module::name`); a glob needs a literal prefix and a crate or file."""
         head, sep, pattern = ref.partition("::")  # `crate::module::name` is crate + a module path
         if not sep:
             head, pattern = None, ref
@@ -411,6 +482,8 @@ class TestIndex:
             head = None
         if not pattern or pattern != pattern.strip() or re.search(r"\s", pattern):
             return [], f"'{ref}' is not a test name or glob"
+        if head is not None and "/" in head and not head.endswith((".rs", ".py")):
+            return [], f"'{ref}': name a crate or a file (`path/file.rs::name`), not a directory"
         if pattern[0] in GLOB_CHARS:
             return [], f"'{ref}': a glob must start with a literal prefix (a bare '*' proves nothing)"
         is_glob = any(ch in pattern for ch in GLOB_CHARS)
@@ -421,12 +494,9 @@ class TestIndex:
             if head is None:
                 return True
             if head.endswith(".py"):
-                return e["lang"] == "python" and self._in_file(e, head)
+                return e["lang"] == "python" and head in e["files"]
             if head.endswith(".rs"):
-                return e["lang"] == "rust" and self._in_file(e, head)
-            if "/" in head:  # a directory
-                d = head.rstrip("/")
-                return e["src"] == d or e["src"].startswith(d + "/")
+                return e["lang"] == "rust" and head in e["files"]
             return e["lang"] == "rust" and e["package"] == head
 
         hits = [e for e in self.entries if selected(e) and (fnmatch.fnmatchcase(e["leaf"], pattern) or fnmatch.fnmatchcase(e["name"], pattern))]
