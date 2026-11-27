@@ -1,0 +1,4 @@
+05dc14a0ff8300c8 | Ok([RawObservation { quantity: 0, mantissa: 1500, exponent: 0 }, RawObservation { quantity: 1, mantissa: 5280, exponent: -2 }, RawObservation { quantity: 2, mantissa: -125, exponent: -1 }, RawObservation { quantity: 3, mantissa: 600, exponent: -1 }])
+05dc14a0fe8300c8 | Ok([RawObservation { quantity: 0, mantissa: 1500, exponent: 0 }, RawObservation { quantity: 1, mantissa: 5280, exponent: -2 }, RawObservation { quantity: 2, mantissa: -381, exponent: -1 }, RawObservation { quantity: 3, mantissa: 600, exponent: -1 }])
+05dc14a0 | Ok([RawObservation { quantity: 0, mantissa: 1500, exponent: 0 }, RawObservation { quantity: 1, mantissa: 5280, exponent: -2 }])
+05dc14a0ff8300c8ffffff | Err(Declined(Malformed))
