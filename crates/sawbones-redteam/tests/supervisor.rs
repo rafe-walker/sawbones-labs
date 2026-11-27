@@ -112,8 +112,7 @@ fn redteam_bus_007_a_write_with_no_reply_blocks_new_leases_until_a_readback() {
     b.tick();
     b.interlock.panel_button_pressed = false;
     b.bus.reply = BusReply::NoReply;
-    let got =
-        b.s.invoke(&write(10), token, b.now, &mut b.bus, &mut b.interlock);
+    let got = b.invoke(&write(10), token);
     assert_eq!(got, Ok(Outcome::Unknown));
 
     // The agent retries: no new lease, no write.
@@ -122,8 +121,7 @@ fn redteam_bus_007_a_write_with_no_reply_blocks_new_leases_until_a_readback() {
         b.s.request_lease(&token, &mut b.interlock),
         Err(InvokeRefusal::OutcomeUnknown { .. })
     ));
-    let got =
-        b.s.invoke(&write(10), token, b.now, &mut b.bus, &mut b.interlock);
+    let got = b.invoke(&write(10), token);
     assert!(matches!(got, Err(InvokeRefusal::OutcomeUnknown { .. })));
     assert_eq!(b.bus.performed.len(), 1);
 
@@ -135,8 +133,7 @@ fn redteam_bus_007_a_write_with_no_reply_blocks_new_leases_until_a_readback() {
     });
     b.bus.reply = BusReply::Value(WriteValue::U16(9));
     let token = b.s.preflight(&read, b.now).unwrap();
-    let got =
-        b.s.invoke(&read, token, b.now, &mut b.bus, &mut b.interlock);
+    let got = b.invoke(&read, token);
     assert_eq!(
         got,
         Ok(Outcome::ReadBack {

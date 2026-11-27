@@ -9,13 +9,14 @@ use sawbones_policy::{
 };
 
 use crate::io::{BusReply, BusTransport, InterlockLink, ToInterlock};
+use crate::latch::{LatchPass, LatchRefusal};
 use crate::supervisor::{ArmedPlan, Supervisor};
 
-/// An action that passed [`confirm`] at the moment of action and every
-/// supervisor gate. Private fields and no constructor outside this crate:
-/// only [`Supervisor::invoke`] makes one, and only after consuming a
-/// [`PreflightToken`], so a [`BusTransport`] cannot be driven around the
-/// write path.
+/// An action that passed [`confirm`] at the moment of action, the taint
+/// latch and every supervisor gate. Private fields and no constructor
+/// outside this crate: only [`Supervisor::invoke`] makes one, and only after
+/// consuming a [`PreflightToken`] and a [`LatchPass`], so a [`BusTransport`]
+/// cannot be driven around the write path.
 ///
 /// ```compile_fail
 /// use sawbones_policy::{Decision, EffectRequest};
@@ -121,6 +122,10 @@ pub enum InvokeRefusal {
     },
     /// [`confirm`] refused the token, or the preflight refused the request.
     Preflight(PreflightRefusal),
+    /// The taint latch (#210) refused at the moment of action: the pass is
+    /// for another turn or request, or outside content entered the agent's
+    /// context and no fresh approval has been seen since.
+    Latch(LatchRefusal),
     /// Class 2 or 3 with no connection plan checked clean by
     /// [`Supervisor::arm`].
     NotArmed,
@@ -238,30 +243,50 @@ impl Supervisor {
         Ok(target)
     }
 
-    /// Step two of the write path, and the only way to carry out an
-    /// action: [`confirm`] consumes the token at the moment of action, then
-    /// the supervisor's gates run, then the bus transport gets an
-    /// [`Authorized`] action. There is no way to call it without a token,
-    /// and no way to make a token but [`Supervisor::preflight`]:
+    /// Step three of the write path, and the only way to carry out an
+    /// action: [`confirm`] consumes the token at the moment of action, the
+    /// taint latch checks the pass again, then the supervisor's gates run,
+    /// then the bus transport gets an [`Authorized`] action. There is no way
+    /// to call it without a token and a latch pass, no way to make a token
+    /// but [`Supervisor::preflight`], and no way to make a pass but
+    /// [`Supervisor::latch_check`] (see [`LatchPass`]):
     ///
     /// ```compile_fail
     /// use sawbones_policy::{EffectRequest, PreflightToken};
-    /// use sawbones_supervisor::{BusTransport, InterlockLink, Supervisor};
+    /// use sawbones_supervisor::{BusTransport, InterlockLink, LatchPass, Supervisor};
     /// fn skip(
     ///     s: &mut Supervisor,
     ///     r: &EffectRequest,
+    ///     pass: LatchPass,
     ///     bus: &mut impl BusTransport,
     ///     interlock: &mut impl InterlockLink,
     /// ) {
     ///     // A token cannot be written down outside the policy crate.
     ///     let token: PreflightToken = PreflightToken { checked_at: 0 };
+    ///     let _ = s.invoke(r, token, pass, 0, bus, interlock);
+    /// }
+    /// ```
+    ///
+    /// ```compile_fail
+    /// use sawbones_policy::{EffectRequest, PreflightToken};
+    /// use sawbones_supervisor::{BusTransport, InterlockLink, Supervisor};
+    /// fn skip_latch(
+    ///     s: &mut Supervisor,
+    ///     r: &EffectRequest,
+    ///     token: PreflightToken,
+    ///     bus: &mut impl BusTransport,
+    ///     interlock: &mut impl InterlockLink,
+    /// ) {
+    ///     // The latch pass is not optional.
     ///     let _ = s.invoke(r, token, 0, bus, interlock);
     /// }
     /// ```
     ///
     /// The gates, in order: a write of unknown effect on the port blocks
     /// everything but a read of its signal; the port's carrier module must
-    /// be available; the token must confirm; class 2 and 3 need an armed
+    /// be available; the token must confirm; the pass must be for the open
+    /// turn and this request, and the latch must allow the confirmed class
+    /// now; class 2 and 3 need an armed
     /// plan and a trust-root report with this build's rule set, no fault and
     /// rail A on; class 3 also needs rail B on for the lease's port. A class
     /// 3 action is reported to the trust root as used whatever the reply.
@@ -274,6 +299,7 @@ impl Supervisor {
         &mut self,
         request: &EffectRequest,
         token: PreflightToken,
+        pass: LatchPass,
         now: Tick,
         bus: &mut impl BusTransport,
         interlock: &mut impl InterlockLink,
@@ -305,6 +331,10 @@ impl Supervisor {
         .map_err(InvokeRefusal::Preflight)?;
         let decision = confirmed.decision().clone();
         let lease = confirmed.lease_target();
+        let grounds = self
+            .latch
+            .recheck(&pass, request, &decision)
+            .map_err(InvokeRefusal::Latch)?;
         match decision.requirement() {
             Requirement::Nothing => {}
             Requirement::RailA { .. } => self.rails_live(None, interlock)?,
@@ -334,6 +364,7 @@ impl Supervisor {
         if let Some(target) = lease {
             interlock.send(ToInterlock::LeaseUsed { target });
         }
+        self.latch.spend(grounds);
         Ok(match (request, reply) {
             (EffectRequest::BusWrite(w), BusReply::NoReply) => {
                 self.pending.insert(
