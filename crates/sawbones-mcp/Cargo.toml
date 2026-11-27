@@ -1,0 +1,30 @@
+[package]
+name = "sawbones-mcp"
+description = "PROVISIONAL MCP surface v0 for the Sawbones test bench (#103): read-only tools, named by hazard class, served over stdio on top of sawbones-supervisor and the simulated bench. Every result is a host-written summary plus a handle; module text is fenced and reported to the taint latch before it is returned. No transport authentication yet (#211)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "sawbones-mcp"
+path = "src/bin/sawbones-mcp.rs"
+
+# A hand-written JSON-RPC subset on serde_json, not rmcp: see the crate docs
+# and the README for why. No dependency here is new to the tree.
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sawbones-interlock = { path = "../sawbones-interlock" }
+sawbones-module-protocol = { path = "../sawbones-module-protocol", features = ["verify"] }
+sawbones-policy = { path = "../sawbones-policy" }
+sawbones-reading = { path = "../sawbones-reading" }
+sawbones-supervisor = { path = "../sawbones-supervisor" }
+# v0 serves the simulated bench. Module keys are drawn from the operating
+# system's random source at start, so no key lives in this crate.
+sawbones-sim-modules = { path = "../sawbones-sim-modules" }
+ed25519-dalek = { version = "3.0.0", default-features = false }

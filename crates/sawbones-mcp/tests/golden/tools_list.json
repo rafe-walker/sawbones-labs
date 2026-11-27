@@ -1,0 +1,139 @@
+{
+  "tools": [
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Bench status"
+      },
+      "description": "One status line for the simulated bench: modules by state, rails, fault, the taint latch and stored handles. Written by the host from its own state; it returns no module content. Call it first.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "bench_status",
+      "title": "Bench status"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Inventory"
+      },
+      "description": "Every enrolled module: id, hub port, the owner's label, state, the enrolled hazard-class ceiling and whether it may transmit. From the owner's enrollment and the supervisor's own state; it returns no module content.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      },
+      "name": "inventory",
+      "title": "Inventory"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Describe a module"
+      },
+      "description": "One module's enrollment and its manifest pages, checked against the digest pinned at enrollment. The pages are the module's own text: they are returned fenced as untrusted data, stored behind a handle, and reported to the taint latch.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "module": {
+            "description": "The module id, from inventory.",
+            "maximum": 4294967295,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "module"
+        ],
+        "type": "object"
+      },
+      "name": "describe",
+      "title": "Describe a module"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Read a module value"
+      },
+      "description": "Asks a module for a config value or a live reading (live readings are keys 256 and up), 1 to 64 times. Returns a summary of what the module claims, which is device-reported and not measured, and a handle to the samples. Reported to the taint latch.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "description": "The config key; live readings are 256 and up.",
+            "maximum": 65535,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "module": {
+            "description": "The module id, from inventory.",
+            "maximum": 4294967295,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "samples": {
+            "default": 1,
+            "description": "How many times to ask.",
+            "maximum": 64,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "module",
+          "key"
+        ],
+        "type": "object"
+      },
+      "name": "read",
+      "title": "Read a module value"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true,
+        "title": "Query the session store"
+      },
+      "description": "Without a handle: lists this session's handles. With a handle: its summary, and for a read, statistics over samples from..to. Never returns raw samples.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "description": "First sample, for a read handle.",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "handle": {
+            "description": "A handle from an earlier result.",
+            "pattern": "^(rd|mf)-[1-9][0-9]{0,8}$",
+            "type": "string"
+          },
+          "to": {
+            "description": "One past the last sample, for a read handle.",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "name": "session_query",
+      "title": "Query the session store"
+    }
+  ]
+}
