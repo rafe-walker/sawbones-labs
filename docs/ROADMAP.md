@@ -101,7 +101,7 @@ Read it as: an arrow means "has to be done first". Three things follow from the 
 | **Funding and credits** | Apply for free usage, credits and funding, using the P1 bench data and the site technical report. | #285 | P1.6 |
 | **P2.1 The pack** | The S.A.W. pack: case, battery, BMS, cooling, indicators, speaker and hub. | #282 | P1.6 |
 | **P2.2 Module 1: the DC meter** | The first built instrument, isolated from the brain. | #163 | P1.2, P1.4, P0.3 |
-| **P2.3 Module 2: the listen-only comms pod** | Reading the inverter directly (the Solar Assistant read path for the EG4), unable to transmit unless armed. | #164 | P1.3 |
+| **P2.3 Module 2: the listen-only comms pod** | Reading the EG4 inverter, Solar Assistant first and then the native ports, unable to transmit unless armed. | #164 | P1.3 |
 | **P2.4 The investigation** | One real question about the EG4 answered end to end, read-only. | #165 | P2.2, P2.3, P0.4, P0.5 |
 | **P2.5 More modules and field use** | Vehicle pod, mic array, radio modules, field use, LoRa, the T.A.B.L.E. overhead camera and toolkit hardware. | #284 | P2.1, P2.4 |
 
