@@ -235,7 +235,7 @@ class FailureModes(Base):
             rc, out = t.run("--bless")
             self.assertNotEqual(rc, 0, r)
 
-    def test_regression_unparseable_toml_and_unknown_component_fail(self):
+    def test_regression_malformed_toml_and_unknown_component_fail(self):
         t = self.tree()
         t.write("design/requirements/cortex.toml", "[[requirement\n")
         self.assertNotEqual(t.run()[0], 0)
