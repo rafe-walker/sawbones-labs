@@ -1,7 +1,9 @@
 //! The one write path, and arming behind the isolation check.
 
+use std::collections::BTreeMap;
+
 use sawbones_interlock::{LeaseTarget, Tick};
-use sawbones_isolation::{Finding, IsolationMap};
+use sawbones_isolation::{build_plan, Connection, Finding, ModuleDeclaration, PlanProblem};
 use sawbones_module_protocol::ModuleId;
 use sawbones_policy::{
     confirm, preflight, BusWriteAction, Decision, EffectRequest, PortId, PreflightRefusal,
@@ -10,6 +12,7 @@ use sawbones_policy::{
 
 use crate::io::{BusReply, BusTransport, InterlockLink, ToInterlock};
 use crate::latch::{LatchPass, LatchRefusal};
+use crate::registry::ModuleState;
 use crate::supervisor::{ArmedPlan, Supervisor};
 
 /// An action that passed [`confirm`] at the moment of action, the taint
@@ -102,6 +105,13 @@ pub enum ArmRefusal {
         /// Every Stop finding.
         violations: Vec<Finding>,
     },
+    /// The plan's map could not be built from the bench config and the
+    /// modules' declarations: something is missing, unconfirmed or in
+    /// conflict. An unknown terminal is not a safe one.
+    Plan {
+        /// Every reason found.
+        problems: Vec<PlanProblem>,
+    },
 }
 
 /// Why an action was not carried out. The gates run in this order.
@@ -148,20 +158,40 @@ pub enum InvokeRefusal {
 }
 
 impl Supervisor {
-    /// Checks a connection plan with the isolation checker before arming.
-    /// Any finding of severity Stop refuses; warnings and notes are kept in
-    /// the [`ArmedPlan`]. On a clean plan it asks the trust root for rail A,
-    /// which only the arm switch can grant.
+    /// Builds the map of the connection plan and checks it before arming.
+    /// The map is built here, from the bench config, the declarations of the
+    /// modules that are available now, and the proposed `connections`
+    /// (galvanic only): a caller cannot pass a map of its own. A terminal no
+    /// one declared, or declared and the config does not back, refuses the
+    /// plan (fail closed). Any finding of severity Stop refuses; warnings and
+    /// notes are kept in the [`ArmedPlan`]. On a clean plan it asks the trust
+    /// root for rail A, which only the arm switch can grant.
     ///
     /// # Errors
     ///
+    /// [`ArmRefusal::Plan`] if the map cannot be built,
     /// [`ArmRefusal::Isolation`] with every Stop finding.
     pub fn arm(
         &mut self,
-        plan: &IsolationMap,
+        connections: &[Connection],
         interlock: &mut impl InterlockLink,
     ) -> Result<(), ArmRefusal> {
-        let report = plan.check();
+        let vouched: BTreeMap<u32, ModuleDeclaration> = self
+            .declarations
+            .iter()
+            .filter(|(m, _)| self.module_state(**m) == Some(ModuleState::Available))
+            .map(|(m, d)| (m.0, d.clone()))
+            .collect();
+        let map = match build_plan(&self.bench, &vouched, connections) {
+            Ok(map) => map,
+            Err(refusal) => {
+                self.armed = None;
+                return Err(ArmRefusal::Plan {
+                    problems: refusal.problems,
+                });
+            }
+        };
+        let report = map.check();
         let violations: Vec<Finding> = report.violations().cloned().collect();
         if !violations.is_empty() {
             self.armed = None;

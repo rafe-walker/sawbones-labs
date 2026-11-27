@@ -93,7 +93,7 @@ fn it_starts_tripped_and_the_first_arm_seen_clears_it() {
     // Off and on again, seen by the main loop.
     b.interlock.arm_switch_on = false;
     b.run(2);
-    b.s.arm(&clean_plan(), &mut b.interlock).unwrap();
+    b.s.arm(&[], &mut b.interlock).unwrap();
     b.interlock.arm_switch_on = true;
     b.run(2);
     assert_eq!(b.s.tainted_by(), None);
@@ -341,7 +341,7 @@ fn a_pre_taint_approval_does_not_clear_it() {
     b.interlock.arm_switch_on = false;
     b.run(2);
     b.s.taint(Origin::Note);
-    b.s.arm(&clean_plan(), &mut b.interlock).unwrap();
+    b.s.arm(&[], &mut b.interlock).unwrap();
     b.interlock.arm_switch_on = true;
     b.run(2);
     assert!(b.interlock.outputs.rail_a);
@@ -417,7 +417,7 @@ fn nothing_from_inside_clears_it() {
     b.s.end_turn(turn);
     b.s.begin_turn();
     b.s.disarm();
-    b.s.arm(&clean_plan(), &mut b.interlock).unwrap();
+    b.s.arm(&[], &mut b.interlock).unwrap();
     let token = b.s.preflight(&write(10), b.now).unwrap();
     b.s.request_lease(&token, &mut b.interlock).unwrap();
     b.s.set_chain_head(ChainHead([9; 32]));
