@@ -88,13 +88,22 @@
 //! effect unknown, so its port takes nothing but a read of the same signal
 //! until a read back answers ([`Outcome::ReadBack`]).
 //!
+//! ## Read-only questions
+//!
+//! [`Supervisor::query`] queues a [`ModuleQuery`] (a manifest page, or a
+//! config value or live reading) for an available module; it goes out on
+//! the module's own link before the next health poll, and
+//! [`Supervisor::take_answer`] returns the [`QueryOutcome`]. Every question
+//! is class 0 by its request kind. Every answer is the module's claim
+//! (`FromModule`), and the MCP layer (`sawbones-mcp`, #103) reports it to
+//! the latch before the model sees it.
+//!
 //! ## Not here yet
 //!
-//! Drivers as child processes, the MCP server (the latch models its turn
-//! boundary, but nothing calls it yet), module write commands
+//! Drivers as child processes, the MCP invoke tools (`sawbones-mcp` v0 is
+//! read-only), module write commands
 //! (config writes and actuations: the policy engine classifies bus requests
-//! only, so the supervisor offers none), the manifest pages and their
-//! fencing, signed ledger events (#172), USB interface-class authorization
+//! only, so the supervisor offers none), signed ledger events (#172), USB interface-class authorization
 //! (#177), and the module states for self-test, read-only, armed and
 //! updating.
 
@@ -102,6 +111,7 @@
 
 mod io;
 pub mod latch;
+mod query;
 mod registry;
 mod supervisor;
 mod write;
@@ -113,6 +123,10 @@ pub use io::{
 pub use latch::{
     FreshApproval, Grounds, LatchPass, LatchRefusal, MeasuredNumber, Origin, Taint, TaintSource,
     TurnId, TurnInput,
+};
+pub use query::{
+    ManifestPage, ModuleQuery, QueryId, QueryOutcome, QueryRefusal, QueryReply, MAX_KEPT_ANSWERS,
+    MAX_QUEUED_QUERIES,
 };
 pub use registry::{
     ConfigError, Enrollment, Happened, HubPort, ModuleState, PortRefusal, PortState,

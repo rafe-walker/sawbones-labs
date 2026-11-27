@@ -15,6 +15,7 @@ use sawbones_policy::{
 
 use crate::io::{ChallengeSource, InterlockLink, ModuleTransport};
 use crate::latch::Latch;
+use crate::query::{ModuleQuery, Queries, QueryId, QueryOutcome};
 use crate::registry::{
     ConfigError, Enrollment, Happened, HubPort, ModuleState, PortRefusal, PortState,
     QuarantineReason,
@@ -76,6 +77,9 @@ struct Slot {
     /// Frames the host could not take since `window_start`.
     bad_frames: u32,
     window_start: Tick,
+    /// The read-only question outstanding on the link, if the outstanding
+    /// request is one.
+    query: Option<(QueryId, ModuleQuery)>,
 }
 
 impl Slot {
@@ -88,6 +92,7 @@ impl Slot {
             next_poll: now,
             bad_frames: 0,
             window_start: now,
+            query: None,
         }
     }
 }
@@ -119,6 +124,7 @@ pub struct Supervisor {
     pub(crate) armed: Option<ArmedPlan>,
     pub(crate) pending: BTreeMap<PortId, PendingWrite>,
     pub(crate) latch: Latch,
+    pub(crate) queries: Queries,
 }
 
 impl std::fmt::Debug for Supervisor {
@@ -187,6 +193,7 @@ impl Supervisor {
             armed: None,
             pending: BTreeMap::new(),
             latch: Latch::at_start(),
+            queries: Queries::default(),
         })
     }
 
@@ -366,6 +373,9 @@ impl Supervisor {
         for port in gone {
             if let Some(slot) = self.slots.remove(&port) {
                 out.push(Happened::Unplugged(port));
+                if let Some((id, _)) = slot.query {
+                    self.queries.answer(id, QueryOutcome::Dropped);
+                }
                 if let PortState::Verified(module) = slot.state {
                     self.lost(module, port, now, hub, out);
                 }
@@ -428,8 +438,8 @@ impl Supervisor {
             // Not listening: a late reply after a loss is not taken either.
             return;
         }
-        let response = match slot.link.receive(bytes) {
-            Ok(r) => r.into_claim(),
+        let from = match slot.link.receive(bytes) {
+            Ok(r) => r,
             Err(error) => {
                 out.push(Happened::FrameDropped { port, error });
                 self.bad_frame(port, now, hub, out);
@@ -437,6 +447,7 @@ impl Supervisor {
             }
         };
         slot.deadline = None;
+        let response = *from.claim();
         match (slot.state, response) {
             (PortState::Opening, Response::Identity(claim)) => {
                 self.identify(port, claim, now, hub, out);
@@ -447,9 +458,13 @@ impl Supervisor {
                 out.push(Happened::Refused { port, why });
             }
             (PortState::Verified(_), _) => {
-                // Any answer to a poll keeps it alive. Its content is a claim
-                // and is not used yet.
+                // Any answer keeps it alive. A health reply's content is a
+                // claim and is not used yet; an answer to a question is kept,
+                // as the module's claim, for take_answer.
                 slot.next_poll = now.saturating_add(POLL_PERIOD_TICKS);
+                if let Some((id, query)) = slot.query.take() {
+                    self.queries.reply(id, query, from);
+                }
             }
             _ => {}
         }
@@ -558,12 +573,16 @@ impl Supervisor {
         out: &mut Vec<Happened>,
     ) {
         self.quarantine.entry(module).or_insert(reason);
+        self.queries.drop_for(module);
         out.push(Happened::Quarantined { module, reason });
         let why = PortRefusal::Quarantined(module);
         for (p, slot) in &mut self.slots {
             if *p == port || slot.state == PortState::Verified(module) {
                 slot.state = PortState::Refused(why);
                 slot.deadline = None;
+                if let Some((id, _)) = slot.query.take() {
+                    self.queries.answer(id, QueryOutcome::Dropped);
+                }
                 slot.link.abandon();
                 let mut buf = [0u8; MAX_FRAME_LEN];
                 if let Ok(len) = slot.link.send(&Request::SafeState, &mut buf) {
@@ -587,6 +606,7 @@ impl Supervisor {
         out: &mut Vec<Happened>,
     ) {
         out.push(Happened::Lost { module, port });
+        self.queries.drop_for(module);
         self.invalidate(module, now, out);
         let times = self.losses.entry(module).or_default();
         times.retain(|t| now.saturating_sub(*t) < LOSS_WINDOW_TICKS);
@@ -685,6 +705,9 @@ impl Supervisor {
                 slot.link.abandon();
                 slot.deadline = None;
                 slot.next_poll = now.saturating_add(POLL_PERIOD_TICKS);
+                if let Some((id, _)) = slot.query.take() {
+                    self.queries.answer(id, QueryOutcome::TimedOut);
+                }
                 let was = slot.state;
                 slot.state = PortState::Lost;
                 match was {
@@ -692,6 +715,23 @@ impl Supervisor {
                     _ => out.push(Happened::IdentifyTimedOut(port)),
                 }
                 continue;
+            }
+            if let PortState::Verified(module) = slot.state {
+                if let Some((id, query)) = self.queries.next_for(module) {
+                    let mut buf = [0u8; MAX_FRAME_LEN];
+                    match slot.link.send(&query.request(), &mut buf) {
+                        Ok(len) => {
+                            slot.deadline = Some(now.saturating_add(LINK_TIMEOUT_TICKS));
+                            slot.query = Some((id, query));
+                            hub.send(port, &buf[..len]);
+                        }
+                        Err(_) => {
+                            self.queries.answer(id, QueryOutcome::Dropped);
+                            self.open(port, now, hub);
+                        }
+                    }
+                    continue;
+                }
             }
             if now < slot.next_poll {
                 continue;

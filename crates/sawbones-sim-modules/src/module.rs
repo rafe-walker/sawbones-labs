@@ -4,9 +4,9 @@ use core::num::NonZeroU64;
 use ed25519_dalek::{Signer, SigningKey};
 use sawbones_module_protocol::{
     Challenge, ConfigKey, DescriptionPage, Dropped, HealthReport, HealthStatus, IdentityClaim,
-    IdentitySignature, ImageDigest, LogEntries, LogEntry, LogLevel, ModuleBytes, ModuleId,
-    ModuleLink, RefusalCode, Rejection, Request, ResetMode, Response, SelfTestOutcome,
-    SelfTestReport, TimeReport, MAX_FRAME_LEN, MAX_LOG_BYTES,
+    IdentitySignature, ImageDigest, LogEntries, LogEntry, LogLevel, ManifestDigest, ManifestHasher,
+    ModuleBytes, ModuleId, ModuleLink, RefusalCode, Rejection, Request, ResetMode, Response,
+    SelfTestOutcome, SelfTestReport, TimeReport, MAX_FRAME_LEN, MAX_LOG_BYTES,
 };
 
 use crate::kinds::{ModuleKind, READING_KEY_BASE};
@@ -84,6 +84,7 @@ pub struct SimModule {
     latency: u64,
     faults: ModuleFaults,
     fault_onset: u64,
+    manifest: Vec<Vec<u8>>,
 }
 
 impl SimModule {
@@ -110,7 +111,29 @@ impl SimModule {
             latency: 1,
             faults: ModuleFaults::default(),
             fault_onset: 0,
+            manifest: kind.manifest().iter().map(|p| p.to_vec()).collect(),
         }
+    }
+
+    /// Serves `pages` as the manifest instead of the kind's own, and signs
+    /// their digest: a module whose installed manifest says something else,
+    /// such as text written to steer an agent (#103). A page longer than
+    /// [`MAX_PAGE_LEN`](sawbones_module_protocol::MAX_PAGE_LEN) is never
+    /// served.
+    #[must_use]
+    pub fn with_manifest(mut self, pages: Vec<Vec<u8>>) -> Self {
+        self.manifest = pages;
+        self
+    }
+
+    /// The digest of the manifest this module serves and signs.
+    #[must_use]
+    pub fn manifest_digest(&self) -> ManifestDigest {
+        let mut hasher = ManifestHasher::new();
+        for page in &self.manifest {
+            hasher.bytes(page);
+        }
+        hasher.finish()
     }
 
     /// Sets how many silent ticks end the session and send the module to its
@@ -223,7 +246,7 @@ impl SimModule {
         let mut claim = IdentityClaim {
             module: self.faults.wrong_identity.unwrap_or(self.id),
             capabilities: self.kind.capabilities(),
-            manifest_digest: self.kind.manifest_digest(),
+            manifest_digest: self.manifest_digest(),
             firmware_digest: self.firmware_digest(),
             signature: IdentitySignature([0; 64]),
         };
@@ -261,12 +284,20 @@ impl SimModule {
         let mut log_buf = [0u8; MAX_LOG_BYTES];
         let uptime = now.saturating_sub(self.boot_tick);
         let counters = self.link.counters();
+        // A copy, so the reply does not borrow the module while it is sent.
+        let (served_page, page_count) = match accepted.request {
+            Request::Describe { page } => (
+                self.manifest.get(usize::from(page)).cloned(),
+                self.manifest.len(),
+            ),
+            _ => (None, 0),
+        };
         let response = match accepted.request {
             Request::Identify { challenge } => Response::Identity(self.identity(&challenge)?),
-            Request::Describe { page } => match self.kind.manifest().get(usize::from(page)) {
+            Request::Describe { page } => match served_page.as_deref() {
                 Some(text) => Response::Description(DescriptionPage {
                     page,
-                    page_count: u8::try_from(self.kind.manifest().len()).ok()?,
+                    page_count: u8::try_from(page_count).ok()?,
                     text: ModuleBytes::new(text)?,
                 }),
                 None => Response::Refused(RefusalCode::OutOfRange),

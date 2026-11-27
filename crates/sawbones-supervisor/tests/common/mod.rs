@@ -136,6 +136,16 @@ impl FakeModule {
                 refused_frames: 0,
             }),
             Request::SafeState => Response::SafeStateEntered,
+            Request::Describe { page: 0 } => {
+                Response::Description(sawbones_module_protocol::DescriptionPage {
+                    page: 0,
+                    page_count: 1,
+                    text: sawbones_module_protocol::ModuleBytes::new(MANIFEST).unwrap(),
+                })
+            }
+            Request::ConfigRead { key } if key.0 >= 0x100 => {
+                Response::ConfigValue { key, value: 42 }
+            }
             _ => Response::Refused(RefusalCode::UnknownKey),
         };
         self.reply(accepted.seq, &response)
