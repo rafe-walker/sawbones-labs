@@ -83,6 +83,9 @@ pub struct ModuleSpec {
     /// A manifest to serve in place of the kind's own, if any. The
     /// enrollment pins whatever it serves, as an install would.
     pub manifest: Option<Vec<Vec<u8>>>,
+    /// A manifest digest to sign (and so to pin) in place of the digest of
+    /// the pages it serves, for a module whose pages do not hash to its pin.
+    pub signed_digest: Option<sawbones_module_protocol::ManifestDigest>,
 }
 
 impl ModuleSpec {
@@ -99,6 +102,7 @@ impl ModuleSpec {
             label: ScopeName::parse(kind.name())
                 .unwrap_or_else(|_| unreachable!("kind names are valid labels")),
             manifest: None,
+            signed_digest: None,
         }
     }
 }
@@ -298,6 +302,9 @@ impl SimBench {
             let mut module = SimModule::new(spec.kind, id, seed, u64::from(n) + 1);
             if let Some(pages) = &spec.manifest {
                 module = module.with_manifest(pages.clone());
+            }
+            if let Some(digest) = spec.signed_digest {
+                module = module.with_signed_manifest_digest(digest);
             }
             let port = HubPort(n);
             enrollments.push(Enrollment {

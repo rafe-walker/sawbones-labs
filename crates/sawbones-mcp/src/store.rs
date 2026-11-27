@@ -10,6 +10,14 @@ use std::fmt;
 use sawbones_module_protocol::ModuleId;
 use sawbones_supervisor::{ManifestPage, Tick};
 
+/// The highest handle number. Handles are never reused: past it the store
+/// refuses new records ([`StoreFull`]).
+pub const MAX_HANDLE: u32 = 999_999_999;
+
+/// Every handle number has been used in this session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StoreFull;
+
 /// The most records kept. Past it, the oldest is dropped and its handle
 /// stops resolving.
 pub const MAX_RECORDS: usize = 256;
@@ -119,8 +127,16 @@ pub struct Store {
 
 impl Store {
     /// Keeps `record`, taken at `tick`, and returns its handle.
-    pub fn put(&mut self, tick: Tick, record: Record) -> Handle {
-        self.next = self.next.saturating_add(1).min(999_999_999);
+    ///
+    /// # Errors
+    ///
+    /// [`StoreFull`] once [`MAX_HANDLE`] handles have been made: a handle
+    /// is never reused for other data.
+    pub fn put(&mut self, tick: Tick, record: Record) -> Result<Handle, StoreFull> {
+        if self.next >= MAX_HANDLE {
+            return Err(StoreFull);
+        }
+        self.next += 1;
         let kind = match record {
             Record::Read { .. } => HandleKind::Read,
             Record::Manifest { .. } => HandleKind::Manifest,
@@ -137,7 +153,7 @@ impl Store {
                 self.records.remove(&h);
             }
         }
-        handle
+        Ok(handle)
     }
 
     /// The record behind `handle`, and the tick it was taken at.
@@ -209,11 +225,31 @@ mod tests {
             samples: Vec::new(),
             asked: 0,
         };
-        let first = store.put(0, record.clone());
+        let first = store.put(0, record.clone()).unwrap();
         for _ in 0..MAX_RECORDS {
-            store.put(0, record.clone());
+            store.put(0, record.clone()).unwrap();
         }
         assert_eq!(store.len(), MAX_RECORDS);
         assert!(store.get(first).is_none());
+    }
+
+    /// Review of #103: at the cap the handle number saturated, so every
+    /// later record took the same handle and replaced the data behind it.
+    #[test]
+    fn regression_103_handles_are_never_reused_at_the_cap() {
+        let mut store = Store::default();
+        let record = Record::Read {
+            module: ModuleId(1),
+            key: 0x100,
+            samples: Vec::new(),
+            asked: 0,
+        };
+        store.next = MAX_HANDLE - 1;
+        let last = store.put(7, record.clone()).unwrap();
+        assert_eq!(last.to_string(), format!("rd-{MAX_HANDLE}"));
+        assert_eq!(store.put(8, record.clone()), Err(StoreFull));
+        assert_eq!(store.put(9, record), Err(StoreFull));
+        // The last handle still points at its own data.
+        assert_eq!(store.get(last).map(|(t, _)| t), Some(7));
     }
 }

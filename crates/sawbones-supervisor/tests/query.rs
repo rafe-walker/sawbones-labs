@@ -123,3 +123,49 @@ fn health_polls_go_on_between_questions() {
     }
     assert_eq!(b.s.module_state(METER), Some(ModuleState::Available));
 }
+
+/// Review of #103: a queued question went out before a due health poll,
+/// and its answer put the next poll off, so a steady stream of questions
+/// starved the health polls. Now a due poll goes first, and only a health
+/// reply schedules the next one.
+#[test]
+fn regression_103_a_steady_question_stream_does_not_starve_health_polls() {
+    use sawbones_module_protocol::{decode_request, Request};
+    let mut b = ready();
+    let health_sent = |b: &Bench| {
+        b.hub.sent[&METER_PORT]
+            .iter()
+            .filter(|f| matches!(decode_request(f), Ok(r) if r.request == Request::Health))
+            .count()
+    };
+    let before = health_sent(&b);
+    let ticks = 20 * sawbones_supervisor::POLL_PERIOD_TICKS;
+    let mut answered = 0;
+    let mut waiting = Vec::new();
+    for _ in 0..ticks {
+        // Keep the queue full the whole time.
+        while let Ok(id) = b.s.query(
+            METER,
+            ModuleQuery::Read {
+                key: ConfigKey(0x100),
+            },
+        ) {
+            waiting.push(id);
+        }
+        b.run(1);
+        waiting.retain(|id| match b.s.take_answer(*id) {
+            Some(_) => {
+                answered += 1;
+                false
+            }
+            None => true,
+        });
+    }
+    let polls = health_sent(&b) - before;
+    assert!(answered > 20, "questions still flow: {answered}");
+    assert!(
+        polls >= 18,
+        "health polls starved: {polls} in {ticks} ticks"
+    );
+    assert_eq!(b.s.module_state(METER), Some(ModuleState::Available));
+}

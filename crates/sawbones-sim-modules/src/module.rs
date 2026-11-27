@@ -85,6 +85,7 @@ pub struct SimModule {
     faults: ModuleFaults,
     fault_onset: u64,
     manifest: Vec<Vec<u8>>,
+    signed_digest: Option<ManifestDigest>,
 }
 
 impl SimModule {
@@ -112,6 +113,7 @@ impl SimModule {
             faults: ModuleFaults::default(),
             fault_onset: 0,
             manifest: kind.manifest().iter().map(|p| p.to_vec()).collect(),
+            signed_digest: None,
         }
     }
 
@@ -126,9 +128,24 @@ impl SimModule {
         self
     }
 
-    /// The digest of the manifest this module serves and signs.
+    /// Signs `digest` as its manifest digest while serving its pages as
+    /// they are: a module whose pages do not hash to the digest it signed
+    /// (and that was pinned at install), as a reflash that changed only
+    /// the pages would leave it (#103).
+    #[must_use]
+    pub fn with_signed_manifest_digest(mut self, digest: ManifestDigest) -> Self {
+        self.signed_digest = Some(digest);
+        self
+    }
+
+    /// The manifest digest this module signs: the one set with
+    /// [`SimModule::with_signed_manifest_digest`], or else the digest of
+    /// the pages it serves.
     #[must_use]
     pub fn manifest_digest(&self) -> ManifestDigest {
+        if let Some(digest) = self.signed_digest {
+            return digest;
+        }
         let mut hasher = ManifestHasher::new();
         for page in &self.manifest {
             hasher.bytes(page);

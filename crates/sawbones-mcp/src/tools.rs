@@ -298,16 +298,30 @@ struct QueryArgs {
     to: Option<u32>,
 }
 
-/// Parses tool arguments, or a host-written error result. The parser's
-/// message names only the model's own input, never module content.
-fn args<T: for<'de> Deserialize<'de>>(arguments: Value) -> Result<T, Envelope> {
+/// Parses tool arguments, or a fixed host-written error naming the tool and
+/// what it takes. Nothing the client sent is echoed back.
+fn args<T: for<'de> Deserialize<'de>>(
+    arguments: Value,
+    tool: &str,
+    expected: &str,
+) -> Result<T, Envelope> {
     let arguments = if arguments.is_null() {
         json!({})
     } else {
         arguments
     };
-    serde_json::from_value(arguments)
-        .map_err(|e| Envelope::error(&format!("invalid arguments: {e}")))
+    serde_json::from_value(arguments).map_err(|_| {
+        Envelope::error(&format!(
+            "invalid arguments for {tool}: it takes {expected}, and no other field"
+        ))
+    })
+}
+
+/// The error for a full session store.
+fn store_full() -> Envelope {
+    Envelope::error(
+        "the session store has used every handle; start a new session (restart the server)",
+    )
 }
 
 fn class_digit(class: HazardClass) -> u8 {
@@ -365,7 +379,7 @@ fn enrollment(bench: &SimBench, module: ModuleId) -> Option<Enrollment> {
 }
 
 fn bench_status(bench: &mut SimBench, store: &mut Store, arguments: Value) -> Envelope {
-    if let Err(e) = args::<NoArgs>(arguments) {
+    if let Err(e) = args::<NoArgs>(arguments, "bench_status", "no arguments") {
         return e;
     }
     let mut counts = [0usize; 5];
@@ -407,7 +421,7 @@ fn bench_status(bench: &mut SimBench, store: &mut Store, arguments: Value) -> En
 }
 
 fn inventory(bench: &mut SimBench, _store: &mut Store, arguments: Value) -> Envelope {
-    if let Err(e) = args::<NoArgs>(arguments) {
+    if let Err(e) = args::<NoArgs>(arguments, "inventory", "no arguments") {
         return e;
     }
     let mut env = Envelope::default();
@@ -469,7 +483,11 @@ fn refusal_text(module: ModuleId, refusal: QueryRefusal) -> String {
 }
 
 fn describe(bench: &mut SimBench, store: &mut Store, arguments: Value) -> Envelope {
-    let a: DescribeArgs = match args(arguments) {
+    let a: DescribeArgs = match args(
+        arguments,
+        "describe",
+        "module (an integer id from inventory)",
+    ) {
         Ok(a) => a,
         Err(e) => return e,
     };
@@ -544,14 +562,16 @@ fn describe(bench: &mut SimBench, store: &mut Store, arguments: Value) -> Envelo
     let digest_matches = hasher.finish() == e.manifest;
     let bytes: usize = pages.iter().map(|p| p.as_untrusted_bytes().len()).sum();
     let n = pages.len();
-    let handle = store.put(
+    let Ok(handle) = store.put(
         bench.now(),
         Record::Manifest {
             module,
             pages: pages.clone(),
             digest_matches,
         },
-    );
+    ) else {
+        return store_full();
+    };
     if !digest_matches {
         env.host(format!(
             "manifest: {n} page(s), {bytes} bytes, which do not hash to the digest pinned at enrollment; text withheld; handle {handle}"
@@ -590,7 +610,11 @@ fn stats(samples: &[Sample]) -> Option<String> {
 }
 
 fn read(bench: &mut SimBench, store: &mut Store, arguments: Value) -> Envelope {
-    let a: ReadArgs = match args(arguments) {
+    let a: ReadArgs = match args(
+        arguments,
+        "read",
+        "module (an integer id from inventory), key (an integer, 0 to 65535) and samples (optional, 1 to 64)",
+    ) {
         Ok(a) => a,
         Err(e) => return e,
     };
@@ -647,7 +671,7 @@ fn read(bench: &mut SimBench, store: &mut Store, arguments: Value) -> Envelope {
     }
     let values = samples.len();
     let summary = stats(&samples);
-    let handle = store.put(
+    let Ok(handle) = store.put(
         bench.now(),
         Record::Read {
             module,
@@ -655,7 +679,9 @@ fn read(bench: &mut SimBench, store: &mut Store, arguments: Value) -> Envelope {
             samples,
             asked,
         },
-    );
+    ) else {
+        return store_full();
+    };
     let mut env = Envelope::default();
     env.host(format!(
         "read: module {} '{}' key 0x{:04x}: {asked} asked, {values} answered with a value, {refused} refused, {unexpected} unexpected, {timed_out} timed out, {dropped} dropped; handle {handle}",
@@ -677,6 +703,14 @@ fn read(bench: &mut SimBench, store: &mut Store, arguments: Value) -> Envelope {
             format!("refusal codes the module sent: {}", codes.join(", ")),
         );
     }
+    if unexpected > 0 {
+        // Any answer is the module's claim, whatever its kind.
+        env.claim(
+            &mut bench.supervisor,
+            Origin::Device,
+            format!("the module answered {unexpected} time(s) with something other than a value or a refusal"),
+        );
+    }
     if values == 0 {
         env.set_error();
         if timed_out + dropped > 0 {
@@ -695,7 +729,11 @@ fn read(bench: &mut SimBench, store: &mut Store, arguments: Value) -> Envelope {
 }
 
 fn session_query(bench: &mut SimBench, store: &mut Store, arguments: Value) -> Envelope {
-    let a: QueryArgs = match args(arguments) {
+    let a: QueryArgs = match args(
+        arguments,
+        "session_query",
+        "handle (optional, rd-N or mf-N), from and to (optional integers, with a read handle)",
+    ) {
         Ok(a) => a,
         Err(e) => return e,
     };

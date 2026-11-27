@@ -530,12 +530,14 @@ impl Supervisor {
                 out.push(Happened::Refused { port, why });
             }
             (PortState::Verified(_), _) => {
-                // Any answer keeps it alive. A health reply's content is a
-                // claim and is not used yet; an answer to a question is kept,
-                // as the module's claim, for take_answer.
-                slot.next_poll = now.saturating_add(POLL_PERIOD_TICKS);
+                // An answer to a question is kept, as the module's claim, for
+                // take_answer. It does not put off the next health poll, so
+                // a stream of questions cannot starve the polls (#103). A
+                // health reply's content is a claim and is not used yet.
                 if let Some((id, query)) = slot.query.take() {
                     self.queries.reply(id, query, from);
+                } else {
+                    slot.next_poll = now.saturating_add(POLL_PERIOD_TICKS);
                 }
             }
             _ => {}
@@ -788,7 +790,10 @@ impl Supervisor {
                 }
                 continue;
             }
-            if let PortState::Verified(module) = slot.state {
+            // A due health poll goes first; a question waits for the next
+            // pass with nothing outstanding.
+            let poll_due = now >= slot.next_poll;
+            if let (PortState::Verified(module), false) = (slot.state, poll_due) {
                 if let Some((id, query)) = self.queries.next_for(module) {
                     let mut buf = [0u8; MAX_FRAME_LEN];
                     match slot.link.send(&query.request(), &mut buf) {
