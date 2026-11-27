@@ -91,6 +91,16 @@ Tracked in #166. The plugin and store index design itself is written up after th
 | The external cut | Required before any real power switching. A separate watchdog part, about a dollar, with its own supply monitor, asks the RP2350 questions; the relay stays on only while the answers come back right and on time. A frozen, glitched or misbehaving RP2350 drops the rail by itself. It must work with any controller chosen later. Tracked in [#144](https://github.com/rafe-walker/sawbones-labs/issues/144). |
 | Later add-ons | Not now. A secure element for module keys, if key secrecy is ever needed. A second controller from a different maker that must agree before an output turns on, decided in P1. |
 
+## 26 November 2026, names, T.R.I.A.G.E. and the field toolkit
+
+| Topic | Decision |
+| --- | --- |
+| Names | Pack S.A.W. (Sensory Agent Workstation); bench T.A.B.L.E. (Test, Assembly, Build & Lab Environment). Body theme for the systems: C.O.R.T.E.X. (supervisor), N.E.R.V.E. (module protocol), P.U.L.S.E. (heartbeat to the trust root), C.H.A.R.T. (knowledge store), T.R.I.A.G.E. (MCP server). Interlock, modules and plugins keep their names. |
+| T.R.I.A.G.E. tool surface | A stable set of tool verbs split by hazard class; attached modules and plugins appear as data, never as new tools, because the current MCP spec forbids per-connection tool lists. Design in the v1 proposal; v0 is #245. |
+| Official Rust MCP SDK (rmcp) | Use it, behind safeguards: tool logic stays SDK-free behind an adapter so the SDK can be swapped; dependencies are never vendored into the repo (its build script sets git's hooks path two folders above its manifest); a CI check fails if a build changes the repo's git configuration; it goes through the build-code allow-list review. |
+| Panel request for class 3 | The agent may light the panel to ask for the key and press on a class 3 job. The light only invites; nothing happens without the physical press. |
+| Field toolkit | Catalogue the Kali Linux and other open-source tools per module (RF, Wi-Fi and Bluetooth, network capture, serial, CAN and OBD-II, Modbus, firmware and hardware debugging, audio, vision, thermal) and decide per tool family how it runs (native and sandboxed on the Pi, wrapped, or ported to Rust), its hazard class and how T.R.I.A.G.E. exposes it. Own systems and property only. #250. |
+
 ## Reversals and corrections
 
 | Was | Now | Why |
