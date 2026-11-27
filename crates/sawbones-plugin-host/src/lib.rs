@@ -48,8 +48,8 @@
 //!
 //! ## Not here yet
 //!
-//! Logs and health counters (#175), the conformance suite (#176), state
-//! snapshots, other plugin kinds (drivers, analyses, plans), shadow mode,
+//! Logs and health counters (#175), the rest of the conformance suite (#176;
+//! v0 is `tests/conformance.rs`), state snapshots, other plugin kinds (drivers, analyses, plans), shadow mode,
 //! signed plugins, and the rest of the sandbox (#177): see [`sandbox`].
 
 #![forbid(unsafe_code)]

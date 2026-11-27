@@ -1,0 +1,8 @@
+14a0ff83c8 | Ok([RawObservation { quantity: 0, mantissa: 5280, exponent: -2 }, RawObservation { quantity: 1, mantissa: -125, exponent: -1 }]) | Result(Ok(Some(List([Record([("quantity", U16(0)), ("value", Record([("mantissa", S64(5280)), ("exponent", S8(-2))]))]), Record([("quantity", U16(1)), ("value", Record([("mantissa", S64(-125)), ("exponent", S8(-1))]))])])))) | 95
+12c0012cff | Ok([RawObservation { quantity: 0, mantissa: 4800, exponent: -2 }, RawObservation { quantity: 1, mantissa: 300, exponent: -1 }]) | Result(Ok(Some(List([Record([("quantity", U16(0)), ("value", Record([("mantissa", S64(4800)), ("exponent", S8(-2))]))]), Record([("quantity", U16(1)), ("value", Record([("mantissa", S64(300)), ("exponent", S8(-1))]))])])))) | 95
+14a0ef83c8 | Err(Declined(Malformed)) | Result(Err(Some(Enum("malformed")))) | 53
+14a0 | Err(Declined(Malformed)) | Result(Err(Some(Enum("malformed")))) | 36
+14a0ff83c8ffffff | Err(Declined(Malformed)) | Result(Err(Some(Enum("malformed")))) | 36
+12c0112cff | Err(Declined(Malformed)) | Result(Err(Some(Enum("malformed")))) | 53
+12c0 | Err(Declined(Malformed)) | Result(Err(Some(Enum("malformed")))) | 36
+12c0012cffffffff | Err(Declined(Malformed)) | Result(Err(Some(Enum("malformed")))) | 36

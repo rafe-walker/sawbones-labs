@@ -1146,6 +1146,7 @@ version = "0.0.0"
 dependencies = [
  "libc",
  "rustix",
+ "sawbones-policy",
  "sawbones-reading",
  "sawbones-regmap",
  "seccompiler",
