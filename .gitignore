@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 fuzz/artifacts/
 fuzz/coverage/
+
+# Coverage profiles (#246)
+*.profraw
+*.profdata

@@ -156,6 +156,11 @@ jobs:
           export SAWBONES_SAMPLE_PLUGIN_CORE="$GITHUB_WORKSPACE/plugins/sample-decoder/target/wasm32-unknown-unknown/release/sawbones_sample_decoder.wasm"
           export SAWBONES_REQUIRE_SAMPLE_PLUGIN=1
           cargo test -p sawbones-plugin-host --locked --test sample_plugin
+      - name: Run the plugin conformance suite on the sample plugin (#176)
+        run: |
+          export SAWBONES_SAMPLE_PLUGIN_CORE="$GITHUB_WORKSPACE/plugins/sample-decoder/target/wasm32-unknown-unknown/release/sawbones_sample_decoder.wasm"
+          export SAWBONES_REQUIRE_SAMPLE_PLUGIN=1
+          cargo test -p sawbones-plugin-host --locked --test conformance
 
   build-artifacts:
     name: no build output committed (#208)

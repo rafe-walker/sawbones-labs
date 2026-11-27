@@ -1,0 +1,4 @@
+01020304 | Ok([RawObservation { quantity: 0, mantissa: 4, exponent: -1 }]) | Result(Ok(Some(List([Record([("quantity", U16(0)), ("value", Record([("mantissa", S64(4)), ("exponent", S8(-1))]))])])))) | 48
+01020204 | Ok([RawObservation { quantity: 0, mantissa: 4, exponent: -1 }]) | Result(Ok(Some(List([Record([("quantity", U16(0)), ("value", Record([("mantissa", S64(4)), ("exponent", S8(-1))]))])])))) | 48
+0102 | Ok([RawObservation { quantity: 0, mantissa: 2, exponent: -1 }]) | Result(Ok(Some(List([Record([("quantity", U16(0)), ("value", Record([("mantissa", S64(2)), ("exponent", S8(-1))]))])])))) | 48
+01020304ffffff | Ok([RawObservation { quantity: 0, mantissa: 7, exponent: -1 }]) | Result(Ok(Some(List([Record([("quantity", U16(0)), ("value", Record([("mantissa", S64(7)), ("exponent", S8(-1))]))])])))) | 48

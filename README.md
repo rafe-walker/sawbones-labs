@@ -4,7 +4,7 @@ An open-source, agent-first Maker's bench, and a portable test bench that docks 
 
 Sawbones is Old West slang for a field surgeon. This is one for machines: a carry-case of instruments that an AI agent operates over MCP, so it can observe, measure and, behind a safety layer, act on the thing under test. Inverters, battery packs, older vehicles, radios, appliances, a breadboard on the bench.
 
-**Status: P0.** Nothing here is built or bench-tested yet. The design has been through a first round of outside review. P0 is under way: the software, the firmware and the hardware blueprints, all built and tested without hardware. The first build after that is a small Bench Core.
+**Status: P0.** The software is built and tested in simulation; nothing has run on real hardware yet. The design has been through a first round of outside review. P0 is under way: the software, the firmware and the hardware blueprints, all built and tested without hardware. The first build after that is a small Bench Core.
 
 ## What is in here
 
