@@ -309,6 +309,10 @@ def scan_rust(src):
       tests:   [(inline module path, fn name, ignored)]
       mods:    [(inline module path, name, attrs)] for out-of-line `mod name;`.
       tainted: None, or why this file cannot be trusted (see below).
+      macro_hazard: None, or where a `macro_rules!` body (read with only comments and
+        strings blanked) contains `mod` or `include!`: such a macro can declare the live
+        module behind the declaration the scanner follows, here or in any file that
+        uses it, so TestIndex refuses every Rust credit in the workspace.
     Module names a scope declares more than once (a cfg'd-out `mod b;` next to a
     live `mod b {}`, inline or not), or declares with a path attribute (even inside
     `cfg_attr`), are ambiguous without evaluating cfg: all their declarations, and
@@ -317,9 +321,16 @@ def scan_rust(src):
     (an odd spelling, a macro-built item) or an `include!` taints the file, and a
     tainted file credits no test and has its `mod` children ignored."""
     code = blank_rust(src)
+    hazard = None
     for m in list(_MACRO.finditer(code)):
         code_open = m.end() - 1
-        code = _blank_span(code, m.start(), _match_close(code, code_open))
+        end = _match_close(code, code_open)
+        body = code[m.start():end]
+        bad = _MOD_TOKEN.search(body) or _INCLUDE.search(body)
+        if bad and hazard is None:
+            line = code.count("\n", 0, m.start() + bad.start()) + 1
+            hazard = f"line {line}: a `macro_rules!` body contains `{bad.group(0).strip()}`"
+        code = _blank_span(code, m.start(), end)
     decls = list(_MODDECL.finditer(code))
     kw_positions = {code.rfind("mod", m.start(), m.start(2)) for m in decls}
     unparsed = [t for t in _MOD_TOKEN.finditer(code) if t.start() not in kw_positions]
@@ -335,7 +346,7 @@ def scan_rust(src):
         line = code.count("\n", 0, _INCLUDE.search(code).start()) + 1
         taint = f"line {line}: `include!` pulls in text the scanner cannot see"
     if taint:
-        return {"tests": [], "mods": [], "tainted": taint}
+        return {"tests": [], "mods": [], "tainted": taint, "macro_hazard": hazard}
     spans0 = sorted((m.start(), _match_brace(code, m.end() - 1), m.group(2)) for m in decls if m.group(3) == "{")
 
     def scope_at(p, spans):
@@ -369,7 +380,7 @@ def scan_rust(src):
         scope = scope_at(m.start(), spans0)
         if inline_ok(scope) and (tuple(scope), m.group(2)) not in refused:
             mods.append((scope, m.group(2), m.group(1)))
-    return {"tests": tests, "mods": mods, "tainted": None}
+    return {"tests": tests, "mods": mods, "tainted": None, "macro_hazard": hazard}
 
 
 def rust_tests(src):
@@ -389,6 +400,18 @@ _SAFE_CALLS = {"pathlib.Path", "re.compile", "importlib.util.spec_from_file_loca
 _SAFE_CALL_PREFIX = ("os.path.",)
 _PATH_METHODS = {"with_name", "with_suffix", "resolve", "absolute", "joinpath"}
 _PLAIN_DECORATORS = {"classmethod", "staticmethod", "property"}
+
+
+def _has_yield(fn):
+    """Does this function's own body (not a nested def, lambda or class) yield?"""
+    stack = list(fn.body)
+    while stack:
+        n = stack.pop()
+        if isinstance(n, (ast.Yield, ast.YieldFrom)):
+            return True
+        if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            stack.extend(ast.iter_child_nodes(n))
+    return False
 
 
 class _Refuse(Exception):
@@ -648,11 +671,15 @@ class _PyScan:
                 self.refuse(item, f"a class-body `{type(item).__name__}` statement runs code at import")
 
     def classes(self):
-        local, skipped, bad, found = set(), set(), set(), set()
+        local, skipped, bad, found, asyncs = set(), set(), set(), set(), set()
+        async_full = "unittest.IsolatedAsyncioTestCase"
         for node in self.tree.body:
             if not isinstance(node, ast.ClassDef) or not any(self.is_testcase_base(b, local) for b in node.bases):
                 continue
             local.add(node.name)
+            if any((isinstance(b, ast.Name) and (b.id in asyncs or self.imports.get(b.id) == async_full)) or self.full(b) == async_full
+                   for b in node.bases):
+                asyncs.add(node.name)
             if any(not self.is_testcase_base(b, local) and not (isinstance(b, ast.Name) and b.id in local) for b in node.bases):
                 self.reasons.append(self.stmt(node) + ("a base class the scanner cannot vouch for",))
                 bad.add(node.name)
@@ -672,6 +699,14 @@ class _PyScan:
                     if item.name in _TC_RESERVED:
                         reserved = reserved or item
                     defs[item.name] = not item.decorator_list
+                    if item.name.startswith("test_") and defs[item.name]:
+                        if _has_yield(item):
+                            defs[item.name] = False
+                            self.reasons.append(self.stmt(item) + ("a test body that yields only builds a generator; it never runs",))
+                        elif isinstance(item, ast.AsyncFunctionDef) and node.name not in asyncs:
+                            defs[item.name] = False
+                            self.reasons.append(self.stmt(item) + ("an `async def` test outside IsolatedAsyncioTestCase only builds a "
+                                                                  "coroutine; it never runs",))
                 elif isinstance(item, (ast.Assign, ast.AnnAssign)):
                     for t in item.targets if isinstance(item, ast.Assign) else [item.target]:
                         if t.id == "__unittest_skip__" and isinstance(item.value, ast.Constant) and item.value.value:
@@ -709,7 +744,8 @@ def python_scan(src):
     an imported name bound again, a class with keywords) means the module is not
     counted. A class counts only if it derives from `unittest.TestCase` and defines
     none of TestCase's own attributes (`run`, `setUp`, `setUpClass`, ...). Its `test_*`
-    methods count when they carry no decorator, the last definition of a name wins,
+    methods count when they carry no decorator, do not `yield`, are not `async` outside an
+    `IsolatedAsyncioTestCase`, the last definition of a name wins,
     and skips (decorators, `__unittest_skip__`, inherited) exclude them.
     `reasons` lists (line, statement, why) for every module or class left out."""
     try:
@@ -780,9 +816,18 @@ class TestIndex:
         self.cargo = cargo
         self.pylist = pylist
         self.refusals = []  # (file, line, statement, why): what was left out and why
-        self.entries = []   # {"lang", "package", "src", "files", "name", "leaf", "ignored"}
+        self.macro_hazard = None
         self._scans = {}
-        if cargo is None:
+        for rel in walk(root, ("crates", "firmware", "plugins", "fuzz"), (".rs",)):
+            info = self._scan(rel)
+            if info and info["macro_hazard"]:
+                self.macro_hazard = f"{rel}:{info['macro_hazard']}"
+                self.refusals.append((rel, 0, "", info["macro_hazard"] + "; every Rust test is refused workspace-wide"))
+                break
+        self.entries = []   # {"lang", "package", "src", "files", "name", "leaf", "ignored"}
+        if self.macro_hazard:
+            pass  # no Rust test is credited; see resolve()
+        elif cargo is None:
             for rel in walk(root, ("crates", "firmware", "plugins", "fuzz"), (".rs",)):
                 info = self._scan(rel)
                 if info and info["tainted"]:
@@ -926,7 +971,9 @@ class TestIndex:
         else:
             why = []
         note = ""
-        if why:
+        if self.macro_hazard and not (head or "").endswith(".py"):
+            note = f"; every Rust test is refused: {self.macro_hazard}"
+        elif why:
             f, line, text, reason = why[0]
             note = f"; left out: {f}" + (f":{line}" if line else "") + (f" `{text}`" if text else "") + f" ({reason})"
         return [], f"no test matches '{ref}' in {how}{note}"

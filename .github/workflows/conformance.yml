@@ -9,7 +9,7 @@ name: Design conformance
 # See CONTRIBUTING.md, "Design conformance".
 #
 # Rust tests are resolved against cargo's own list and Python tests against the
-# outcomes of a real `unittest discover` (both made by the `test-list` job), so a
+# outcomes of a real `unittest discover` (made by the `test-list` and `python-test-list` jobs, kept apart), so a
 # test that never compiles, never runs or does not pass cannot count as built.
 #
 # For a PR the judge is the copy of ci/conformance.py (and the two listers)
@@ -65,6 +65,30 @@ jobs:
             cp ci/rust_test_list.py "${lister}"
           fi
           python3 -I "${lister}" "${RUNNER_TEMP}/rust-tests.json" --root "${GITHUB_WORKSPACE}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rust-test-list
+          path: ${{ runner.temp }}/rust-tests.json
+          if-no-files-found: error
+          retention-days: 7
+
+  # Its own job and artifact: the PR's Python tests run here, and must not be able
+  # to write the file the Rust judge reads.
+  python-test-list:
+    name: run the Python tests and record each outcome
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain (the checker's own tests build scratch workspaces)
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version
       - name: Run the Python tests and record each outcome with the base branch copy of the lister
         run: |
           lister="${RUNNER_TEMP}/py_test_list.py"
@@ -79,16 +103,14 @@ jobs:
           python3 -I "${lister}" "${RUNNER_TEMP}/py-tests.json" --root "${GITHUB_WORKSPACE}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: test-lists
-          path: |
-            ${{ runner.temp }}/rust-tests.json
-            ${{ runner.temp }}/py-tests.json
+          name: py-test-list
+          path: ${{ runner.temp }}/py-tests.json
           if-no-files-found: error
           retention-days: 7
 
   conformance:
     name: design conformance
-    needs: test-list
+    needs: [test-list, python-test-list]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -100,7 +122,11 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: test-lists
+          name: rust-test-list
+          path: ${{ runner.temp }}/list
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: py-test-list
           path: ${{ runner.temp }}/list
       - name: Check the records with the base branch copy of the checker
         run: |
@@ -123,7 +149,7 @@ jobs:
 
   closure-gate:
     name: closing an issue needs its requirements built
-    needs: test-list
+    needs: [test-list, python-test-list]
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -134,7 +160,11 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: test-lists
+          name: rust-test-list
+          path: ${{ runner.temp }}/list
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: py-test-list
           path: ${{ runner.temp }}/list
       - name: Judge the closing keywords (title, body and commit messages) with the base branch copy of the checker
         env:

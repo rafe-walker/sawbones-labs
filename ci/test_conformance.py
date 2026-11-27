@@ -339,7 +339,7 @@ class Feedback(Base):
         # PR text goes through env vars only, never into a run script.
         import re
         run_blocks = re.findall(r"run: \|\n((?: {10}.*\n|\n)+)", wf)
-        self.assertEqual(len(run_blocks), 5)
+        self.assertEqual(len(run_blocks), 6)
         for b in run_blocks:
             self.assertNotIn("github.event.pull_request", b)
 
@@ -693,11 +693,16 @@ fn cfg_attr_ignored() {}
             info = c.scan_rust(src)
             self.assertTrue(info["tainted"], name)
             self.assertEqual((info["tests"], info["mods"]), ([], []), name)
-        # A `mod` or `include!` inside a comment, a string or a macro_rules body is not code.
-        for src in ('// mod x;\n// include!("a");\n#[test]\nfn t() {}\n', 'const S: &str = "mod x; include!(a)";\n#[test]\nfn t() {}\n',
-                    "macro_rules! m { () => { mod x; include!(\"a\"); } }\n#[test]\nfn t() {}\n"):
+        # A `mod` or `include!` inside a comment or a string is not code.
+        for src in ('// mod x;\n// include!("a");\n#[test]\nfn t() {}\n', 'const S: &str = "mod x; include!(a)";\n#[test]\nfn t() {}\n'):
             info = c.scan_rust(src)
-            self.assertEqual((info["tainted"], len(info["tests"])), (None, 1), src)
+            self.assertEqual((info["tainted"], info["macro_hazard"], len(info["tests"])), (None, None, 1), src)
+        # ...but one inside a macro_rules! body IS code that can declare a module: it is a hazard.
+        for body in ("mod x;", "#[path = \"y.rs\"] mod x;", 'include!("a");', "mod $name { }"):
+            info = c.scan_rust("macro_rules! m { ($name:ident) => { " + body + " } }\n#[test]\nfn t() {}\n")
+            self.assertTrue(info["macro_hazard"], body)
+        # A macro_rules! body without them is fine, as before.
+        self.assertIsNone(c.scan_rust("macro_rules! ig { ($i:item) => { #[ignore] $i }; }\n#[test]\nfn t() {}\n")["macro_hazard"])
         # End to end: a tainted file and its `mod` children earn no credit and the error says why.
         lib = "crates/tiny/src/lib.rs"
         files = {lib: 'mod child;\ninclude!("x.rs");\n#[test]\nfn own() {}\n', "crates/tiny/src/child.rs": "#[test]\nfn kid() {}\n"}
@@ -706,6 +711,45 @@ fn cfg_attr_ignored() {}
             rc, out = t.run("--bless", "--rust-tests", cargo_list(os.path.join(t.d, "l.json"), [("tiny", lib, full)]))
             self.assertNotEqual(rc, 0, ref)
             self.assertIn("include!", out, ref)
+
+    def test_regression_271_a_macro_that_declares_a_module_refuses_every_rust_credit(self):
+        lib = "crates/tiny/src/lib.rs"
+        ws7 = ('// The scanner sees only the cfg\'d-out declaration; the live module comes from a macro.\n'
+               '#[cfg(feature = "never")]\nmod m;\n'
+               'macro_rules! live_m { () => { #[cfg(not(feature = "never"))] mod m { #[test] fn tm() {} } }; }\nlive_m!();\n'
+               '#[cfg(feature = "never")]\nmod n;\n'
+               'macro_rules! live_n { () => { #[cfg(not(feature = "never"))] #[path = "real_n.rs"] mod n; }; }\nlive_n!();\n'
+               '#[test]\nfn plain() {}\n')
+        files = {lib: ws7, "crates/tiny/src/m.rs": "#[test]\nfn tm() {}\n", "crates/tiny/src/n.rs": "#[test]\nfn tn() {}\n",
+                 "crates/tiny/src/real_n.rs": "#[test]\nfn tn() {}\n"}
+        tests = [("tiny", lib, "m::tm"), ("tiny", lib, "n::tn"), ("tiny", lib, "plain")]
+        for ref in ("crates/tiny/src/m.rs::tm", "crates/tiny/src/n.rs::tn", "tiny::plain", f"{lib}::plain"):
+            t = self.tree(recs=[self.rec(ref)], extra=files, bless=False)
+            for args in (("--rust-tests", cargo_list(os.path.join(t.d, "l.json"), tests)), ()):
+                rc, out = t.run("--bless", *args)
+                self.assertNotEqual(rc, 0, (ref, args))
+                self.assertIn("macro_rules!", out, (ref, args))
+                self.assertIn("every Rust test is refused", out, (ref, args))
+        # The hazard is workspace-wide: a macro in an unrelated crate refuses tests everywhere...
+        t = self.tree(recs=[self.rec("sup::it_starts_tripped")], bless=False,
+                      extra={"crates/other/src/lib.rs": "macro_rules! m { () => { mod x; }; }\n"})
+        lst = cargo_list(os.path.join(t.d, "l.json"), [("sup", "crates/sup/tests/t.rs", "it_starts_tripped")])
+        self.assertNotEqual(t.run("--bless", "--rust-tests", lst)[0], 0)
+        # ...and Python refs are not affected by it.
+        t.write("design/requirements/cortex.toml", toml_of([record(acc=[("a1", "test", "ci/test_conformance.py::test_x", None)],
+                sha=c.unit_hash(c.source_unit(DESIGN, "The latch starts tripped")))]))
+        t.write("ci/test_conformance.py", "import unittest\nclass T(unittest.TestCase):\n    def test_x(self): pass\n")
+        self.assertEqual(t.run("--bless", "--rust-tests", lst)[0], 0)
+
+    def test_regression_271_generator_and_misplaced_async_tests_never_run(self):
+        names, reasons = c.python_scan(
+            "import unittest\nclass T(unittest.TestCase):\n    def test_gen(self):\n        yield\n        raise AssertionError\n"
+            "    async def test_coro(self): raise AssertionError\n    def test_ok(self):\n        def inner():\n            yield 1\n"
+            "class A(unittest.IsolatedAsyncioTestCase):\n    async def test_async_ok(self): pass\n    async def test_async_gen(self):\n        yield\n"
+            "class B(A):\n    async def test_inherits_async(self): pass\n")
+        self.assertEqual(names, {"test_ok", "test_async_ok", "test_inherits_async"})
+        self.assertEqual({(line, text.split("(")[0]) for line, text, _ in reasons},
+                         {(3, "def test_gen"), (6, "async def test_coro"), (12, "async def test_async_gen")})
 
     def test_regression_271_spaced_and_macro_added_ignores_are_ignores(self):
         need_cargo(self)
@@ -897,6 +941,14 @@ fn cfg_attr_ignored() {}
         self.assertEqual(wf.count("--py-tests"), 2)  # the judge and the closure gate
         self.assertEqual(wf.count("--rust-tests"), 2)
         self.assertIn("py-tests.json", wf)
+        # The PR's Python tests must not be able to write the Rust list: separate jobs, separate artifacts.
+        rust_job = wf[wf.index("\n  test-list:"):wf.index("\n  python-test-list:")]
+        py_job = wf[wf.index("\n  python-test-list:"):wf.index("\n  conformance:")]
+        self.assertIn("rust-test-list", rust_job)
+        self.assertNotIn("py_test_list", rust_job)
+        self.assertNotIn("rust-tests.json", py_job)
+        self.assertIn("py-test-list", py_job)
+        self.assertIn("needs: [test-list, python-test-list]", wf)
 
     def test_regression_271_directory_form_refs_are_refused(self):
         for ref in ("crates/sup::it_starts_tripped", "crates/sup/tests::it_starts_tripped", "crates/sup/::it_starts_tripped"):
@@ -914,7 +966,6 @@ fn cfg_attr_ignored() {}
             "S = 'def test_in_string(self): pass'\n"
             "class T(unittest.TestCase):\n"
             "    def test_real(self): pass\n"
-            "    async def test_async_real(self): pass\n"
             "    @unittest.skip('x')\n"
             "    def test_skipped(self): pass\n"
             "    @unittest.skipIf(True, 'x')\n"
@@ -928,6 +979,8 @@ fn cfg_attr_ignored() {}
             "    def test_inherited_class_member(self): pass\n"
             "class NotATest:\n"
             "    def test_plain_class(self): pass\n"
+            "class A(unittest.IsolatedAsyncioTestCase):\n"
+            "    async def test_async_real(self): pass\n"
             "# def test_comment(self): pass\n"
         )
         self.assertEqual(c.python_tests(src), {"test_real", "test_async_real", "test_inherited_class_member"})
