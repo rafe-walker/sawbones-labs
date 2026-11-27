@@ -58,12 +58,29 @@
 //! ## One write path
 //!
 //! [`Supervisor::preflight`] checks the facts and classifies the request,
-//! returning a [`PreflightToken`]. [`Supervisor::invoke`] takes the token by
-//! value, has [`confirm`](sawbones_policy::confirm) consume it at the moment
-//! of action, runs the supervisor's gates, and only then hands the bus
-//! transport an [`Authorized`] action, which nothing else can make. There is
-//! no path that skips the token: see the `compile_fail` examples on
-//! [`Supervisor::invoke`] and [`Authorized`].
+//! returning a [`PreflightToken`]. [`Supervisor::latch_check`] checks the
+//! taint latch for the open turn, returning a [`LatchPass`].
+//! [`Supervisor::invoke`] takes both by value, has
+//! [`confirm`](sawbones_policy::confirm) consume the token at the moment of
+//! action, checks the latch again, runs the supervisor's gates, and only
+//! then hands the bus transport an [`Authorized`] action, which nothing else
+//! can make. There is no path that skips the token or the latch: see the
+//! `compile_fail` examples on [`Supervisor::invoke`], [`LatchPass`] and
+//! [`Authorized`].
+//!
+//! ## The taint latch
+//!
+//! Once outside content has entered the agent's context, class 2 and higher
+//! actions are refused until a fresh approval seen after it (#210): an arm
+//! cycle for class 2, a lease granted after the taint for class 3. Classes 0
+//! and 1 pass. The MCP layer opens each turn with [`Supervisor::begin_turn`],
+//! reports every input that is not host-authored with
+//! [`Supervisor::admit`] or [`Supervisor::taint`] before the model sees it,
+//! and gets a [`LatchPass`] from [`Supervisor::latch_check`] for each
+//! action; [`Supervisor::invoke`] takes the pass by value and checks again.
+//! The latch starts tripped, a new turn inherits it, and nothing but the
+//! trust root's reports of those approvals clears it. The contract and its
+//! reasons are in the [`latch`] module.
 //!
 //! Class 2 and 3 also need a connection plan checked by
 //! [`Supervisor::arm`]: the isolation checker runs on it and any finding of
@@ -73,7 +90,8 @@
 //!
 //! ## Not here yet
 //!
-//! Drivers as child processes, the MCP server, module write commands
+//! Drivers as child processes, the MCP server (the latch models its turn
+//! boundary, but nothing calls it yet), module write commands
 //! (config writes and actuations: the policy engine classifies bus requests
 //! only, so the supervisor offers none), the manifest pages and their
 //! fencing, signed ledger events (#172), USB interface-class authorization
@@ -83,6 +101,7 @@
 #![forbid(unsafe_code)]
 
 mod io;
+pub mod latch;
 mod registry;
 mod supervisor;
 mod write;
@@ -90,6 +109,10 @@ mod write;
 pub use io::{
     BusReply, BusTransport, ChallengeSource, InterlockLink, InterlockReport, ModuleTransport,
     ToInterlock,
+};
+pub use latch::{
+    FreshApproval, Grounds, LatchPass, LatchRefusal, MeasuredNumber, Origin, Taint, TaintSource,
+    TurnId, TurnInput,
 };
 pub use registry::{
     ConfigError, Enrollment, Happened, HubPort, ModuleState, PortRefusal, PortState,

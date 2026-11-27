@@ -237,8 +237,7 @@ fn a_lost_module_invalidates_its_facts_and_blocks_a_dependent_write() {
     );
     // A token taken before the loss is refused too, before confirm.
     b.arm();
-    let got =
-        b.s.invoke(&write(10), early, b.now, &mut b.bus, &mut b.interlock);
+    let got = b.invoke(&write(10), early);
     assert_eq!(got, Err(InvokeRefusal::CarrierNotAvailable { module: POD }));
     assert!(b.bus.performed.is_empty());
 
@@ -393,8 +392,7 @@ fn a_stop_isolation_finding_refuses_arming() {
     b.run(2);
     assert!(b.interlock.outputs.rail_a);
     let token = b.s.preflight(&write(10), b.now).unwrap();
-    let got =
-        b.s.invoke(&write(10), token, b.now, &mut b.bus, &mut b.interlock);
+    let got = b.invoke(&write(10), token);
     assert_eq!(got, Err(InvokeRefusal::NotArmed));
     assert!(b.bus.performed.is_empty());
 }
@@ -408,8 +406,7 @@ fn a_class_2_write_goes_through_preflight_and_confirm() {
     record_facts(&mut b.s, HazardClass::Class2, b.now);
     let token = b.s.preflight(&write(10), b.now).unwrap();
     assert_eq!(token.decision().class(), HazardClass::Class2);
-    let got =
-        b.s.invoke(&write(10), token, b.now, &mut b.bus, &mut b.interlock);
+    let got = b.invoke(&write(10), token);
     assert_eq!(got, Ok(Outcome::Done));
     assert_eq!(b.bus.performed, vec![(write(10), 0)]);
 }
@@ -420,8 +417,7 @@ fn a_token_for_one_request_does_not_carry_out_another() {
     b.arm();
     record_facts(&mut b.s, HazardClass::Class2, b.now);
     let token = b.s.preflight(&write(10), b.now).unwrap();
-    let got =
-        b.s.invoke(&write(11), token, b.now, &mut b.bus, &mut b.interlock);
+    let got = b.invoke(&write(11), token);
     assert_eq!(
         got,
         Err(InvokeRefusal::Preflight(PreflightRefusal::Token {
@@ -438,32 +434,28 @@ fn a_write_with_no_reply_blocks_its_port_until_a_read_back() {
     record_facts(&mut b.s, HazardClass::Class2, b.now);
     b.bus.reply = BusReply::NoReply;
     let token = b.s.preflight(&write(10), b.now).unwrap();
-    let got =
-        b.s.invoke(&write(10), token, b.now, &mut b.bus, &mut b.interlock);
+    let got = b.invoke(&write(10), token);
     assert_eq!(got, Ok(Outcome::Unknown));
     assert!(b.s.pending_write(&bus_port()).is_some());
 
     // Another write, even the same one, is refused.
     b.bus.reply = BusReply::Done;
     let token = b.s.preflight(&write(10), b.now).unwrap();
-    let got =
-        b.s.invoke(&write(10), token, b.now, &mut b.bus, &mut b.interlock);
+    let got = b.invoke(&write(10), token);
     assert!(matches!(got, Err(InvokeRefusal::OutcomeUnknown { .. })));
     assert_eq!(b.bus.performed.len(), 1);
 
     // A read back with no reply leaves it pending.
     b.bus.reply = BusReply::NoReply;
     let token = b.s.preflight(&read(), b.now).unwrap();
-    let got =
-        b.s.invoke(&read(), token, b.now, &mut b.bus, &mut b.interlock);
+    let got = b.invoke(&read(), token);
     assert_eq!(got, Ok(Outcome::NoReply));
     assert!(b.s.pending_write(&bus_port()).is_some());
 
     // A read back that answers opens the port again.
     b.bus.reply = BusReply::Value(WriteValue::U16(10));
     let token = b.s.preflight(&read(), b.now).unwrap();
-    let got =
-        b.s.invoke(&read(), token, b.now, &mut b.bus, &mut b.interlock);
+    let got = b.invoke(&read(), token);
     assert_eq!(
         got,
         Ok(Outcome::ReadBack {
@@ -474,8 +466,7 @@ fn a_write_with_no_reply_blocks_its_port_until_a_read_back() {
     assert!(b.s.pending_write(&bus_port()).is_none());
     b.bus.reply = BusReply::Done;
     let token = b.s.preflight(&write(12), b.now).unwrap();
-    let got =
-        b.s.invoke(&write(12), token, b.now, &mut b.bus, &mut b.interlock);
+    let got = b.invoke(&write(12), token);
     assert_eq!(got, Ok(Outcome::Done));
 }
 
@@ -489,8 +480,7 @@ fn a_class_3_write_needs_a_panel_granted_lease_and_spends_it() {
     // No lease yet: refused.
     let token = b.s.preflight(&write(10), b.now).unwrap();
     let target = token.decision().requirement().lease_target().unwrap();
-    let got =
-        b.s.invoke(&write(10), token, b.now, &mut b.bus, &mut b.interlock);
+    let got = b.invoke(&write(10), token);
     assert_eq!(got, Err(InvokeRefusal::LeaseNotLive));
 
     // Ask, and a person presses the panel button.
@@ -504,8 +494,7 @@ fn a_class_3_write_needs_a_panel_granted_lease_and_spends_it() {
     assert_eq!(b.interlock.outputs.rail_b, Some(target.port));
 
     // The token from before the ticks is still good: nothing changed.
-    let got =
-        b.s.invoke(&write(10), token, b.now, &mut b.bus, &mut b.interlock);
+    let got = b.invoke(&write(10), token);
     assert_eq!(got, Ok(Outcome::Done));
     assert_eq!(
         b.interlock.requests.last(),
@@ -528,8 +517,7 @@ fn a_lease_is_not_requested_while_a_write_is_of_unknown_effect() {
     b.tick();
     b.interlock.panel_button_pressed = false;
     b.bus.reply = BusReply::NoReply;
-    let got =
-        b.s.invoke(&write(10), token, b.now, &mut b.bus, &mut b.interlock);
+    let got = b.invoke(&write(10), token);
     assert_eq!(got, Ok(Outcome::Unknown));
     let token = b.s.preflight(&write(10), b.now).unwrap();
     assert!(matches!(

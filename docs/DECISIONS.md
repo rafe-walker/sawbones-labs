@@ -110,6 +110,7 @@ Tracked in #166. The plugin and store index design itself is written up after th
 | Question | Recommendation |
 | --- | --- |
 | Arm means yes for the session for class 2; a panel button for class 3 only? | Yes. |
+| Taint latch (#210): arm means yes for class 2 only until outside text enters the agent's context; then an arm cycle after it. A class 3 lease counts only if granted after the latest taint. A new turn inherits the latch (the model still holds earlier turns), and the supervisor starts with it tripped. | Yes. |
 | Keep the ground-up Rust store, starting as the bare chain, with no kronicle-lite stopgap? | Yes. |
 | Thrust stand as Interlock's first real customer, after a lamp and a bare motor? | Yes. |
 | Put the nRF52840 Bluetooth dongle back in, about $11? Now a later-phase question, since all radio left the Bench Core. | Yes, with the radio work. |

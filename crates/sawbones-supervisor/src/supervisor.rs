@@ -14,6 +14,7 @@ use sawbones_policy::{
 };
 
 use crate::io::{ChallengeSource, InterlockLink, ModuleTransport};
+use crate::latch::Latch;
 use crate::registry::{
     ConfigError, Enrollment, Happened, HubPort, ModuleState, PortRefusal, PortState,
     QuarantineReason,
@@ -117,6 +118,7 @@ pub struct Supervisor {
     pub(crate) chain_head: ChainHead,
     pub(crate) armed: Option<ArmedPlan>,
     pub(crate) pending: BTreeMap<PortId, PendingWrite>,
+    pub(crate) latch: Latch,
 }
 
 impl std::fmt::Debug for Supervisor {
@@ -127,6 +129,7 @@ impl std::fmt::Debug for Supervisor {
             .field("slots", &self.slots.len())
             .field("armed", &self.armed.is_some())
             .field("pending", &self.pending)
+            .field("latch", &self.latch)
             .finish_non_exhaustive()
     }
 }
@@ -142,7 +145,10 @@ pub(crate) fn firmware_label(digest: &ImageDigest) -> ScopeLabel {
 }
 
 impl Supervisor {
-    /// A supervisor with nothing seen yet.
+    /// A supervisor with nothing seen yet. Its taint latch starts tripped
+    /// ([`TaintSource::SupervisorStart`](crate::TaintSource::SupervisorStart)):
+    /// class 2 and 3 actions wait for an arm cycle or a lease seen after
+    /// the start.
     ///
     /// # Errors
     ///
@@ -180,6 +186,7 @@ impl Supervisor {
             chain_head: ChainHead([0; 32]),
             armed: None,
             pending: BTreeMap::new(),
+            latch: Latch::at_start(),
         })
     }
 
@@ -290,7 +297,9 @@ impl Supervisor {
     ///
     /// In order: answer the trust root's heartbeat challenge (this is the
     /// only place it is answered, so a stalled loop stops the heartbeat and
-    /// the trust root drops the rails); watch the trust root's report; find
+    /// the trust root drops the rails); watch the trust root's report, and
+    /// give it to the taint latch, which learns of arm cycles and leases
+    /// only here; find
     /// devices plugged in or out; take the frames that arrived; then mark
     /// lost every module past its deadline, invalidating its facts through
     /// the ledger, and poll the rest.
@@ -306,6 +315,7 @@ impl Supervisor {
         let mut out = Vec::new();
         self.answer_heartbeat(interlock, &mut out);
         self.watch_interlock(interlock, &mut out);
+        self.observe_latch(interlock);
         self.discover(now, hub, &mut out);
         self.take_frames(now, hub, &mut out);
         self.deadlines(now, hub, &mut out);
