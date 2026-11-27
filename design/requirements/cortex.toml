@@ -14,7 +14,8 @@ acceptance = [
   { id = "a4", kind = "test", ref = "crates/sawbones-supervisor/tests/latch.rs::a_new_turn_inherits_the_latch" },
   { id = "a5", kind = "test", ref = "crates/sawbones-supervisor/tests/latch.rs::a_lease_granted_after_the_taint_lets_one_class_3_action_through" },
   { id = "a6", kind = "test", ref = "sawbones-redteam::redteam_inj_031_*" },
-  { id = "a7", kind = "test", ref = "the MCP surface reports every outside input to the latch before the model sees it", pending = 103 },
+  { id = "a7", kind = "test", ref = "sawbones-redteam::redteam_inj_031_every_tool_reports_module_content_to_the_latch_before_returning" },
+  { id = "a8", kind = "test", ref = "sawbones-redteam::redteam_inj_031_hostile_manifest_text_is_fenced_and_trips_the_latch" },
 ]
 
 [[requirement]]
@@ -40,7 +41,7 @@ level = "MUST"
 title = "Outside text is typed, escaped and fenced, and never becomes an identifier"
 source = "docs/THREAT-MODEL.md"
 anchor = "Prompt injection through outside text"
-source_sha = "890a531963a7b68d"
+source_sha = "7afa3bf357fb3f5c"
 tracks = [105, 187, 202]
 acceptance = [
   { id = "a1", kind = "test", ref = "sawbones-reading::fence_cannot_be_closed_from_inside" },

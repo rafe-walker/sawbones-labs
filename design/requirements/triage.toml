@@ -6,10 +6,12 @@ title = "The MCP surface is a few fixed meta-tools, not one tool per instrument 
 source = "docs/project-document.md"
 anchor = "The MCP surface is a few fixed"
 source_sha = "37375373d438a054"
-tracks = [103, 204]
+tracks = [103, 204, 272]
 acceptance = [
-  { id = "a1", kind = "test", ref = "golden tool definitions list exactly the six meta-tools", pending = 204 },
-  { id = "a2", kind = "test", ref = "adding simulated modules leaves tools/list byte-identical", pending = 103 },
+  { id = "a1", kind = "test", ref = "sawbones-mcp::the_tool_list_is_pinned" },
+  { id = "a2", kind = "test", ref = "sawbones-redteam::redteam_103_hot_plug_changes_data_not_the_tool_list" },
+  { id = "a3", kind = "test", ref = "sawbones-mcp::a_hostile_manifest_does_not_change_the_tool_list" },
+  { id = "a4", kind = "test", ref = "the invoke and capture meta-tools exist, named by hazard class", pending = 272 },
 ]
 
 [[requirement]]
@@ -22,5 +24,7 @@ anchor = "Tool results are capped"
 source_sha = "cb2cc7803d0808d4"
 tracks = [103]
 acceptance = [
-  { id = "a1", kind = "test", ref = "no tool result exceeds the cap and none carries raw samples", pending = 103 },
+  { id = "a1", kind = "test", ref = "sawbones-mcp::initialize_list_and_call_every_tool_over_stdio" },
+  { id = "a2", kind = "test", ref = "sawbones-mcp::ten_thousand_hostile_items_stay_within_the_budget" },
+  { id = "a3", kind = "test", ref = "sawbones-redteam::redteam_inj_006_a_flood_of_module_text_is_cut_to_the_budget_and_host_fields_come_first" },
 ]

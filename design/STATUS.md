@@ -14,14 +14,14 @@ None.
 
 ### All requirements
 
-**26 requirements:** 8 built, 11 partial, 7 not built.
+**26 requirements:** 10 built, 11 partial, 5 not built.
 
 | ID | Requirement | Status | Tracking | Still to prove |
 | --- | --- | --- | --- | --- |
 | `SAW-CHART-STORE-1` | The equipment knowledge store is a ground-up Rust hash chain built for the agent first | not built | #109 | facts from the Solar Assistant ingest append to a chain that verifies (#109) |
 | `SAW-CORTEX-APPROVE-1` | Approvals are matched to hazard class, signed, and a class 3 action spends one lease | partial | #172, #137 | approvals scaled by risk across every action kind (#172) |
 | `SAW-CORTEX-FACTS-1` | A write rests only on facts with scope, invalidated on reflash, rewiring or change | partial | #110 | a reflashed module's facts re-earn trust against an independent reference (#110) |
-| `SAW-CORTEX-LATCH-1` | Once outside text enters a turn, class 2 and 3 actions are refused until a fresh approval; a new turn inherits the latch | partial | #210, #103 | the MCP surface reports every outside input to the latch before the model sees it (#103) |
+| `SAW-CORTEX-LATCH-1` | Once outside text enters a turn, class 2 and 3 actions are refused until a fresh approval; a new turn inherits the latch | built | #210, #103 | - |
 | `SAW-CORTEX-REC-1` | A session recorder keeps start, annotate, pause, stop and replay, with a visible gap event for a dropped sample | not built | #106 | a session recorded from the simulator replays identically (#106), a deliberately dropped sample shows up as a gap event (#106) |
 | `SAW-CORTEX-TEXT-1` | Outside text is typed, escaped and fenced, and never becomes an identifier | partial | #105, #187, #202 | every ingest path wraps outside text in WorldText (#105) |
 | `SAW-CORTEX-THERMAL-1` | The supervisor reads its own temperatures and sheds load | not built | #248 | load is shed least essential first above a threshold, with hysteresis (#248), the interlock is never shed (#248) |
@@ -34,8 +34,8 @@ None.
 | `SAW-PULSE-FW-1` | The trust-root firmware builds for the RP2350 in CI | partial | #114, #144 | the firmware persists its fault record in a durable store and is flashed on a board (#144) |
 | `SAW-PULSE-HB-1` | A wrong, stale, early, repeated, missing or cross-boot heartbeat reply, or a stalled loop, latches a fault; rails drop within two periods | partial | #198, #100, #114, #161 | a Pi frozen on the real bench loses the rails within the stated limit (#161) |
 | `SAW-SAW-PACKMODEL-1` | One pack model file everything is generated from, with budget checks in CI | not built | #120, #121 | changing one module's entry regenerates every derived output and re-runs every check (#120), budget checks for ports, power by mode, data and cost run in CI (#121) |
-| `SAW-TRIAGE-CAP-1` | Tool results are a summary plus a link, capped at 25,000 tokens | not built | #103 | no tool result exceeds the cap and none carries raw samples (#103) |
-| `SAW-TRIAGE-SURF-1` | The MCP surface is a few fixed meta-tools, not one tool per instrument function | not built | #103, #204 | golden tool definitions list exactly the six meta-tools (#204), adding simulated modules leaves tools/list byte-identical (#103) |
+| `SAW-TRIAGE-CAP-1` | Tool results are a summary plus a link, capped at 25,000 tokens | built | #103 | - |
+| `SAW-TRIAGE-SURF-1` | The MCP surface is a few fixed meta-tools, not one tool per instrument function | partial | #103, #204, #272 | the invoke and capture meta-tools exist, named by hazard class (#272) |
 | `SAW-XRAY-CLOSURE-1` | A PR that closes an issue while a requirement tracking it is not built fails | built | #269, #271 | - |
 | `SAW-XRAY-DRIFT-1` | Prose that changes without its record is flagged by paragraph hash | built | #269 | - |
 | `SAW-XRAY-FEEDBACK-1` | Every finding says what to update, and STATUS.md lists drifted and needs-an-issue items first | built | #269 | - |

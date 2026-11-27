@@ -29,3 +29,5 @@ sawbones-regmap = { path = "../sawbones-regmap" }
 sawbones-isolation = { path = "../sawbones-isolation" }
 sawbones-supervisor = { path = "../sawbones-supervisor" }
 sawbones-sim-modules = { path = "../sawbones-sim-modules" }
+# The MCP surface v0 (#103), on the simulated bench.
+sawbones-mcp = { path = "../sawbones-mcp" }

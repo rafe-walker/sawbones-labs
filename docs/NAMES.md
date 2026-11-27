@@ -8,7 +8,7 @@ The owner-approved names, one line each. The machine-readable copy is [`design/n
 | N.E.R.V.E. | Node Exchange: Reliable, Verified, Enrolled | `sawbones-module-protocol` | The module protocol between the supervisor and each module. |
 | P.U.L.S.E. | Panel-Unlocked Liveness & Safety Exchange | `sawbones-trust-root` (firmware in `firmware/trust-root`); the heartbeat itself is in `sawbones-interlock` | The heartbeat challenge between supervisor and trust root. |
 | C.H.A.R.T. | Chain of Hashed, Attested Readings & Tests | none yet ([#109](https://github.com/rafe-walker/sawbones-labs/issues/109)) | The knowledge store. |
-| T.R.I.A.G.E. | Tools Routed by Interlock And Gated Effects | `sawbones-mcp` (in PR [#245](https://github.com/rafe-walker/sawbones-labs/pull/245), not on main) | The MCP server. |
+| T.R.I.A.G.E. | Tools Routed by Interlock And Gated Effects | `sawbones-mcp` | The MCP server. |
 | Interlock | The physical-safety layer | `sawbones-interlock`, `sawbones-busguard`, `sawbones-modbus-encode` | Rails, leases, panel and bus guard enforced outside the Pi. |
 | modules | Instruments and pods | `sawbones-sim-modules` | Anything with a manifest that plugs in. |
 | plugins | Sandboxed decoders | `sawbones-plugin-host`, `sawbones-regmap` | Zero-import WebAssembly decoders. |

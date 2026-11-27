@@ -35,9 +35,8 @@ crates = []
 key = "triage"
 name = "T.R.I.A.G.E."
 expansion = "Tools Routed by Interlock And Gated Effects"
-meaning = "The MCP server: the few fixed tools the agent sees. In PR #245, not on main yet."
-crates = []
-crates_pending = ["sawbones-mcp"]
+meaning = "The MCP server: the few fixed tools the agent sees. Read class only in v0."
+crates = ["sawbones-mcp"]
 
 [[component]]
 key = "interlock"

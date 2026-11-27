@@ -1122,6 +1122,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sawbones-mcp"
+version = "0.0.0"
+dependencies = [
+ "ed25519-dalek",
+ "sawbones-interlock",
+ "sawbones-isolation",
+ "sawbones-module-protocol",
+ "sawbones-policy",
+ "sawbones-reading",
+ "sawbones-sim-modules",
+ "sawbones-supervisor",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "sawbones-modbus-encode"
 version = "0.0.0"
 dependencies = [
@@ -1188,6 +1204,7 @@ dependencies = [
  "sawbones-busguard",
  "sawbones-interlock",
  "sawbones-isolation",
+ "sawbones-mcp",
  "sawbones-module-protocol",
  "sawbones-policy",
  "sawbones-reading",
