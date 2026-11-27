@@ -49,7 +49,7 @@ Decisions made by the project owner, newest round last. The design document carr
 
 | Topic | Decision |
 | --- | --- |
-| P1 | Rungs 1 to 7 of the Bench Core are phase 1. |
+| P1 | Rungs 1 to 7 of the Bench Core are phase 1. (Superseded the same day by the roadmap re-cut below: P1 is the bench proof of the Interlock.) |
 | Buying | Amazon, from any seller. Watch the delivery estimate; nothing a month out. This replaces the US-stock question for the bench. |
 | Merging | Claude merges and deploys once it has reviewed the change and all checks pass. |
 | Reference meter | No meter bought for P1. The voltage reference module and the meter on hand cover the low-voltage Bench Core. A safety-rated meter waits for bank or mains work. |
@@ -59,6 +59,12 @@ Decisions made by the project owner, newest round last. The design document carr
 | Work size | Agent work outside the cross-check is cut into small pieces, one crate or one check each, pushed early, so work can stop at any point without loss. |
 | Solar Assistant run | The first run of the ingest on the real unit moves to 27 November. |
 | Roadmap | P0 and P1 are cut into numbered stages, P0.1 to P0.8 and P1.1 to P1.7. Each stage is a milestone and ends in a check-in item: what the owner sees working and what he decides. No dates; order comes from what each stage needs first. See `docs/ROADMAP.md`. |
+
+## 26 November 2026, roadmap re-cut
+
+| Topic | Decision |
+| --- | --- |
+| P1 narrowed to bench proof of the Interlock; P2 = make it mobile; funding stage after P1 | P1 is now "Prove the Interlock on the bench": the Pi 5 running C.O.R.T.E.X., RP2350 trust root, the independent watchdog cut (#144), the operator panel, rail A/B switches into a lamp or resistor load, a bench supply, an RS485 loopback for the bus guard, a voltage reference and the cheap handheld meter, and a logic analyzer. Six exit tests each produce recorded evidence for the HWS 0.1 rows and the technical report. A new stage, "Funding and credits", sits between P1 and P2 and does not start before P1 exits. P2 is "Make it mobile": the S.A.W. pack, the hub, the modules, field use, LoRa and the T.A.B.L.E. camera. Reasoning: hardware data, and so the research paper, arrives sooner, and less money is at risk before the safety design is proved. The site technical report is published now; the arXiv or formal submission waits for P1 hardware data. The old Bench Core rungs 5 to 7 (DC meter, comms pod, investigation) move to P2.2 to P2.4. |
 
 ## 26 November 2026, design review round 2 (two of three reviews in)
 
