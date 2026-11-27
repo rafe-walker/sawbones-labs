@@ -1,6 +1,6 @@
 # Bench build compatibility and safety review: the method
 
-A repeatable checklist for any Sawbones bench build. A script ([`ci/check_hardware.py`](../../ci/check_hardware.py), rules HW-001 to HW-033, see the [README](README.md)) runs the mechanical checks against `data/parts.toml`, `data/netlist.toml` and `data/safety_paths.toml`. An agent or a person does the judgement checks. The P1 review (`compatibility.md`, `wiring-mock.md`) was produced with this procedure.
+A repeatable checklist for any Sawbones bench build. A script ([`ci/check_hardware.py`](../../ci/check_hardware.py), rules HW-001 to HW-038, see the [README](README.md)) runs the mechanical checks against `data/parts.toml`, `data/netlist.toml` and `data/safety_paths.toml`. An agent or a person does the judgement checks. The P1 review (`compatibility.md`, `wiring-mock.md`) was produced with this procedure.
 
 Field names in the data files are stable. The CI checker is written against them; renaming a field is a breaking change.
 
@@ -68,7 +68,7 @@ Also mechanical:
 | C-16 | HW-021, HW-022, HW-023 | |
 | C-17 | HW-028 | information only |
 | C-18 | HW-024 | host port used twice |
-| J-06, J-07 (mechanical part) | HW-029 to HW-033 | clamp vs abs max and fuse clearing, AI-host path to debug pins, charge-pump hold voltage at the real toggle rate, pull-down vs erratum maximum, reset-output semantics (added after the independent review, #296) |
+| J-06, J-07 (mechanical part) | HW-029 to HW-033 | clamp vs abs max and fuse clearing, AI-host path to debug pins, charge-pump hold voltage at the real toggle rate, pull-down vs erratum maximum, reset-output semantics (added after the independent review, #296). Review 3 (#297) makes these compute: HW-029 trip band, HW-031 event model, HW-033 latch enum, HW-019 verdict vs effect, HW-034 no part joins safety domains, HW-035 timing-budget sum, HW-036 arm sense behind a human contact, HW-037 self-test expectations, HW-038 reset driver vs ISP wiring |
 | J-06, J-08, J-09 (partly) | HW-025, HW-026, HW-027 | reserved pins, trust-root bypass paths, no-name parts and fuse bytes |
 
 ## 2. Judgement checks (agent or human)

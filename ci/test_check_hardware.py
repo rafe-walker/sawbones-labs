@@ -21,6 +21,17 @@ spec.loader.exec_module(ch)
 REAL = HERE.parent / "hardware" / "p1" / "data"
 
 
+PUMP1_FIELDS = {"parameter_set": 1, "load_ma": 2.0, "toggle_period_us": 10000, "c_series_f": 1.0e-6, "c_series_tol": 0.10,
+                "r_series_ohm": 470.0, "c_hold_f": 10.0e-6, "c_hold_tol_lo": 0.20, "c_hold_tol_hi": 0.20,
+                "r_bleed_ohm": 47000.0, "r_base_ohm": 10000.0, "r_tol": 0.01, "vpp_min_v": 3.2, "vpp_max_v": 3.3,
+                "diode_vf_min_v": 0.20, "diode_vf_max_v": 0.30, "vbe_min_v": 0.60, "vbe_max_v": 0.70,
+                "hfe_min": 60.0, "hfe_max": 200.0, "dropout_ms": [60.0, 205.0]}
+CL1_FIELDS = {"kind": "scr", "trigger": "tl431-gnd-pnp", "rail": "V5", "r_top_ohm": 12000.0, "r_bot_ohm": 10000.0, "r_tol": 0.01,
+              "vref_min_v": 2.470, "vref_max_v": 2.520, "iref_max_ua": 4.0, "vgt_max_v": 1.5, "igt_max_ma": 15.0,
+              "r_gate_ohm": 100.0, "vce_sat_v": 0.2, "trip_min_v": 5.37, "clamp_v_max": 5.66, "source_v": 12.0,
+              "rated_a": 12.0, "rated_ms": 1000}
+
+
 def pins(*names):
     return [{"name": n, "function": f} for n, f in names]
 
@@ -29,12 +40,13 @@ def baseline():
     """A small design that passes every rule: adapter, fuse, buck with crowbar, an MCU, a watchdog,
     a relay behind a driver node, a MOSFET module, a switch, an analyzer and a USB host."""
     parts = [
-        {"id": "ADP", "kind": "adapter", "supply_out_ma": 3000.0, "max_fault_a": 5.0, "power_group": "12V", "isolation_domain": "G",
+        {"id": "ADP", "kind": "adapter", "supply_out_ma": 3000.0, "min_fault_a": 2.0, "max_fault_a": 5.0, "power_group": "12V", "isolation_domain": "G",
          "pins": pins(("+", "out"), ("-", "gnd"))},
-        {"id": "FZ", "kind": "fuse", "rating_a": 1.0, "clearing": [{"multiple": 2.0, "max_ms": 5000}, {"multiple": 3.5, "max_ms": 500}, {"multiple": 6.0, "max_ms": 150}], "pins": pins(("A", "in"), ("B", "out"))},
-        {"id": "BK", "kind": "buck", "supply_out_ma": 1000.0, "power_group": "5V",
+        {"id": "FZ", "kind": "fuse", "rating_a": 1.0, "clearing": [{"multiple": 2.0, "max_ms": 5000}, {"multiple": 3.5, "max_ms": 500}], "pins": pins(("A", "in"), ("B", "out"))},
+        {"id": "FZ2", "kind": "fuse", "rating_a": 1.0, "clearing": [{"multiple": 2.0, "max_ms": 5000}, {"multiple": 3.5, "max_ms": 500}], "pins": pins(("A", "in"), ("B", "out"))},
+        {"id": "BK", "kind": "buck", "supply_out_ma": 1000.0, "min_fault_a": 3.5, "max_fault_a": 7.5, "power_group": "5V",
          "pins": pins(("IN+", "in"), ("IN-", "gnd"), ("OUT+", "out"), ("OUT-", "gnd"))},
-        {"id": "ZN", "kind": "crowbar", "pins": pins(("K", "5V rail"), ("A", "gnd"))},
+        {"id": "ZN", "kind": "crowbar", "pins": pins(("A", "5V rail"), ("K", "gnd"), ("G", "gate"))},
         {"id": "WR", "kind": "wire", "ampacity_a": 3.0},
         {"id": "MCU", "interfaces": ["gpio"], "logic_v": 3.3, "voh_min_v": 2.8, "vol_max_v": 0.4, "vih_min_v": 2.0,
          "vil_max_v": 0.8, "io_max_ma": 4.0, "supply_ma_max": 40.0, "power_group": "5V",
@@ -46,7 +58,7 @@ def baseline():
         {"id": "WD", "output_semantics": {"2": "pulse"}, "interfaces": ["gpio"], "logic_v": 3.3, "voh_min_v": 2.5, "vol_max_v": 0.5, "io_max_ma": 40.0,
          "power_group": "5V", "isolation_domain": "G", "pins": pins(("1", "PB4 toggle"), ("2", "PB3 pump"))},
         {"id": "REL", "input_current_ma": 3.0, "trigger_polarity": "active-low (IN low = energised)", "isolation_domain": "G",
-         "default_state": {s: "released" for s in ch.STATES}, "interfaces": ["gpio"],
+         "default_state": {s: "released" for s in ch.STATES}, "interfaces": ["gpio"], "hold_ma": [0.15, 0.5], "release_ms_max": 10.0,
          "pins": pins(("IN1", "K1 drive"), ("K1.COM", "contact"), ("K1.NO", "contact"))},
         {"id": "MOSM", "trigger_polarity": "active-high", "vih_min_v": 2.0, "input_current_ma": 2.0,
          "power_group": "12V", "isolation_domain": "G", "interfaces": ["gpio"],
@@ -72,33 +84,36 @@ def baseline():
         conn("C1", "ADP:+", "node:TB12", "V12", "barrel"),
         conn("C2", "node:TB12", "FZ:A", "V12", "wired-and-soldered"),
         conn("C3", "FZ:B", "BK:IN+", "V12", "screw-terminal"),
-        conn("C4", "BK:OUT+", "node:TB5", "V5", "wired-and-soldered"),
-        conn("C5", "ZN:K", "node:TB5", "V5", "soldered-to-board"),
+        conn("C4", "BK:OUT+", "FZ2:A", "V5", "wired-and-soldered"),
+        conn("C4b", "FZ2:B", "node:TB5", "V5", "wired-and-soldered"),
+        conn("C5", "ZN:A", "node:TB5", "V5", "soldered-to-board"),
         conn("C10", "node:TB12", "SW:1", "V12", "panel-terminal", [1, 2, 3]),
         conn("C11", "SW:2", "REL:K1.COM", "V12", "screw-terminal", [4]),
         conn("C12", "REL:K1.NO", "MOSM:LOAD", "V12", "screw-terminal", [5, 6]),
-        conn("C13", "node:Q1.C", "REL:IN1", "V5", "jst-xh", [1]),
+        conn("C13", "node:Q1.C", "REL:IN1", "V5", "jst-xh", [1], connector="XH4"),
         conn("C14", "MCU:GP1", "MOSM:PWM", "LOG", "screw-terminal", [1], series_r_ohm=1000),
         conn("C20", "AN:D0", "MCU:GP2", "LOG", "dupont"),
         conn("C21", "AN:GND", "node:TBGND", "GND", "dupont"),
         conn("C22", "HOST:USB1", "AN:USB", "USB", "usb"),
     ]
     elements = [
-        {"order": 1, "id": "SW", "part": "SW", "pins": ["1", "2"], "controlled_by": "human", "board": "PANEL", "supply_net": "V12"},
-        {"order": 2, "id": "K", "part": "REL", "pins": ["K1.COM", "K1.NO"], "controlled_by": "MCU (pump)", "board": "RLY", "supply_net": "V5"},
-        {"order": 3, "id": "Q", "part": "MOSM", "pins": ["LOAD"], "controlled_by": "WD (level)", "board": "M", "supply_net": "V12"},
+        {"order": 1, "id": "SW", "part": "SW", "pins": ["1", "2"], "controlled_by": "human", "board": "PANEL", "supply_net": "V12", "out_nets": ["V12"]},
+        {"order": 2, "id": "K", "part": "REL", "pins": ["K1.COM", "K1.NO"], "controlled_by": "MCU (pump)", "board": "RLY", "supply_net": "V5", "out_nets": ["V5"]},
+        {"order": 3, "id": "Q", "part": "MOSM", "pins": ["LOAD"], "controlled_by": "WD (level)", "board": "M", "supply_net": "V12", "out_nets": ["LAMPN"]},
     ]
     paths = [{"id": "PA", "load": "lamp", "variant": "A", "series_elements": copy.deepcopy(elements)},
              {"id": "PB", "load": "lamp", "variant": "B", "series_elements": copy.deepcopy(elements)}]
+    rest = {"SW": ["K", "Q"], "K": ["Q"], "Q": ["K"]}
     faults = [{"id": f"F{i}", "path": "P?", "variant": "both", "fault": "x", "element": e, "load_state": "off",
-               "verdict": "PASS"} for i, e in enumerate(("SW", "K", "Q"), 1)]
-    pumps = [{"id": "PU", "element": "K", "driver": "MCU", "relay": "REL", "toggle_period_us": 10000, "vpp_v": 3.3,
-              "c_series_f": 1e-6, "r_series_ohm": 470.0, "diode_vf_v": 0.25, "c_hold_f": 10e-6, "r_bleed_ohm": 47000.0,
-              "r_base_ohm": 10000.0, "vbe_v": 0.6, "hfe_min": 70.0}]
-    clamps = [{"id": "CL", "part": "ZN", "kind": "scr", "rail": "V5", "trip_min_v": 5.3, "clamp_v_max": 5.6, "rated_a": 12.0,
-               "rated_ms": 0, "fuse": "FZ", "source": "ADP", "protects": ["MCU"]}]
+               "verdict": "PASS", "remaining_cuts": rest[e]} for i, e in enumerate(("SW", "K", "Q"), 1)]
+    pumps = [dict(PUMP1_FIELDS, id="PU", element="K", driver="MCU", relay="REL")]
+    clamps = [dict(CL1_FIELDS, id="CL", part="ZN", pin="A", protects=["MCU"])]
+    senses = [{"id": "S1", "net": "V5", "pin": "MCU:GP2", "function": "mid"},
+              {"id": "S2", "net": "LAMPN", "pin": "MCU:GP2", "function": "rail"}]
+    selftests = [{"id": "ST_K", "path": "P?", "element": "K", "expect": {"S1": "dead"}},
+                 {"id": "ST_Q", "path": "P?", "element": "Q", "expect": {"S2": "dead", "S1": "live"}}]
     return {"parts": {"part": parts}, "netlist": {"net": nets, "node": nodes, "connection": conns},
-            "paths": {"path": paths, "fault": faults, "pump": pumps, "clamp": clamps}}
+            "paths": {"path": paths, "fault": faults, "pump": pumps, "clamp": clamps, "sense": senses, "selftest": selftests}}
 
 
 def run(data):
@@ -145,7 +160,7 @@ class RealData(Base):
         rules = ch.check(data)
         self.assertEqual([r["id"] for r in rules if r["status"] == "FAIL"], [])
         self.assertEqual({r["id"] for r in rules if r["status"] == "WARN"}, self.EXPECTED_WARN)
-        self.assertEqual(len(rules), 34)
+        self.assertEqual(len(rules), 39)
 
     def test_cli_exit_codes_and_json(self):
         with contextlib.redirect_stdout(io.StringIO()) as out:
@@ -166,8 +181,8 @@ class RealData(Base):
     def test_a28_is_the_only_allow_listed_fail(self):
         data, _ = ch.load(REAL)
         fails = [f["id"] for f in data["paths"]["fault"] if f["verdict"] == "FAIL"]
-        self.assertEqual(fails, ["A28"])
-        self.assertEqual(set(ch.FAULT_FAIL_ALLOWLIST), {"A28"})
+        self.assertEqual(fails, ["A28", "A39"])   # A39 (one decision-maker) is a stated limit, review 3
+        self.assertEqual(set(ch.FAULT_FAIL_ALLOWLIST), {"A28", "A39"})
 
 
 class Synthetic(Base):
@@ -299,7 +314,7 @@ class Synthetic(Base):
         d = baseline(); d["paths"]["fault"][0]["load_state"] = "maybe"; self.fails(d, "HW-019")
 
     def test_hw019_allow_list_is_the_only_exception(self):
-        d = baseline(); f = d["paths"]["fault"][0]; f["id"] = "A28"; f["load_state"] = "on"; f["verdict"] = "FAIL"
+        d = baseline(); f = d["paths"]["fault"][0]; f["id"] = "A28"; f["load_state"] = "on"; f["verdict"] = "FAIL"; del f["remaining_cuts"]
         self.assertFalse(findings(d, "HW-019", "FAIL"))
         self.warns(d, "HW-019")
 
@@ -422,8 +437,11 @@ class Regressions(Base):
 
     def test_regression_288_bottom_pad_gp17_is_not_an_edge_pin(self):
         data, _ = ch.load(REAL)
-        self.assertNotIn("GP17", [p["name"] for p in next(x for x in data["parts"]["part"] if x["id"] == "RP_TR")["pins"]])
-        d = baseline(); add_conn(d, "C81", "MCU:GP17", "MOSM:PWM")
+        # GP17 is a bottom pad: it is declared only because review 3 (B5) wires U-EOUT to it like the SWD pads
+        names = [p["name"] for p in next(x for x in data["parts"]["part"] if x["id"] == "RP_TR")["pins"]]
+        self.assertIn("GP17", names)
+        self.assertEqual(next(c for c in data["netlist"]["connection"] if c["id"] == "C328")["to"], "RP_TR:GP17")
+        d = baseline(); add_conn(d, "C81", "MCU:GP17", "MOSM:PWM")   # a part that does not declare the pad
         self.fails(d, "HW-002")
 
     def test_regression_288_real_pin_map_has_the_missing_signals(self):
@@ -447,9 +465,8 @@ class Regressions(Base):
     def test_regression_289_real_design_hosts_test_4_on_the_mac(self):
         data, _ = ch.load(REAL)
         c = next(c for c in data["netlist"]["connection"] if c["id"] == "C724")
-        self.assertEqual((c["from"], c["observed_by"]), ("MAC:USBA", [4]))
-        c720 = next(c for c in data["netlist"]["connection"] if c["id"] == "C720")
-        self.assertNotIn(4, c720["observed_by"])
+        self.assertEqual((c["from"], c["observed_by"]), ("MAC:USBA", [1, 2, 3, 4, 5, 6]))   # every test, review 3 B6
+        self.assertNotIn("C720", [c["id"] for c in data["netlist"]["connection"]])   # no Pi-hosted analyzer
 
     def test_regression_290_swd_lead_on_the_trust_root_must_be_removable(self):
         d = baseline(); part(d, "MCU")["trust_root"] = True; add_conn(d, "C91", "WD:1", "MCU:SWCLK")
@@ -467,7 +484,9 @@ class Regressions(Base):
         data, _ = ch.load(REAL)
         fb = next(p for p in data["parts"]["part"] if p["id"] == "U3_ATTINY85")["fuse_bytes"]
         self.assertEqual((fb["lfuse"], fb["hfuse"], fb["efuse"], fb["lock"]), ("0xE2", "0xCD", "0xFF", "0xFC"))
-        self.assertFalse(fb["datasheet_checked"])
+        self.assertTrue(fb["datasheet_checked"])   # decoded in the independent review, confirmed by review 3
+        self.assertFalse([f for f in findings(data, "HW-027", "WARN") if "U3_ATTINY85" in f.ids])
+        part(data, "U3_ATTINY85")["fuse_bytes"]["datasheet_checked"] = False
         self.assertTrue([f for f in findings(data, "HW-027", "WARN") if "U3_ATTINY85" in f.ids])
 
     def test_regression_293_no_name_max813l_needs_an_acceptance_result(self):
@@ -478,7 +497,8 @@ class Regressions(Base):
 
 
 class IndependentReview(Base):
-    """Regression tests for the independent clean-room review (#296): one per blocking finding."""
+    """Regression tests for the independent clean-room review (#296): one per blocking finding.
+    Review 3 (#297) changed how several of them are checked; see ReviewThree below."""
 
     def real(self):
         data, _ = ch.load(REAL)
@@ -492,16 +512,16 @@ class IndependentReview(Base):
 
     def test_regression_296_the_original_pump_values_were_fine_at_1_khz_so_rate_is_what_matters(self):
         d = baseline(); pu = d["paths"]["pump"][0]
-        pu.update(c_series_f=100e-9, c_hold_f=1e-6, r_bleed_ohm=100000.0, toggle_period_us=500)
+        pu.update(c_series_f=100e-9, c_hold_f=1e-6, r_bleed_ohm=100000.0, toggle_period_us=500, dropout_ms=[10.0, 40.0])
         self.ok(d, "HW-031")
 
     def test_regression_296_pump_set_1_does_not_serve_a_15_ma_relay_input(self):
-        d = baseline(); part(d, "REL")["input_current_ma"] = 15.0
+        d = baseline(); d["paths"]["pump"][0]["load_ma"] = 15.0
         self.fails(d, "HW-031")
 
     def test_regression_296_real_pumps_are_checked_and_pass(self):
         data = self.real()
-        self.assertEqual(len(data["paths"]["pump"]), 2)
+        self.assertEqual(len(data["paths"]["pump"]), 3)
         self.assertFalse(findings(data, "HW-031", "FAIL"))
         k1 = data["paths"]["pump"][0]
         self.assertEqual(k1["toggle_period_us"], 10000)  # one toggle per 10 ms tick: 50 Hz
@@ -513,18 +533,18 @@ class IndependentReview(Base):
 
     def test_regression_296_zener_clamp_can_fail_before_the_fuse_and_clamps_too_high(self):
         d = baseline(); c = d["paths"]["clamp"][0]
-        c.update(kind="zener", clamp_v_max=8.0, rated_a=13.4, rated_ms=8.3)
+        c.update(trigger="zener", vz_min_v=5.32, vz_max_v=8.0, trip_min_v=5.32, clamp_v_max=8.0, rated_a=13.4, rated_ms=8.3)
         msgs = " ".join(f.message for f in findings(d, "HW-029", "FAIL"))
         self.assertIn("absolute maximum", msgs)
         self.assertIn("before", msgs)
 
     def test_regression_296_real_zener_design_fails(self):
         data = self.real()
-        data["paths"]["clamp"][0].update(kind="zener", clamp_v_max=8.0, rated_a=13.4, rated_ms=8.3)
+        data["paths"]["clamp"][0].update(trigger="zener", vz_min_v=5.32, vz_max_v=8.0, trip_min_v=5.32, clamp_v_max=8.0, rated_a=13.4, rated_ms=8.3)
         self.fails(data, "HW-029")
 
     def test_regression_296_clamp_must_not_fire_in_normal_operation(self):
-        d = baseline(); d["paths"]["clamp"][0]["trip_min_v"] = 5.0
+        d = baseline(); d["paths"]["clamp"][0].update(vref_min_v=2.2, trip_min_v=4.79)
         self.fails(d, "HW-029")
 
     def test_regression_296_clamp_rating_below_the_fault_current(self):
@@ -566,11 +586,12 @@ class IndependentReview(Base):
     def test_regression_296_real_pi_has_no_path_to_debug_pins(self):
         data = self.real()
         self.assertFalse(findings(data, "HW-030", "FAIL"))
-        pi = next(p for p in data["parts"]["part"] if p["id"] == "PI5")
+        pi = part(data, "PI5")
         self.assertTrue(pi["ai_host"])
+        pi["pins"].append({"name": "USB2A", "function": "PICO"})   # the original Pi-hosted probe
         data["netlist"]["connection"].append({"id": "C722x", "from": "PI5:USB2A", "to": "PICO:USB", "net": "USB", "domain": "USB",
                                               "joint": "usb", "variant": "both", "observed_by": [5]})
-        self.fails(data, "HW-030")  # the original Pi-hosted probe
+        self.fails(data, "HW-030")
 
     def test_regression_296_both_relays_on_one_module_fail(self):
         d = baseline()
@@ -607,12 +628,16 @@ class IndependentReview(Base):
         self.assertEqual({k: pd[k] for k in ("C324", "C325", "C326")}, {"C324": 4700, "C325": 4700, "C326": 4700})
         self.assertFalse(findings(data, "HW-032", "FAIL"))
 
-    def _variant_b(self, claim, latch=None):
+    def _variant_b(self, claim, latch=None, **latch_part):
         d = baseline()
-        el = d["paths"]["path"][1]["series_elements"][1]
+        part(d, "WD")["board"] = "WDB"
+        el = d["paths"]["path"][1]["series_elements"][2]   # Q, controlled by WD
         el["cut_sources"] = ["WD:2"]; el["cut_claim"] = claim
         if latch:
             el["latch"] = latch
+            el["latch_part"] = "LATCH"
+            d["parts"]["part"].append(dict({"id": "LATCH", "kind": "latch", "board": "WDB", "controlled_by": "WD", "clear_by": "human",
+                                            "pins": pins(("SET", "set"))}, **latch_part))
         return d
 
     def test_regression_296_wdo_to_mr_read_as_a_held_cut_fails(self):
@@ -622,13 +647,13 @@ class IndependentReview(Base):
         self.fails(self._variant_b("pulse-latched"), "HW-033")
 
     def test_regression_296_pulse_cut_with_a_latch_passes(self):
-        self.ok(self._variant_b("pulse-latched", "RP2350 latches on VBUS loss"), "HW-033")
+        self.ok(self._variant_b("pulse-latched", "hardware"), "HW-033")
 
     def test_regression_296_real_variant_b_k2_names_its_latch(self):
         data = self.real()
         k2 = [e for p in data["paths"]["path"] if p["variant"] == "B" for e in p["series_elements"] if e["id"] == "K2"]
         self.assertEqual(len(k2), 2)
-        self.assertTrue(all(e["cut_claim"] == "pulse-latched" and e["latch"] for e in k2))
+        self.assertTrue(all(e["cut_claim"] == "pulse-latched" and e["latch"] == "hardware" and e["latch_part"] for e in k2))
         k2[0]["cut_claim"] = "held"
         self.fails(data, "HW-033")
 
@@ -639,6 +664,345 @@ class IndependentReview(Base):
         by = {f["id"]: f for f in data["paths"]["fault"]}
         self.assertIn("pulse", by["B1"]["effect"])
         self.assertNotIn("disabled", by["B6"]["effect"].split("Only")[0])
+
+
+class ReviewThree(Base):
+    """Regression tests for review 3 (#297). The rules passed the review-2 design because every number they
+    checked was typed in; each test here builds the review-2 data (or a variant of it) and requires a FAIL,
+    and a test on the revised real data requires the computed numbers to hold."""
+
+    def real(self):
+        data, _ = ch.load(REAL)
+        return data
+
+    def pump(self, d, pid):
+        return next(x for x in d["paths"]["pump"] if x["id"] == pid)
+
+    # ---- R3-B1: the crowbar topology and its computed trip band
+    def anode_gate(self, d):
+        c = d["paths"]["clamp"][0]
+        c.update(trigger="tl431-anode-gate", r_gate_ohm=220.0, vgt_min_v=0.25, igt_min_ma=0.04, trip_min_v=5.32, clamp_v_max=5.66,
+                 r_top_ohm=12000.0, r_bot_ohm=10000.0)
+        return d
+
+    def test_regression_297_review_2_anode_to_gate_crowbar_trips_at_6_to_16_volts(self):
+        d = self.anode_gate(baseline())
+        lo, hi = ch.clamp_band(d["paths"]["clamp"][0])[0]
+        self.assertAlmostEqual(lo, 6.0, delta=0.15)
+        self.assertAlmostEqual(hi, 16.3, delta=0.4)
+        msgs = " ".join(f.message for f in findings(d, "HW-029", "FAIL"))
+        self.assertIn("declared", msgs)
+        self.assertIn("absolute maximum", msgs)
+
+    def test_regression_297_real_review_2_crowbar_fails_the_real_data(self):
+        d = self.anode_gate(self.real())
+        self.fails(d, "HW-029")
+
+    def test_regression_297_a_typed_in_trip_band_that_the_components_do_not_give_fails(self):
+        d = baseline(); d["paths"]["clamp"][0]["clamp_v_max"] = 5.2
+        self.assertIn("declared", " ".join(f.message for f in findings(d, "HW-029", "FAIL")))
+
+    def test_regression_297_real_trip_band_is_computed_5_37_to_5_66(self):
+        data = self.real()
+        lo, hi = ch.clamp_band(data["paths"]["clamp"][0])[0]
+        self.assertAlmostEqual(lo, 5.375, delta=0.01)
+        self.assertAlmostEqual(hi, 5.65, delta=0.02)
+        self.assertFalse(findings(data, "HW-029", "FAIL"))
+
+    def test_regression_297_a_crowbar_that_cannot_fire_at_the_fault_voltage_fails(self):
+        d = baseline(); d["paths"]["clamp"][0].update(source_v=5.5)
+        self.fails(d, "HW-029")
+
+    def test_regression_297_weak_gate_drive_fails(self):
+        d = baseline(); d["paths"]["clamp"][0].update(r_gate_ohm=1000.0)
+        self.assertIn("gate drive", " ".join(f.message for f in findings(d, "HW-029", "FAIL")))
+
+    def test_regression_297_a_missing_or_zero_surge_time_is_not_waved_through(self):
+        d = baseline(); d["paths"]["clamp"][0]["rated_ms"] = 0
+        self.fails(d, "HW-029")
+        d = baseline(); del d["paths"]["clamp"][0]["rated_ms"]
+        self.fails(d, "HW-029")
+
+    # ---- R3-B2: a live buck feeds a fired crowbar and F2 never sees it
+    def test_regression_297_buck_output_without_a_fuse_before_the_clamp_fails(self):
+        d = baseline()
+        conn(d, "C4")["to"] = "node:TB5"           # review-2 data: buck OUT+ straight on the rail
+        d["netlist"]["connection"] = [c for c in d["netlist"]["connection"] if c["id"] != "C4b"]
+        msgs = " ".join(f.message for f in findings(d, "HW-029", "FAIL"))
+        self.assertIn("no fuse in between", msgs)
+
+    def test_regression_297_fuse_that_clears_after_the_clamp_can_fail_fails(self):
+        d = baseline(); d["paths"]["clamp"][0]["rated_ms"] = 100
+        self.assertIn("before the fuse blows", " ".join(f.message for f in findings(d, "HW-029", "FAIL")))
+
+    def test_regression_297_a_fault_current_below_the_fuse_multiple_never_clears(self):
+        d = baseline(); part(d, "BK")["min_fault_a"] = 1.2
+        self.assertIn("never reaches a clearing multiple".replace("never reaches", "reach"), " ".join(f.message for f in findings(d, "HW-029", "FAIL")).replace("reaches", "reach"))
+
+    def test_regression_297_fold_back_current_needs_its_own_figure(self):
+        d = baseline(); del part(d, "BK")["min_fault_a"]
+        self.assertIn("min_fault_a", " ".join(f.message for f in findings(d, "HW-029", "FAIL")))
+
+    def test_regression_297_real_buck_reaches_the_rail_only_through_f3(self):
+        data = self.real()
+        m = ch.Model(data)
+        srcs = ch.clamp_sources(m, "M6_SCR:A")
+        self.assertEqual([(s["id"], [f["id"] for f in fz]) for s, fz in srcs], [("M1_BUCK5", ["F3"])])
+        self.assertFalse(findings(data, "HW-029", "FAIL"))
+        data["netlist"]["connection"] = [c for c in data["netlist"]["connection"] if c["id"] != "C108b"]
+        self.fails(data, "HW-029")
+
+    # ---- R3-B3: the K2 budget, worst-case corners, dropout
+    def test_regression_297_review_2_k2_timing_adds_up_to_141_ms_and_fails_the_120_ms_bound(self):
+        data = self.real()
+        bud = next(b for b in data["paths"]["budget"] if b["id"] == "BUD_K2")
+        bud["components"][0].update(period_ms=50.0, tol=0.10)           # 2 x 50 ms, factory RC +/-10 %
+        pu = self.pump(data, "PUMP2")
+        pu.update(c_hold_f=1.0e-6, r_bleed_ohm=100000.0, dropout_ms=[3.5, 40.0])   # the review-2 K2 pump
+        total, _, _ = ch.budget_sum(ch.Model(data), bud)
+        self.assertGreater(total, 120.0)
+        self.assertIn("over the 120", " ".join(f.message for f in findings(data, "HW-035", "FAIL")))
+
+    def test_regression_297_real_k2_budget_is_about_70_ms(self):
+        data = self.real()
+        bud = next(b for b in data["paths"]["budget"] if b["id"] == "BUD_K2")
+        total, parts, _ = ch.budget_sum(ch.Model(data), bud)
+        self.assertLess(total, 80.0)
+        self.assertEqual(len(parts), 3)
+        self.assertFalse(findings(data, "HW-035", "FAIL"))
+
+    def test_regression_297_worst_case_corners_fail_set_1_that_typical_values_pass(self):
+        d = baseline()
+        self.ok(d, "HW-031")
+        d["paths"]["pump"][0].update(diode_vf_max_v=0.33, vbe_max_v=0.72, hfe_min=50.0)
+        self.assertIn("worst corner", " ".join(f.message for f in findings(d, "HW-031", "FAIL")))
+
+    def test_regression_297_set_2_does_not_serve_9_ma(self):
+        data = self.real()
+        self.pump(data, "PUMP1B")["load_ma"] = 9.0     # the review-2 range of set 2
+        self.fails(data, "HW-031")
+
+    def test_regression_297_declared_dropout_must_cover_the_computed_window(self):
+        data = self.real()
+        self.pump(data, "PUMP2")["dropout_ms"] = [8.0, 15.0]    # the review-2 claim for K2
+        self.assertIn("does not cover", " ".join(f.message for f in findings(data, "HW-031", "FAIL")))
+        del self.pump(data, "PUMP2")["dropout_ms"]
+        self.assertIn("not declared", " ".join(f.message for f in findings(data, "HW-031", "FAIL")))
+
+    def test_regression_297_dropout_is_computed_from_the_values(self):
+        data = self.real()
+        m = ch.Model(data)
+        k2, _ = ch.pump_result(m, self.pump(data, "PUMP2"))
+        k1, _ = ch.pump_result(m, self.pump(data, "PUMP1B"))
+        self.assertLess(k2["hi"], 12.0)
+        self.assertGreater(k1["hi"], 200.0)     # set 2 drops out in 0.2 to 0.3 s: K1 is not the 120 ms cut
+
+    def test_regression_297_a_fault_bound_below_its_budget_fails(self):
+        data = self.real()
+        row = next(f for f in data["paths"]["fault"] if f["id"] == "A14")
+        row["bound_ms"] = 30                  # the stale 1 kHz-era figure
+        self.assertIn("below", " ".join(f.message for f in findings(data, "HW-035", "FAIL")))
+
+    def test_regression_297_a_fault_bound_without_a_budget_fails(self):
+        data = self.real()
+        row = next(f for f in data["paths"]["fault"] if f["id"] == "A7")
+        del row["budget"]
+        self.assertIn("no valid [[budget]]", " ".join(f.message for f in findings(data, "HW-035", "FAIL")))
+
+    def test_regression_297_budget_component_with_a_missing_relay_figure_fails(self):
+        data = self.real()
+        del part(data, "RLY2")["release_ms_max"]
+        self.fails(data, "HW-035")
+
+    # ---- R3-B4: Q64 opened an ISP window; the latch must be hardware
+    def test_regression_297_review_2_q64_reset_driver_with_isp_wires_fails(self):
+        data = self.real()
+        for cid in ("C629", "C630", "C631", "C632", "C633"):
+            data["netlist"]["connection"] = [c for c in data["netlist"]["connection"] if c["id"] != cid]
+        data["netlist"]["node"] += [{"name": "Q64.C", "board": "WD", "net": "V3V3_WD"}, {"name": "Q64.B", "board": "WD", "net": "LOGIC_5V_WD"}]
+        for cid, a, b in (("C629", "node:Q64.C", "U3_ATTINY85:1"), ("C630", "U4_MAX813L:7", "node:Q64.B")):
+            data["netlist"]["connection"].append({"id": cid, "from": a, "to": b, "net": "LOGIC_5V_WD", "domain": "5V",
+                                                  "joint": "soldered-to-board", "variant": "B", "observed_by": [5]})
+        msgs = " ".join(f.message for f in findings(data, "HW-038", "FAIL"))
+        self.assertIn("erase and rewrite", msgs)
+
+    def test_regression_297_real_attiny_reset_is_not_driven_by_an_active_output(self):
+        data = self.real()
+        self.assertFalse(findings(data, "HW-038", "FAIL"))
+        self.assertEqual(sum(1 for r in ch.check(data) if r["id"] == "HW-038" and r["checked"] > 0), 1)
+
+    def test_regression_297_a_firmware_latch_is_the_decision_maker_it_should_be_independent_of(self):
+        d = self._variant_b_for("firmware")
+        self.assertIn("firmware latch", " ".join(f.message for f in findings(d, "HW-033", "FAIL")))
+
+    def test_regression_297_any_latch_string_is_not_a_latch(self):
+        d = self._variant_b_for("x")
+        self.assertIn("not one of", " ".join(f.message for f in findings(d, "HW-033", "FAIL")))
+
+    def _variant_b_for(self, latch, **lp):
+        return IndependentReview()._variant_b("pulse-latched", latch, **lp)
+
+    def test_regression_297_a_latch_that_a_person_does_not_clear_fails(self):
+        d = self._variant_b_for("hardware", clear_by="firmware")
+        self.fails(d, "HW-033")
+
+    def test_regression_297_a_latch_fed_by_another_cuts_controller_fails(self):
+        d = self._variant_b_for("hardware", controlled_by="MCU")
+        self.fails(d, "HW-033")
+
+    def test_regression_297_a_latch_on_another_board_fails(self):
+        d = self._variant_b_for("hardware", board="ELSEWHERE")
+        self.fails(d, "HW-033")
+
+    def test_regression_297_real_latch_is_hardware_on_the_wd_board_cleared_by_a_person(self):
+        data = self.real()
+        lp = part(data, "LATCH_WD")
+        self.assertEqual((lp["kind"], lp["board"], lp["clear_by"]), ("latch", "WD", "human"))
+        self.assertFalse(findings(data, "HW-033", "FAIL"))
+        self.assertNotIn("Q64.C", [n["name"] for n in data["netlist"]["node"]])
+
+    # ---- R3-B5: arm sense downstream of an unsensed human contact
+    def test_regression_297_review_2_arm_sense_downstream_of_the_unsensed_estop_fails(self):
+        data = self.real()
+        data["paths"]["sense"] = [s for s in data["paths"]["sense"] if s["id"] != "S_EOUT"]
+        self.assertIn("one sense fault re-arms", " ".join(f.message for f in findings(data, "HW-036", "FAIL")))
+
+    def test_regression_297_real_estop_output_is_sensed_on_gp17(self):
+        data = self.real()
+        self.assertFalse(findings(data, "HW-036", "FAIL"))
+        s = next(x for x in data["paths"]["sense"] if x["id"] == "S_EOUT")
+        self.assertEqual((s["net"], s["pin"]), ("ESTOP_OUT", "RP_TR:GP17"))
+
+    # ---- R3-B6: the analyzer is a write path and its host records the evidence
+    def test_regression_297_pi_hosted_analyzer_reaches_the_drive_chain(self):
+        data = self.real()
+        part(data, "PI5")["pins"].append({"name": "USB3A", "function": "LA"})
+        data["netlist"]["connection"].append({"id": "C720", "from": "PI5:USB3A", "to": "LA:USB", "net": "USB", "domain": "USB",
+                                              "joint": "usb", "variant": "both", "observed_by": [1, 3, 6]})
+        self.assertIn("drive", " ".join(f.message for f in findings(data, "HW-030", "FAIL")))
+        part(data, "LA")["input_only_verified"] = True      # after the meter check of the buffer wiring
+        self.assertFalse(findings(data, "HW-030", "FAIL"))
+
+    def test_regression_297_evidence_for_tests_2_and_5_is_not_recorded_by_an_ai_host(self):
+        data = self.real()
+        part(data, "PI5")["pins"].append({"name": "USB3A", "function": "LA"})
+        data["netlist"]["connection"].append({"id": "C720", "from": "PI5:USB3A", "to": "LA:USB", "net": "USB", "domain": "USB",
+                                              "joint": "usb", "variant": "both", "observed_by": [2, 5]})
+        self.assertIn("independent", " ".join(f.message for f in findings(data, "HW-022", "FAIL")))
+
+    def test_regression_297_real_probes_are_modelled_and_removable(self):
+        data = self.real()
+        probes = [c for c in data["netlist"]["connection"] if "LA:D" in (c["from"], c["to"]) or str(c["to"]).startswith("LA:D")]
+        self.assertGreaterEqual(len(probes), 5)
+        d4 = next(c for c in probes if c["to"] == "LA:D4")
+        self.assertEqual(d4["from"], "node:Q61.C")      # RLY2 IN1, not the tied-high IN2
+        self.assertTrue(all(c.get("removable") for c in probes if c["to"] != "LA:D2" or c["id"] != "C806"))
+
+    # ---- R3-B7: self-test expectations and swappable plugs
+    def test_regression_297_review_2_self_test_expecting_mid_live_with_k1_open_fails(self):
+        data = self.real()
+        next(t for t in data["paths"]["selftest"] if t["id"] == "ST_K1")["expect"] = {"S_MID": "live", "S_VBUS": "dead"}
+        self.assertIn("would pass a wrong bench", " ".join(f.message for f in findings(data, "HW-037", "FAIL")))
+
+    def test_regression_297_a_cut_without_a_self_test_fails(self):
+        data = self.real()
+        data["paths"]["selftest"] = [t for t in data["paths"]["selftest"] if t["id"] != "ST_K2"]
+        self.assertIn("no self-test", " ".join(f.message for f in findings(data, "HW-037", "FAIL")))
+
+    def test_regression_297_real_self_tests_match_the_topology(self):
+        data = self.real()
+        self.assertFalse(findings(data, "HW-037", "FAIL"))
+        by = {t["id"]: t["expect"] for t in data["paths"]["selftest"]}
+        self.assertEqual(by["ST_K1"], {"S_MID": "dead", "S_VBUS": "dead"})
+        self.assertEqual(by["ST_K2"], {"S_MID": "live", "S_VBUS": "dead"})
+
+    def test_regression_297_interchangeable_relay_plugs_fail(self):
+        data = self.real()
+        for c in data["netlist"]["connection"]:
+            if c.get("connector") == "XH5-blank":
+                c["connector"] = "XH4"
+        self.assertIn("swapped", " ".join(f.message for f in findings(data, "HW-020", "FAIL")))
+
+    def test_regression_297_keyed_connector_without_a_family_fails(self):
+        d = baseline(); del conn(d, "C13")["connector"]
+        self.assertIn("connector family", " ".join(f.message for f in findings(d, "HW-020", "FAIL")))
+
+    def test_regression_297_real_relays_use_different_shrouded_families(self):
+        data = self.real()
+        fam = {}
+        for c in data["netlist"]["connection"]:
+            for ep in (c["from"], c["to"]):
+                if ep.startswith(("RLY1:", "RLY2:")) and c["joint"] == "jst-xh":
+                    fam.setdefault(ep.split(":")[0], set()).add(c["connector"])
+        self.assertEqual(fam, {"RLY1": {"XH4"}, "RLY2": {"XH5-blank"}})
+
+    # ---- N3: one LAMP part for four lamps joined the pre-e-stop 12 V to the load terminal
+    def test_regression_297_one_part_joining_pre_estop_12_v_to_the_load_terminal_fails(self):
+        data = self.real()
+        data["parts"]["part"].append({"id": "LAMP", "pins": pins(("+", "terminal"), ("-", "terminal"))})
+        for c in data["netlist"]["connection"]:
+            if c["id"] == "C111":
+                c["from"] = "LAMP:+"
+            if c["id"] == "C212":
+                c["from"] = "LAMP:+"
+        self.assertIn("joins safety domains", " ".join(f.message for f in findings(data, "HW-034", "FAIL")))
+
+    def test_regression_297_real_lamps_are_four_separate_parts(self):
+        data = self.real()
+        self.assertFalse(findings(data, "HW-034", "FAIL"))
+        ids = {p["id"] for p in data["parts"]["part"]}
+        self.assertTrue({"LAMP_A", "LAMP_B", "L_PWR", "L_BUS"} <= ids and "LAMP" not in ids)
+
+    def test_regression_297_domain_rule_ignores_nets_without_a_domain(self):
+        d = baseline()
+        self.ok(d, "HW-034")
+        d["netlist"]["net"][1]["safety_domain"] = "supply"; d["netlist"]["net"][5]["safety_domain"] = "load"
+        d["parts"]["part"].append({"id": "WIRE", "pins": pins(("1", "a"), ("2", "b"))})
+        add_conn(d, "C61", "WIRE:1", "node:TB12", "V12"); add_conn(d, "C62", "WIRE:2", "node:LAMPNODE", "LAMPN")
+        self.fails(d, "HW-034")
+        part(d, "WIRE")["bridges_domains"] = True
+        self.ok(d, "HW-034")
+
+    # ---- N16: fault rows whose verdict contradicts their own text
+    def test_regression_297_off_row_without_remaining_cuts_fails(self):
+        d = baseline(); del d["paths"]["fault"][0]["remaining_cuts"]
+        self.assertIn("remaining_cuts", " ".join(f.message for f in findings(d, "HW-019", "FAIL")))
+
+    def test_regression_297_remaining_cut_controlled_by_the_faulted_part_fails(self):
+        d = baseline()
+        f = d["paths"]["fault"][1]; f.update(element="MCU", fault_mode="holds", remaining_cuts=["K"])
+        self.assertIn("controlled or fed by faulted part", " ".join(x.message for x in findings(d, "HW-019", "FAIL")))
+
+    def test_regression_297_effect_text_that_says_held_contradicts_an_off_row(self):
+        d = baseline(); d["paths"]["fault"][0]["effect"] = "K1, K2 and the MOSFET are all held."
+        self.assertIn("contradict".replace("contradict", "held or re-energised"), " ".join(f.message for f in findings(d, "HW-019", "FAIL")))
+        d = baseline(); d["paths"]["fault"][0]["effect"] = "The load re-energises on release."
+        self.fails(d, "HW-019")
+
+    def test_regression_297_a_remaining_cut_must_exist_and_not_be_the_faulted_element(self):
+        d = baseline(); d["paths"]["fault"][1]["remaining_cuts"] = ["K"]       # row F2 faults K itself
+        self.fails(d, "HW-019")
+        d = baseline(); d["paths"]["fault"][0]["remaining_cuts"] = ["NOPE"]
+        self.fails(d, "HW-019")
+
+    def test_regression_297_real_a36_and_a39_no_longer_contradict_themselves(self):
+        data = self.real()
+        by = {f["id"]: f for f in data["paths"]["fault"]}
+        self.assertEqual((by["A39"]["load_state"], by["A39"]["verdict"]), ("on", "FAIL"))
+        self.assertEqual(by["A36"]["load_state"], "off")
+        self.assertNotIn("re-energises", by["A36"]["effect"])
+        self.assertFalse(findings(data, "HW-019", "FAIL"))
+
+    def test_regression_297_a_row_with_the_load_on_may_not_list_remaining_cuts(self):
+        d = baseline(); f = d["paths"]["fault"][0]; f["id"] = "A28"; f["load_state"] = "on"; f["verdict"] = "FAIL"
+        self.fails(d, "HW-019")      # still carries remaining_cuts
+
+    # ---- bounds and budgets are required wherever a fault row bounds time
+    def test_regression_297_every_bounded_real_row_has_a_budget(self):
+        data = self.real()
+        for f in data["paths"]["fault"]:
+            if f.get("bound_ms") is not None:
+                self.assertIn(f["budget"], {b["id"] for b in data["paths"]["budget"]}, f["id"])
 
 
 if __name__ == "__main__":
