@@ -257,35 +257,73 @@ def _blank_span(s, a, b):
     return s[:a] + re.sub(r"[^\n]", " ", s[a:b]) + s[b:]
 
 
+_MACRO_CALL = re.compile(r"(?<![\w])(?!macro_rules\b)[A-Za-z_][\w:]*\s*!\s*[{(\[]")
+_PATH_ANY = re.compile(r"\bpath\s*=")  # `#[path = ..]` and `#[cfg_attr(.., path = ..)]`
+
+
+def _match_close(s, i):
+    """Index just past the bracket that closes the one at s[i] (blanked code)."""
+    pairs = {"(": ")", "[": "]", "{": "}"}
+    stack, n = [], len(s)
+    while i < n:
+        c = s[i]
+        if c in pairs:
+            stack.append(pairs[c])
+        elif stack and c == stack[-1]:
+            stack.pop()
+            if not stack:
+                return i + 1
+        i += 1
+    return n
+
+
 def scan_rust(src):
     """What a source scan sees in one Rust file, with nested comments, strings,
     `macro_rules!` bodies and modules or fns behind a never-true cfg removed:
       tests: [(inline module path, fn name, ignored)]
-      mods:  [(inline module path, name, attrs)] for out-of-line `mod name;`."""
+      mods:  [(inline module path, name, attrs)] for out-of-line `mod name;`.
+    Module names a scope declares more than once (a cfg'd-out `mod b;` next to a
+    live `mod b {}`), or declares with a path attribute (even inside `cfg_attr`),
+    are ambiguous without evaluating cfg: all their declarations, and the tests
+    inside them, are dropped. `mod x;` inside a macro invocation is not followed."""
     code = blank_rust(src)
     for m in list(_MACRO.finditer(code)):
         code_open = m.end() - 1
-        if code[code_open] == "{":
-            code = _blank_span(code, m.start(), _match_brace(code, code_open))
-        else:
-            close = {"(": ")", "[": "]"}[code[code_open]]
-            end = code.find(close, code_open)
-            code = _blank_span(code, m.start(), len(code) if end == -1 else end + 1)
-    for m in list(_MODDECL.finditer(code)):
+        code = _blank_span(code, m.start(), _match_close(code, code_open))
+    decls = list(_MODDECL.finditer(code))
+    spans0 = sorted((m.start(), _match_brace(code, m.end() - 1), m.group(2)) for m in decls if m.group(3) == "{")
+
+    def scope_at(p, spans):
+        return [name for a, b, name in spans if a <= p < b]
+
+    seen, refused = {}, set()
+    for m in decls:
+        key = (tuple(scope_at(m.start(), spans0)), m.group(2))
+        seen[key] = seen.get(key, 0) + 1
+        if seen[key] > 1 or _PATH_ANY.search(m.group(1)):
+            refused.add(key)
+    macro_spans = [(m.start(), _match_close(code, m.end() - 1)) for m in _MACRO_CALL.finditer(code)]
+    for m in decls:
         if m.group(3) == "{" and _NEVER_CFG.search(m.group(1)):
             code = _blank_span(code, m.start(), _match_brace(code, m.end() - 1))
-    spans = sorted((m.start(), _match_brace(code, m.end() - 1), m.group(2)) for m in _MODDECL.finditer(code) if m.group(3) == "{")
 
-    def inline_at(p):
-        return [name for a, b, name in spans if a <= p < b]
+    def inline_ok(path):
+        return not any((tuple(path[:k]), path[k]) in refused for k in range(len(path)))
 
     tests = []
     for m in _FN.finditer(code):
         attrs = m.group(1)
         if _TEST_ATTR.search(attrs) and not _NEVER_CFG.search(attrs):
-            tests.append((inline_at(m.start()), m.group(2), bool(_IGNORE_ATTR.search(attrs))))
-    mods = [(inline_at(m.start()), m.group(2), m.group(1)) for m in _MODDECL.finditer(code)
-            if m.group(3) == ";" and not _NEVER_CFG.search(m.group(1))]
+            path = scope_at(m.start(), spans0)
+            if inline_ok(path):
+                tests.append((path, m.group(2), bool(_IGNORE_ATTR.search(attrs))))
+    mods = []
+    for m in decls:
+        if m.group(3) != ";" or _NEVER_CFG.search(m.group(1)) or any(a <= m.start() < b for a, b in macro_spans):
+            continue
+        scope = scope_at(m.start(), spans0)
+        if inline_ok(scope) and (tuple(scope), m.group(2)) not in refused:
+            mods.append((scope, m.group(2), m.group(1)))
     return {"tests": tests, "mods": mods}
 
 
@@ -314,51 +352,123 @@ def _is_skip_expr(node):
     return _decorator_name(node) in _SKIP_DECORATORS
 
 
+def _mentions_skiptest(node):
+    return any((isinstance(n, ast.Name) and n.id == "SkipTest") or (isinstance(n, ast.Attribute) and n.attr in ("SkipTest", "skipTest"))
+               for n in ast.walk(node))
+
+
+def _is_main_guard(node):
+    return (isinstance(node, ast.If) and isinstance(node.test, ast.Compare) and isinstance(node.test.left, ast.Name)
+            and node.test.left.id == "__name__" and not node.orelse)
+
+
+def _is_sys_path_call(node):
+    f = node.value.func if isinstance(node.value, ast.Call) else None
+    return isinstance(f, ast.Attribute) and f.attr in ("insert", "append") and isinstance(f.value, ast.Attribute) \
+        and f.value.attr == "path" and isinstance(f.value.value, ast.Name) and f.value.value.id == "sys"
+
+
 def python_tests(src):
-    """Names of the `test_*` methods that `unittest` discovery would really run:
-    defined in the body of a module-level class that derives from `unittest.TestCase`
-    (imported from unittest), where the last definition of a name wins, and not
-    skipped (decorator, alias of a skip decorator, `__unittest_skip__`), deleted or
-    reassigned. A class with any decorator, and a module that defines `load_tests`,
-    are not counted: either can change which tests run. Nothing in strings, comments
-    or `if` blocks counts, and a module-level `def test_x` is never collected."""
+    """Names of the `test_*` methods that `unittest` discovery would really run.
+
+    Only a module whose top-level statements are imports, classes, functions,
+    docstrings, simple assignments, `sys.path` tweaks and a `__main__` guard is
+    counted; a module-level `raise`, `try`, `with`, loop, other call, `del`, a
+    `load_tests` or `setUpModule` of any form (def, assignment, import), or a
+    rebinding of `TestCase`, `unittest` or a test class name means it is not
+    counted. The last module-level binding of a class name wins. A counted class
+    derives from `unittest.TestCase` (imported from unittest), has no decorator, is
+    not skipped (decorator, `__unittest_skip__`, a `setUpClass` that raises
+    SkipTest), and counts only `test_*` methods whose last definition in the class
+    body is a plain function with no decorator, or only skip decorators of
+    `unittest` (which exclude it). Nothing in strings, comments or `if` blocks
+    counts, and a module-level `def test_x` is never collected."""
     try:
         tree = ast.parse(src)
     except (SyntaxError, ValueError):
         return set()
-    unittest_names, testcase_names = set(), set()
-    aliases = set()  # names bound to a skip decorator, e.g. `off = unittest.skip("x")`
+    unittest_names, testcase_names, aliases = set(), set(), set()
+    reserved = {"load_tests", "setUpModule"}
+    bindings = {}  # module-level name -> ClassDef (or None once rebound otherwise)
     for node in tree.body:
         if isinstance(node, ast.Import):
-            unittest_names |= {a.asname or a.name for a in node.names if a.name == "unittest"}
-        elif isinstance(node, ast.ImportFrom) and node.module == "unittest" and node.level == 0:
-            testcase_names |= {a.asname or a.name for a in node.names if a.name in _TESTCASE_NAMES}
-        elif isinstance(node, ast.FunctionDef) and node.name == "load_tests":
-            return set()
-        elif isinstance(node, ast.Assign) and _is_skip_expr(node.value):
-            aliases |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+            for a in node.names:
+                bound = a.asname or a.name.split(".")[0]
+                if a.name == "unittest":
+                    unittest_names.add(bound)
+                bindings[bound] = None
+        elif isinstance(node, ast.ImportFrom):
+            for a in node.names:
+                bound = a.asname or a.name
+                if node.module == "unittest" and node.level == 0 and a.name in _TESTCASE_NAMES:
+                    testcase_names.add(bound)
+                if bound in reserved:
+                    return set()
+                bindings[bound] = None
+        elif isinstance(node, ast.ClassDef):
+            bindings[node.name] = node
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name in reserved:
+                return set()
+            if node.name == "setUpModule" or (node.name in reserved):
+                return set()
+            bindings[node.name] = None
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                if not isinstance(t, ast.Name):
+                    return set()  # attribute or item assignment can rebind a method
+                if t.id in reserved:
+                    return set()
+                bindings[t.id] = None
+            if isinstance(node, ast.Assign) and _is_skip_expr(node.value):
+                aliases |= {t.id for t in targets if isinstance(t, ast.Name)}
+        elif isinstance(node, ast.Expr) and ((isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)) or _is_sys_path_call(node)):
+            continue
+        elif _is_main_guard(node):
+            continue
+        else:
+            return set()  # raise, try, with, loops, del, other calls, ...
+    for name in list(unittest_names) + list(testcase_names):
+        if bindings.get(name, None) is not None:
+            return set()  # `TestCase = ...` or `class TestCase` shadows the import
+    # A later rebinding of an import name (unittest = something) is caught above for
+    # classes only; an Assign to `unittest` or `TestCase` after the import is final:
+    for node in tree.body:
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            for t in node.targets if isinstance(node, ast.Assign) else [node.target]:
+                if isinstance(t, ast.Name) and t.id in unittest_names | testcase_names:
+                    return set()
 
-    def is_base(b):
+    def is_base(b, local):
         if isinstance(b, ast.Attribute):
             return isinstance(b.value, ast.Name) and b.value.id in unittest_names and b.attr in _TESTCASE_NAMES
-        return isinstance(b, ast.Name) and b.id in testcase_names | local_cases
+        return isinstance(b, ast.Name) and (b.id in testcase_names or b.id in local)
 
     def skipping(d):
         return _is_skip_expr(d) or (isinstance(d, ast.Name) and d.id in aliases) \
             or (isinstance(d, ast.Call) and isinstance(d.func, ast.Name) and d.func.id in aliases)
 
     local_cases, skipped_cases, found = set(), set(), set()
-    for node in tree.body:
-        if not isinstance(node, ast.ClassDef) or not any(is_base(b) for b in node.bases):
+    for node in tree.body:  # in order, so a class can derive from an earlier one
+        if not isinstance(node, ast.ClassDef) or not any(is_base(b, local_cases) for b in node.bases):
             continue
         local_cases.add(node.name)
         if node.decorator_list or any(isinstance(b, ast.Name) and b.id in skipped_cases for b in node.bases):
             skipped_cases.add(node.name)  # unittest.skip is inherited; other decorators are not trusted
             continue
+        if bindings.get(node.name) is not node:
+            continue  # a later binding of the same name replaced this class
         defs, class_skipped = {}, False
         for item in node.body:  # in order, so the last definition of a name wins
             if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                defs[item.name] = not any(skipping(d) for d in item.decorator_list)
+                if item.name in ("setUpClass", "setUp") and _mentions_skiptest(item) and item.name == "setUpClass":
+                    class_skipped = True
+                defs[item.name] = all(skipping(d) is False and False for d in item.decorator_list) or not item.decorator_list
+                if item.decorator_list and not any(skipping(d) for d in item.decorator_list):
+                    defs[item.name] = False  # an unrecognised decorator can change what runs
+                elif any(skipping(d) for d in item.decorator_list):
+                    defs[item.name] = False
             elif isinstance(item, ast.Assign):
                 for t in item.targets:
                     if isinstance(t, ast.Name):
@@ -374,6 +484,37 @@ def python_tests(src):
             continue
         found |= {n for n, ok in defs.items() if ok and n.startswith("test_")}
     return found
+
+
+def harness_false_srcs(root, pkg):
+    """Repo-relative source paths of the targets that a package manifest declares
+    with `harness = false` (lib, bin, test, example, bench), with the default path
+    cargo would use when the manifest gives none. Their `--list` output is the
+    target's own, so no test can count from them."""
+    try:
+        with open(os.path.join(root, pkg, "Cargo.toml"), "rb") as fh:
+            manifest = tomllib.load(fh)
+    except (OSError, ValueError):
+        return set()
+    out = set()
+
+    def add(path):
+        out.add(os.path.normpath(os.path.join(pkg, path)).replace(os.sep, "/"))
+
+    lib = manifest.get("lib", {})
+    if isinstance(lib, dict) and lib.get("harness") is False:
+        add(lib.get("path", "src/lib.rs"))
+    for kind, folder in (("bin", "src/bin"), ("test", "tests"), ("example", "examples"), ("bench", "benches")):
+        for t in manifest.get(kind, []) if isinstance(manifest.get(kind, []), list) else []:
+            if not (isinstance(t, dict) and t.get("harness") is False):
+                continue
+            name = t.get("name") if isinstance(t.get("name"), str) else ""
+            if isinstance(t.get("path"), str):
+                add(t["path"])
+            else:
+                for cand in (f"{folder}/{name}.rs", f"{folder}/{name}/main.rs") + (("src/main.rs",) if kind == "bin" else ()):
+                    add(cand)
+    return out
 
 
 def pkg_dir(root, rel):
@@ -403,14 +544,20 @@ class TestIndex:
                     self._add("rust", self._fallback_package(rel), rel, {rel}, name, name, ign)
         else:
             reach = {}
+            no_harness = {}
             for t in cargo["tests"]:
+                d = pkg_dir(root, t["src"])
+                if d not in no_harness:
+                    no_harness[d] = harness_false_srcs(root, d)
+                if t["src"] in no_harness[d]:
+                    continue  # a harness = false target: the list entry is not libtest's
                 if t["src"] not in reach:
                     reach[t["src"]] = self._reach(t["src"])
                 # Cargo's list says what compiles and runs. The source must also declare
                 # a test with exactly this module path in a file that `mod` really
                 # reaches from the binary's root; a source #[ignore] wins over the list.
                 files = {f for f, names in reach[t["src"]].items() if t["name"] in names}
-                if files:
+                if len(files) == 1:  # the same full name reached from two files is ambiguous: refused
                     ign = bool(t["ignored"]) or any(reach[t["src"]][f][t["name"]] for f in files)
                     self._add("rust", t["package"], t["src"], files, t["name"], t["name"].rsplit("::", 1)[-1], ign)
         # Only files `unittest discover -s ci -p 'test_*.py'` collects.

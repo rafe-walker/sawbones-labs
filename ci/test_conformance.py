@@ -621,6 +621,47 @@ fn cfg_attr_ignored() {}
         self.assertNotEqual(self.judge(t, "tiny::ghost")[0], 0)
         self.assertEqual(self.judge(t, "tiny::real")[0], 0)
 
+    def test_regression_271_harness_false_examples_and_benches_are_skipped_and_refused(self):
+        need_cargo(self)
+        forge = ("fn main() {\n    let a: Vec<String> = std::env::args().collect();\n"
+                 "    if a.iter().any(|x| x == \"--list\") && !a.iter().any(|x| x == \"--ignored\") {\n"
+                 "        println!(\"ghost: test\");\n    }\n}\n#[test]\nfn ghost() {}\n")
+        extra = {"crates/tiny/examples/ex.rs": forge, "crates/tiny/benches/bn.rs": forge}
+        manifest = ('\n[[example]]\nname = "ex"\npath = "examples/ex.rs"\nharness = false\ntest = true\n'
+                    '\n[[bench]]\nname = "bn"\npath = "benches/bn.rs"\nharness = false\n')
+        t, listed = self.scratch_tiny("#[test]\nfn real() {}\n", extra, manifest)
+        self.assertEqual({x["name"] for x in listed["tests"]}, {"real"})
+        # `cargo test` does not build benches, so only the example is ever seen by the lister.
+        self.assertIn("tiny:ex", listed["skipped_harness_false"])
+        # Even a forged list that includes the forged entries is refused by the judge,
+        # which reads the manifests itself.
+        for src in ("crates/tiny/examples/ex.rs", "crates/tiny/benches/bn.rs"):
+            forged = cargo_list(os.path.join(t.d, "f.json"), [("tiny", src, "ghost")])
+            t.write("design/requirements/cortex.toml", toml_of([record(acc=[("a1", "test", "tiny::ghost", None)],
+                    sha=c.unit_hash(c.source_unit(DESIGN, "The latch starts tripped")))]))
+            self.assertNotEqual(t.run("--bless", "--rust-tests", forged)[0], 0, src)
+        self.assertEqual(c.harness_false_srcs(t.d, "crates/tiny"),
+                         {"crates/tiny/examples/ex.rs", "crates/tiny/benches/bn.rs"})
+
+    def test_regression_271_dead_or_ambiguous_module_declarations_earn_no_credit(self):
+        lib = "crates/tiny/src/lib.rs"
+        cases = {
+            "macro-swallowed mod": ("macro_rules! m { ($($t:tt)*) => {}; }\nm! { mod ghost; }\n", {"crates/tiny/src/ghost.rs": "#[test]\nfn t() {}\n"}, "ghost::t", "crates/tiny/src/ghost.rs::t"),
+            "duplicate mod": ("mod d;\nmod d;\n", {"crates/tiny/src/d.rs": "#[test]\nfn t() {}\n"}, "d::t", "crates/tiny/src/d.rs::t"),
+            "path attribute": ("#[path = \"other.rs\"]\nmod p;\n", {"crates/tiny/src/p.rs": "#[test]\nfn t() {}\n", "crates/tiny/src/other.rs": "#[test]\nfn t() {}\n"}, "p::t", "crates/tiny/src/p.rs::t"),
+            "cfg_attr path": ("#[cfg_attr(unix, path = \"other.rs\")]\nmod p;\n", {"crates/tiny/src/p.rs": "#[test]\nfn t() {}\n", "crates/tiny/src/other.rs": "#[test]\nfn t() {}\n"}, "p::t", "crates/tiny/src/p.rs::t"),
+        }
+        for name, (libsrc, files, full, ref) in cases.items():
+            files = dict(files)
+            files[lib] = libsrc
+            t = self.tree(recs=[self.rec(ref)], extra=files, bless=False)
+            rc, out = t.run("--bless", "--rust-tests", cargo_list(os.path.join(t.d, "l.json"), [("tiny", lib, full)]))
+            self.assertNotEqual(rc, 0, (name, out))
+        # The same full test name reached from two files is ambiguous: refused.
+        files = {lib: "mod x;\nmod y;\n", "crates/tiny/src/x.rs": "#[test]\nfn t() {}\n", "crates/tiny/src/y.rs": "#[test]\nfn t() {}\n"}
+        t = self.tree(recs=[self.rec("crates/tiny/src/x.rs::t")], extra=files, bless=False)
+        self.assertEqual(t.run("--bless", "--rust-tests", cargo_list(os.path.join(t.d, "l.json"), [("tiny", lib, "x::t"), ("tiny", lib, "y::t")]))[0], 0)
+
     def test_regression_271_spaced_and_macro_added_ignores_are_ignores(self):
         need_cargo(self)
         for src in ("# [ignore]\n#[test]\nfn x() {}\n", "#[test]\n#  [ ignore ]\nfn x() {}\n", "# [test]\n# [ignore = \"r\"]\nfn x() {}\n"):
@@ -693,9 +734,6 @@ fn cfg_attr_ignored() {}
             "import unittest\n"
             "def test_module_level(): pass\n"
             "S = 'def test_in_string(self): pass'\n"
-            "if False:\n"
-            "    class T0(unittest.TestCase):\n"
-            "        def test_under_if_false(self): pass\n"
             "class T(unittest.TestCase):\n"
             "    def test_real(self): pass\n"
             "    async def test_async_real(self): pass\n"
@@ -716,6 +754,42 @@ fn cfg_attr_ignored() {}
         )
         self.assertEqual(c.python_tests(src), {"test_real", "test_async_real", "test_inherited_class_member"})
         self.assertEqual(c.python_tests("def broken(:\n"), set())
+
+    def test_regression_271_python_modules_with_side_effects_are_not_counted(self):
+        head = "import unittest\nclass T(unittest.TestCase):\n    def test_x(self): pass\n"
+        for name, extra in (
+            ("raise", "raise SystemExit(1)\n"),
+            ("if block", "if False:\n    pass\n"),
+            ("try", "try:\n    pass\nexcept Exception:\n    pass\n"),
+            ("load_tests def", "def load_tests(l, t, p):\n    return t\n"),
+            ("load_tests assign", "load_tests = None\n"),
+            ("load_tests import", "from x import load_tests\n"),
+            ("setUpModule", "def setUpModule():\n    raise unittest.SkipTest\n"),
+            ("rebind TestCase", "unittest = None\n"),
+            ("attribute assign", "T.test_x = None\n"),
+            ("other call", "print('x')\n"),
+        ):
+            self.assertEqual(c.python_tests(head + extra), set(), name)
+        shadow = "from unittest import TestCase\nclass TestCase: pass\nclass T(TestCase):\n    def test_x(self): pass\n"
+        self.assertEqual(c.python_tests(shadow), set())
+        ok = head + "HERE = 1\nimport sys\nsys.path.insert(0, '.')\nif __name__ == '__main__':\n    unittest.main()\n"
+        self.assertEqual(c.python_tests(ok), {"test_x"})
+
+    def test_regression_271_python_last_binding_and_decorators_decide(self):
+        src = (
+            "import unittest\n"
+            "class T(unittest.TestCase):\n    def test_old(self): pass\n"
+            "class T(unittest.TestCase):\n    def test_new(self): pass\n"
+            "class D(unittest.TestCase):\n"
+            "    @some.decorator\n    def test_wrapped(self): pass\n"
+            "    def test_plain(self): pass\n"
+            "    def test_twice(self): pass\n"
+            "    test_twice = None\n"
+            "class Skipped(unittest.TestCase):\n"
+            "    @classmethod\n    def setUpClass(cls):\n        raise unittest.SkipTest('no')\n"
+            "    def test_never(self): pass\n"
+        )
+        self.assertEqual(c.python_tests(src), {"test_new", "test_plain"})
 
     def test_regression_271_python_refs_resolve_only_in_ci_test_files(self):
         good = "import unittest\nclass T(unittest.TestCase):\n    def test_x(self): pass\n"

@@ -22,7 +22,7 @@ level = "MUST"
 title = "Prose that changes without its record is flagged by paragraph hash"
 source = "CONTRIBUTING.md"
 anchor = "**Records.**"
-source_sha = "63ea58f184c2722d"
+source_sha = "a793c25854f86dfb"
 tracks = [269]
 acceptance = [
   { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_drifted_when_the_design_prose_changes" },
@@ -99,6 +99,10 @@ acceptance = [
   { id = "a17", kind = "test", ref = "ci/test_conformance.py::test_regression_271_spaced_and_macro_added_ignores_are_ignores" },
   { id = "a18", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_last_definition_wins_and_skips_cannot_hide" },
   { id = "a19", kind = "test", ref = "ci/test_conformance.py::test_regression_271_directory_form_refs_are_refused" },
+  { id = "a20", kind = "test", ref = "ci/test_conformance.py::test_regression_271_harness_false_examples_and_benches_are_skipped_and_refused" },
+  { id = "a21", kind = "test", ref = "ci/test_conformance.py::test_regression_271_dead_or_ambiguous_module_declarations_earn_no_credit" },
+  { id = "a22", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_modules_with_side_effects_are_not_counted" },
+  { id = "a23", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_last_binding_and_decorators_decide" },
 ]
 
 [[requirement]]

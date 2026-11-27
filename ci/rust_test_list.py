@@ -32,7 +32,7 @@ def package_name(package_id):
 
 def no_harness_targets(root, locked):
     """{(package, target name)} for every workspace target whose manifest says
-    `harness = false` (lib, bin and test targets), via `cargo metadata` + tomllib."""
+    `harness = false` (lib, bin, test, example and bench targets), via `cargo metadata` + tomllib."""
     cmd = ["cargo", "metadata", "--no-deps", "--format-version", "1"] + (["--locked"] if locked else [])
     r = subprocess.run(cmd, cwd=root, capture_output=True, text=True)
     if r.returncode != 0:
@@ -45,7 +45,7 @@ def no_harness_targets(root, locked):
         lib = manifest.get("lib", {})
         if lib.get("harness") is False:
             out.add((name, lib.get("name") or name.replace("-", "_")))
-        for kind in ("bin", "test"):
+        for kind in ("bin", "test", "example", "bench"):
             for t in manifest.get(kind, []):
                 if t.get("harness") is False and isinstance(t.get("name"), str):
                     out.add((name, t["name"]))
