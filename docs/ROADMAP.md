@@ -141,7 +141,7 @@ A whole bench that runs with no hardware: the supervisor, the module protocol, t
 
 Claude drives the simulated bench the same way it will drive the real one.
 
-**Work:** #103, #104, #112, #115
+**Work:** #103, #104, #112, #115, #250 (field toolkit: Kali and open-source tools per module, how they run and how the agent uses them)
 
 **Check-in (#154). You will see:**
 
