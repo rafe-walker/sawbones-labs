@@ -389,7 +389,7 @@ The site technical report is published now. The arXiv or formal submission waits
 
 ## P2: Make it mobile
 
-Everything else from the old Bench Core and the later phases. Nothing in P2 is bought before P1 has exited. The home-built DC meter is here, since P1 does not need it: the voltage reference and the handheld meter cover P1 calibration.
+Everything else from the old Bench Core and the later phases. P2 parts sit on their own list, since P1 does not need them. The home-built DC meter is here, since P1 does not need it: the voltage reference and the handheld meter cover P1 calibration.
 
 ### P2.1 The pack
 
@@ -426,7 +426,7 @@ The first built instrument, isolated from the brain.
 
 ### P2.3 Module 2: the listen-only comms pod
 
-Reading the inverter directly, unable to transmit unless armed. This includes the Solar Assistant read path for the EG4.
+Reading the EG4 inverter, Solar Assistant first and then the native ports, unable to transmit unless armed.
 
 **Work:** #147, #70 (confirm baud rate and pinout on the real units)
 
