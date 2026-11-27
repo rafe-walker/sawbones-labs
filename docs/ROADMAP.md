@@ -141,7 +141,7 @@ A whole bench that runs with no hardware: the supervisor, the module protocol, t
 
 Claude drives the simulated bench the same way it will drive the real one.
 
-**Work:** #103, #104, #112, #115, #250 (field toolkit: Kali and open-source tools per module, how they run and how the agent uses them)
+**Work:** #103, #104, #112, #115, #250 (field toolkit: Kali and open-source tools per module, how they run and how the agent uses them), #253 (sandboxed tool launcher), #254 (parser sandbox), #255 (adapter manifest admission and hash pinning), #256 (scope enforcement for capabilities), #257 (effect contracts and passive proof), #258 (first adapters, in order), #259 (CAN guard), #260 (Modbus/TCP guard), #261 (bus collision handling), #262 (licence and SBOM checks), #263 (Pi 5 resource budget), #264 (compiled capability vocabulary)
 
 **Check-in (#154). You will see:**
 
