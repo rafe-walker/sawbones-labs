@@ -288,7 +288,7 @@ pub enum Grounds {
 ///
 /// ```compile_fail
 /// use sawbones_policy::{EffectRequest, PreflightToken};
-/// use sawbones_supervisor::{BusTransport, InterlockLink, LatchPass, Supervisor};
+/// use sawbones_supervisor::{BusTransport, Grounds, InterlockLink, LatchPass, Supervisor};
 /// fn skip(
 ///     s: &mut Supervisor,
 ///     r: &EffectRequest,
@@ -296,8 +296,10 @@ pub enum Grounds {
 ///     bus: &mut impl BusTransport,
 ///     interlock: &mut impl InterlockLink,
 /// ) {
-///     // A pass cannot be written down outside this crate.
-///     let pass = LatchPass { turn: s.begin_turn(), request: Vec::new() };
+///     // A pass cannot be written down outside this crate. Every field is
+///     // named, so the only reason this fails is that the fields are private.
+///     let turn = s.begin_turn();
+///     let pass = LatchPass { turn, request: Vec::new(), grounds: Grounds::Clear };
 ///     let _ = s.invoke(r, token, pass, 0, bus, interlock);
 /// }
 /// ```
