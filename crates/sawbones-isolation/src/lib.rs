@@ -46,6 +46,12 @@
 //! ));
 //! ```
 //!
+//! [`build_plan`] builds the map of a connection plan from the owner's
+//! [`BenchConfig`] (fixed wiring, the Mac on its charger or on battery), the
+//! terminals each module declares, and the connections proposed. A module's
+//! declaration is a claim: the stricter of it and the config wins, and a
+//! missing declaration refuses the plan.
+//!
 //! What this crate does not know: anything the map does not say. It checks a
 //! description, not the bench. A connection nobody declared is invisible to
 //! it, and a rating is only the number somebody typed.
@@ -54,9 +60,15 @@
 
 mod check;
 mod map;
+mod plan;
 
 pub use check::{Finding, Path, Report, Severity, Step};
 pub use map::{
     BusMaster, Edge, EdgeId, IsolationMap, IsolationRule, Link, MapError, MapSpec, Node, NodeId,
     Role, SwitchId, MAP_SCHEMA,
+};
+pub use plan::{
+    build_plan, BenchConfig, Connection, GroundDomain, MacPower, ModuleDeclaration, ModuleWiring,
+    PlanProblem, PlanRefusal, TerminalClaim, TerminalSpec, BENCH_SCHEMA, MAC, MAC_ON_CHARGER,
+    MAINS_EARTH,
 };

@@ -1127,6 +1127,7 @@ version = "0.0.0"
 dependencies = [
  "ed25519-dalek",
  "sawbones-interlock",
+ "sawbones-isolation",
  "sawbones-module-protocol",
  "sawbones-policy",
  "sawbones-reading",

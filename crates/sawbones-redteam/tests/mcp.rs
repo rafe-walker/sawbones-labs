@@ -11,19 +11,6 @@ use sawbones_reading::{FENCE_CLOSE, FENCE_OPEN};
 use sawbones_sim_modules::ModuleKind;
 use sawbones_supervisor::{Origin, Taint, TaintSource};
 
-/// A clean connection plan: the brain, a hub, and an isolated meter.
-fn clean_plan() -> sawbones_isolation::IsolationMap {
-    use sawbones_isolation::{Edge, MapSpec, Node, Role};
-    MapSpec::new()
-        .node(Node::new("pi", Role::Brain))
-        .node(Node::new("hub", Role::Other))
-        .node(Node::new("meter", Role::MeasuringModule).must_float())
-        .edge(Edge::bonded("pi-usb", "pi", "hub"))
-        .edge(Edge::isolated("usb-isolator", "hub", "meter", 1000))
-        .build()
-        .unwrap()
-}
-
 fn bench(specs: &[ModuleSpec]) -> SimBench {
     SimBench::new(
         specs,
@@ -37,7 +24,7 @@ fn bench(specs: &[ModuleSpec]) -> SimBench {
 fn clear_server(specs: &[ModuleSpec]) -> Server {
     let mut server = Server::new(bench(specs));
     let b = server.bench_mut();
-    b.supervisor.arm(&clean_plan(), &mut b.interlock).unwrap();
+    b.supervisor.arm(&[], &mut b.interlock).unwrap();
     b.interlock.arm_switch_on = true;
     b.advance(3);
     assert!(b.interlock.outputs().rail_a, "rail A did not come up");
@@ -138,7 +125,7 @@ fn redteam_inj_031_every_tool_reports_module_content_to_the_latch_before_returni
     let b = server.bench_mut();
     b.interlock.arm_switch_on = false;
     b.advance(2);
-    b.supervisor.arm(&clean_plan(), &mut b.interlock).unwrap();
+    b.supervisor.arm(&[], &mut b.interlock).unwrap();
     b.interlock.arm_switch_on = true;
     b.advance(3);
     assert_eq!(server.bench().supervisor.tainted_by(), None, "arm cycle");

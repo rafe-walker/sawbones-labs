@@ -144,6 +144,13 @@ pub enum ConfigError {
     DuplicateHubPort(HubPort),
     /// Two modules carry one bus port.
     SharedBusPort(PortId),
+    /// The bench config lists a module that is not enrolled.
+    BenchModuleNotEnrolled(ModuleId),
+    /// An enrolled module is not in the bench config: its terminals would
+    /// be missing from every plan.
+    ModuleNotInBench(ModuleId),
+    /// A declaration for a module that is not enrolled.
+    UnknownModule(ModuleId),
 }
 
 /// Something that happened on one [`Supervisor::step`], for the log.

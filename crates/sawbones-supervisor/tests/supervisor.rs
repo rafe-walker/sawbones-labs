@@ -5,15 +5,21 @@ mod common;
 
 use common::*;
 use sawbones_interlock::{HazardClass, HEARTBEAT_PERIOD_TICKS};
-use sawbones_module_protocol::{Capabilities, Challenge, IdentityError, ImageDigest, Request};
+use sawbones_isolation::{
+    Connection, Finding, MacPower, ModuleDeclaration, PlanProblem, TerminalSpec,
+};
+use sawbones_module_protocol::{
+    Capabilities, Challenge, IdentityError, ImageDigest, ModuleId, Request,
+};
 use sawbones_module_protocol::{HostLink, MAX_FRAME_LEN};
 use sawbones_policy::{
     BusRead, BusWrite, EffectRequest, FactEvent, FactKey, FactProblem, InvalidationCause,
     PreflightRefusal, Reference, ScopeName, TokenProblem, WriteValue,
 };
 use sawbones_supervisor::{
-    ArmRefusal, BusReply, Happened, InvokeRefusal, ModuleState, Outcome, PortRefusal, PortState,
-    QuarantineReason, ToInterlock, LINK_TIMEOUT_TICKS, POLL_PERIOD_TICKS,
+    ArmRefusal, BusReply, Config, ConfigError, Happened, InvokeRefusal, ModuleState, Outcome,
+    PortRefusal, PortState, QuarantineReason, Supervisor, ToInterlock, LINK_TIMEOUT_TICKS,
+    POLL_PERIOD_TICKS,
 };
 
 fn write(value: u16) -> EffectRequest {
@@ -199,7 +205,9 @@ fn a_device_that_cannot_sign_is_refused_not_quarantined() {
 #[test]
 fn a_lost_module_invalidates_its_facts_and_blocks_a_dependent_write() {
     let mut b = Bench::new(HazardClass::Class2);
-    b.tick();
+    // Armed while the pod is up: a lost module's declaration is not vouched
+    // for, so the plan could not be armed after the loss.
+    b.arm();
     record_facts(&mut b.s, HazardClass::Class2, b.now);
     let early = b.s.preflight(&write(10), b.now).unwrap();
 
@@ -236,10 +244,15 @@ fn a_lost_module_invalidates_its_facts_and_blocks_a_dependent_write() {
         "{refusal:?}"
     );
     // A token taken before the loss is refused too, before confirm.
-    b.arm();
     let got = b.invoke(&write(10), early);
     assert_eq!(got, Err(InvokeRefusal::CarrierNotAvailable { module: POD }));
     assert!(b.bus.performed.is_empty());
+
+    // A lost module is not vouched for: arming again is refused.
+    assert!(matches!(
+        b.s.arm(&[], &mut b.interlock),
+        Err(ArmRefusal::Plan { .. })
+    ));
 
     // It comes back and is identified again, but its facts stay invalid.
     b.hub.module(POD_PORT).responsive = true;
@@ -371,20 +384,20 @@ fn a_missed_heartbeat_drops_the_rails_within_the_interlocks_budget() {
 
 // ---- Isolation ------------------------------------------------------------
 
-#[test]
-fn a_stop_isolation_finding_refuses_arming() {
+/// Brings the fake bench up until both modules are available.
+fn available_bench() -> Bench {
     let mut b = Bench::new(HazardClass::Class2);
-    b.tick();
-    let refused = b.s.arm(&clipped_plan(), &mut b.interlock).unwrap_err();
-    let ArmRefusal::Isolation { violations } = refused;
-    assert!(matches!(
-        violations[..],
-        [sawbones_isolation::Finding::ModuleNotFloating { .. }]
-    ));
+    b.run(3);
+    assert_eq!(b.s.module_state(POD), Some(ModuleState::Available));
+    assert_eq!(b.s.module_state(METER), Some(ModuleState::Available));
+    b
+}
+
+/// Arming is refused, no rail is requested, no plan is held, and a class 2
+/// write is refused even with rail A up by the switch.
+fn assert_refused_and_unarmed(b: &mut Bench) {
     assert!(b.s.armed_plan().is_none());
     assert!(!b.interlock.requests.contains(&ToInterlock::RequestArm));
-
-    // Even with rail A on by the switch, a class 2 write is refused.
     record_facts(&mut b.s, HazardClass::Class2, b.now);
     b.interlock.arm_switch_on = false;
     b.run(3);
@@ -395,6 +408,191 @@ fn a_stop_isolation_finding_refuses_arming() {
     let got = b.invoke(&write(10), token);
     assert_eq!(got, Err(InvokeRefusal::NotArmed));
     assert!(b.bus.performed.is_empty());
+}
+
+#[test]
+fn a_stop_isolation_finding_refuses_arming() {
+    // Known-bad plan 1 (#111): a grounded scope clip on a floating bus. The
+    // pod's clip is on mains earth; the pack
+    // bus floats.
+    let mut b = available_bench();
+    let plan = [Connection::new("pod/clip", "pack-bus")];
+    let ArmRefusal::Isolation { violations } = b.s.arm(&plan, &mut b.interlock).unwrap_err() else {
+        panic!("expected an isolation refusal");
+    };
+    assert!(matches!(violations[..], [Finding::IsolationBroken { .. }]));
+    assert_refused_and_unarmed(&mut b);
+}
+
+#[test]
+fn a_truck_chassis_tied_to_the_macs_charger_through_usb_is_refused() {
+    // Known-bad plan 2 (#111): the USB cable's ground joins the chassis to
+    // the Mac, and on its charger the Mac is on mains earth.
+    let mut b = available_bench();
+    b.s.set_bench(bench_config(MacPower::OnCharger)).unwrap();
+    let plan = [Connection::new("truck-chassis", "mac")];
+    let ArmRefusal::Isolation { violations } = b.s.arm(&plan, &mut b.interlock).unwrap_err() else {
+        panic!("expected an isolation refusal");
+    };
+    assert!(matches!(violations[..], [Finding::IsolationBroken { .. }]));
+    assert_refused_and_unarmed(&mut b);
+}
+
+#[test]
+fn the_same_usb_cable_is_allowed_while_the_mac_is_on_battery() {
+    let mut b = available_bench();
+    let plan = [Connection::new("truck-chassis", "mac")];
+    b.s.arm(&plan, &mut b.interlock).unwrap();
+    assert!(b.s.armed_plan().is_some());
+    // Plugging the charger in is a bench change: set_bench drops the plan,
+    // and arming again refuses.
+    b.s.set_bench(bench_config(MacPower::OnCharger)).unwrap();
+    assert!(b.s.armed_plan().is_none());
+    assert!(matches!(
+        b.s.arm(&plan, &mut b.interlock),
+        Err(ArmRefusal::Isolation { .. })
+    ));
+}
+
+#[test]
+fn a_module_that_lies_isolated_is_overridden_by_the_config() {
+    // The config says the pod's clip is on mains earth. The pod says it is
+    // isolated. The stricter wins, so the clip plan is still refused.
+    let mut b = available_bench();
+    let lie = ModuleDeclaration::new(vec![
+        TerminalSpec::isolated("rs232", 1000),
+        TerminalSpec::isolated("clip", 5000),
+    ]);
+    b.s.declare_terminals(POD, lie).unwrap();
+    let plan = [Connection::new("pod/clip", "pack-bus")];
+    assert!(matches!(
+        b.s.arm(&plan, &mut b.interlock),
+        Err(ArmRefusal::Isolation { .. })
+    ));
+    assert!(b.s.armed_plan().is_none());
+}
+
+#[test]
+fn a_missing_declaration_is_unknown_and_refused() {
+    let mut b = Bench::new(HazardClass::Class2);
+    b.s.declare_terminals(METER, ModuleDeclaration::default())
+        .unwrap();
+    b.run(3);
+    let ArmRefusal::Plan { problems } = b.s.arm(&[], &mut b.interlock).unwrap_err() else {
+        panic!("expected a plan refusal");
+    };
+    assert_eq!(
+        problems,
+        vec![PlanProblem::UndeclaredTerminal {
+            module: "meter".into(),
+            terminal: "probe".into()
+        }]
+    );
+    assert_refused_and_unarmed(&mut b);
+
+    // No declaration at all.
+    let mut s2 = available_bench();
+    let mut bare = Supervisor::new(
+        Config {
+            ledger: sawbones_policy::LedgerId(1),
+            enrollments: vec![pod_enrollment(), meter_enrollment()],
+            writes: sawbones_policy::WriteMap::default(),
+            buses: sawbones_policy::BusFacts::default(),
+            bench: bench_config(MacPower::OnBattery),
+        },
+        Box::new(Counter(0)),
+    )
+    .unwrap();
+    let ArmRefusal::Plan { problems } = bare.arm(&[], &mut s2.interlock).unwrap_err() else {
+        panic!("expected a plan refusal");
+    };
+    assert!(problems.contains(&PlanProblem::NoDeclaration {
+        module: "meter".into()
+    }));
+    assert!(problems.contains(&PlanProblem::NoDeclaration {
+        module: "pod".into()
+    }));
+}
+
+#[test]
+fn a_declaration_counts_only_while_the_module_is_available() {
+    // Before the modules have proved their identities, their declarations
+    // are not vouched for.
+    let mut b = Bench::new(HazardClass::Class2);
+    let ArmRefusal::Plan { problems } = b.s.arm(&[], &mut b.interlock).unwrap_err() else {
+        panic!("expected a plan refusal");
+    };
+    assert_eq!(problems.len(), 2);
+    assert!(problems
+        .iter()
+        .all(|p| matches!(p, PlanProblem::NoDeclaration { .. })));
+}
+
+#[test]
+fn a_terminal_the_config_does_not_list_is_not_believed() {
+    let mut b = available_bench();
+    let mut claim = declaration(METER);
+    claim.terminals.push(TerminalSpec::isolated("aux", 4000));
+    b.s.declare_terminals(METER, claim).unwrap();
+    let ArmRefusal::Plan { problems } = b.s.arm(&[], &mut b.interlock).unwrap_err() else {
+        panic!("expected a plan refusal");
+    };
+    assert_eq!(
+        problems,
+        vec![PlanProblem::UnconfirmedTerminal {
+            module: "meter".into(),
+            terminal: "aux".into()
+        }]
+    );
+}
+
+#[test]
+fn a_connection_to_something_not_on_the_bench_is_refused() {
+    let mut b = available_bench();
+    let plan = [Connection::new("pod/clip", "nowhere")];
+    let ArmRefusal::Plan { problems } = b.s.arm(&plan, &mut b.interlock).unwrap_err() else {
+        panic!("expected a plan refusal");
+    };
+    assert_eq!(
+        problems,
+        vec![PlanProblem::UnknownEndpoint {
+            endpoint: "nowhere".into()
+        }]
+    );
+}
+
+#[test]
+fn a_clean_built_plan_arms_and_a_changed_declaration_drops_it() {
+    let mut b = available_bench();
+    b.s.arm(&[], &mut b.interlock).unwrap();
+    assert!(b.s.armed_plan().is_some());
+    assert!(b.interlock.requests.contains(&ToInterlock::RequestArm));
+    // The same declaration again changes nothing.
+    b.s.declare_terminals(METER, declaration(METER)).unwrap();
+    assert!(b.s.armed_plan().is_some());
+    b.s.declare_terminals(METER, ModuleDeclaration::default())
+        .unwrap();
+    assert!(b.s.armed_plan().is_none());
+    assert_eq!(
+        b.s.declare_terminals(ModuleId(99), ModuleDeclaration::default()),
+        Err(ConfigError::UnknownModule(ModuleId(99)))
+    );
+}
+
+#[test]
+fn the_config_must_name_exactly_the_enrolled_modules() {
+    let mut s = supervisor(HazardClass::Class2);
+    let mut missing = bench_config(MacPower::OnBattery);
+    missing.modules.retain(|m| m.id != POD.0);
+    assert_eq!(
+        s.set_bench(missing),
+        Err(ConfigError::ModuleNotInBench(POD))
+    );
+    let extra = bench_config(MacPower::OnBattery).module(77, "ghost", Vec::new());
+    assert_eq!(
+        s.set_bench(extra),
+        Err(ConfigError::BenchModuleNotEnrolled(ModuleId(77)))
+    );
 }
 
 // ---- The write path -------------------------------------------------------
@@ -538,6 +736,7 @@ fn the_config_refuses_ambiguous_enrollments() {
             enrollments: vec![pod_enrollment(), second],
             writes: WriteMap::default(),
             buses: BusFacts::default(),
+            bench: bench_config(sawbones_isolation::MacPower::OnBattery),
         },
         Box::new(Counter(0)),
     );

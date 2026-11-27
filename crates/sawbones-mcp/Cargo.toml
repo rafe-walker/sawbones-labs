@@ -20,6 +20,8 @@ path = "src/bin/sawbones-mcp.rs"
 serde.workspace = true
 serde_json.workspace = true
 sawbones-interlock = { path = "../sawbones-interlock" }
+# The bench config the supervisor builds its connection plans from (#111).
+sawbones-isolation = { path = "../sawbones-isolation" }
 sawbones-module-protocol = { path = "../sawbones-module-protocol", features = ["verify"] }
 sawbones-policy = { path = "../sawbones-policy" }
 sawbones-reading = { path = "../sawbones-reading" }

@@ -14,6 +14,7 @@ use ed25519_dalek::SigningKey;
 use sawbones_interlock::{
     step, Event, FaultRecord, HeartbeatChallenge, HeartbeatReply, Inputs, Outputs, State,
 };
+use sawbones_isolation::{BenchConfig, Edge, MacPower, ModuleDeclaration, Node, Role};
 use sawbones_module_protocol::{Challenge, ModuleId, ModuleKey};
 use sawbones_policy::{BusFacts, LedgerId, ScopeName, WriteMap};
 use sawbones_sim_modules::{ModuleKind, SimLink, SimModule};
@@ -282,6 +283,13 @@ impl SimBench {
         let mut hub = SimHub::default();
         let mut enrollments = Vec::new();
         let mut labels = BTreeMap::new();
+        // The owner's bench config: the brain, a hub, and each module behind
+        // its own USB isolator, with no terminals wired. The Mac is on its
+        // battery.
+        let mut bench_config = BenchConfig::new(MacPower::OnBattery)
+            .node(Node::new("pi", Role::Brain))
+            .node(Node::new("hub", Role::Other))
+            .edge(Edge::bonded("pi-usb", "pi", "hub"));
         for (index, spec) in specs.iter().enumerate() {
             let n = u8::try_from(index).unwrap_or_else(|_| panic!("too many modules"));
             let id = ModuleId(u32::from(n) + 1);
@@ -300,6 +308,15 @@ impl SimBench {
                 instrument: (spec.kind == ModuleKind::DcMeter).then(|| spec.label.clone()),
                 carries: Vec::new(),
             });
+            let node = format!("module-{}", id.0);
+            bench_config = bench_config
+                .edge(Edge::isolated(
+                    &format!("usb-isolator-{}", id.0),
+                    "hub",
+                    &node,
+                    1000,
+                ))
+                .module(id.0, &node, Vec::new());
             labels.insert(id, spec.label.clone());
             hub.links.insert(port, SimLink::new(module, None));
         }
@@ -310,9 +327,11 @@ impl SimBench {
                 break n;
             }
         };
-        let supervisor = Supervisor::new(
+        let modules: Vec<ModuleId> = labels.keys().copied().collect();
+        let mut supervisor = Supervisor::new(
             Config {
                 ledger: LedgerId(1),
+                bench: bench_config,
                 enrollments,
                 writes: WriteMap::new([]).unwrap_or_else(|_| unreachable!("empty map")),
                 buses: BusFacts::new([]).unwrap_or_else(|_| unreachable!("no facts")),
@@ -320,6 +339,13 @@ impl SimBench {
             challenges,
         )
         .unwrap_or_else(|e| panic!("bench config refused: {e:?}"));
+        // What each simulated module says about its terminals: none, as the
+        // config says. Real modules will carry this in their manifests.
+        for module in modules {
+            supervisor
+                .declare_terminals(module, ModuleDeclaration::new(Vec::new()))
+                .unwrap_or_else(|e| panic!("declaration refused: {e:?}"));
+        }
         let mut bench = SimBench {
             supervisor,
             hub,
