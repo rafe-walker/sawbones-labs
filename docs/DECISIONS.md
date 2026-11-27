@@ -83,6 +83,14 @@ Tracked in #166. The plugin and store index design itself is written up after th
 | Battery protection limits | Class 3, not class 4: the agent may propose a change, and it happens only after the owner confirms it with a physical panel press for that one action. Charge voltages are also class 3. The review document said class 4; the repo's design document (class 3) was right. Class 4 stays: mains work and string switching. |
 | Round 2 capture | No separate response document. Review round 2 changes are work items #167 to #180 in their roadmap stages, plus comments on the affected items; summary in #166. |
 
+## 26 November 2026, the trust-root chip
+
+| Topic | Decision |
+| --- | --- |
+| Trust-root microcontroller | Keep the RP2350. It costs about a dollar, the firmware already builds for it in CI with Rust, it has signed boot, OTP, TrustZone and glitch detectors, and it shares a toolchain with the RP2040 pods. The published breaks ([THREAT-MODEL.md](THREAT-MODEL.md) section 4a) all needed the board on the attacker's bench. A different general-purpose part (STM32, NXP LPC55, Nordic nRF) has the same class of published glitch attacks; a lockstep safety part (TI Hercules, Infineon AURIX) costs several times more and has weak Rust support. Neither is worth it now. |
+| The external cut | Required before any real power switching. A separate watchdog part, about a dollar, with its own supply monitor, asks the RP2350 questions; the relay stays on only while the answers come back right and on time. A frozen, glitched or misbehaving RP2350 drops the rail by itself. It must work with any controller chosen later. Tracked in [#144](https://github.com/rafe-walker/sawbones-labs/issues/144). |
+| Later add-ons | Not now. A secure element for module keys, if key secrecy is ever needed. A second controller from a different maker that must agree before an output turns on, decided in P1. |
+
 ## Reversals and corrections
 
 | Was | Now | Why |
