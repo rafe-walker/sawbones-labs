@@ -1655,4 +1655,160 @@ mod tests {
             FactProblem::MastershipNeedsExpiry
         );
     }
+
+    // --- #231: second-line checks, tested by changing the ledger directly. ---
+
+    fn write_key(request: &EffectRequest) -> FactKey {
+        relied_facts(request).remove(0)
+    }
+
+    fn mastership_key(request: &EffectRequest) -> FactKey {
+        FactKey::Mastership {
+            port: request.port().clone(),
+        }
+    }
+
+    /// `invalidate_place` takes a fact down if its key is at the place or its
+    /// scope is, so a record whose scope drifted from its key still falls.
+    #[test]
+    fn regression_231_policy_invalidate_place_matches_by_key_or_by_scope() {
+        let cause = |request: &EffectRequest| InvalidationCause::DeviceLost {
+            port: request.port().clone(),
+            unit: 1,
+        };
+        // Keyed at the place, scoped elsewhere.
+        let (_, _, mut ledger, request) = world();
+        let key = write_key(&request);
+        ledger
+            .facts
+            .get_mut(&key)
+            .unwrap()
+            .record
+            .scope
+            .interface
+            .unit = Some(9);
+        let mut out = Vec::new();
+        ledger.invalidate_place(request.port(), 1, &cause(&request), &mut out);
+        assert!(out.contains(&key), "keyed fact kept: {out:?}");
+
+        // Scoped at the place, keyed elsewhere.
+        let (_, _, mut ledger, request) = world();
+        let key = mastership_key(&request);
+        ledger
+            .facts
+            .get_mut(&key)
+            .unwrap()
+            .record
+            .scope
+            .interface
+            .unit = Some(1);
+        let mut out = Vec::new();
+        ledger.invalidate_place(request.port(), 1, &cause(&request), &mut out);
+        assert!(out.contains(&key), "scoped fact kept: {out:?}");
+    }
+
+    /// A rewired port takes down a fact if its key's port or its scope's port
+    /// is that port.
+    #[test]
+    fn regression_231_policy_port_rewired_matches_by_key_or_by_scope() {
+        // Keyed on the port, scoped on another.
+        let (_, _, mut ledger, request) = world();
+        let key = write_key(&request);
+        ledger
+            .facts
+            .get_mut(&key)
+            .unwrap()
+            .record
+            .scope
+            .interface
+            .port = PortId::parse("q").unwrap();
+        let applied = ledger
+            .apply(
+                FactEvent::PortRewired {
+                    port: request.port().clone(),
+                },
+                2,
+            )
+            .unwrap();
+        assert!(applied.invalidated.contains(&key), "{applied:?}");
+
+        // Scoped on the port, keyed on another.
+        let (_, _, mut ledger, request) = world();
+        let key = mastership_key(&request);
+        let other = PortId::parse("q").unwrap();
+        ledger
+            .facts
+            .get_mut(&key)
+            .unwrap()
+            .record
+            .scope
+            .interface
+            .port = other.clone();
+        let applied = ledger
+            .apply(FactEvent::PortRewired { port: other }, 2)
+            .unwrap();
+        assert!(applied.invalidated.contains(&key), "{applied:?}");
+    }
+
+    /// A stored record whose scope names another unit than the request's is
+    /// out of scope: a write entry's, and a mastership's (which has none).
+    #[test]
+    fn regression_231_policy_a_record_scoped_to_another_unit_is_refused() {
+        let head = ChainHead([0; 32]);
+        let (writes, buses, mut ledger, request) = world();
+        let key = write_key(&request);
+        ledger
+            .facts
+            .get_mut(&key)
+            .unwrap()
+            .record
+            .scope
+            .interface
+            .unit = Some(2);
+        assert_eq!(
+            problem(preflight(&request, &writes, &buses, &ledger, head, 2)),
+            FactProblem::OutOfScope {
+                field: ScopeField::Unit
+            }
+        );
+        let (writes, buses, mut ledger, request) = world();
+        let key = mastership_key(&request);
+        ledger
+            .facts
+            .get_mut(&key)
+            .unwrap()
+            .record
+            .scope
+            .interface
+            .unit = Some(1);
+        let read = EffectRequest::BusRead(crate::BusRead {
+            port: request.port().clone(),
+            unit: 7,
+            signal: SignalId::parse("s").unwrap(),
+        });
+        assert_eq!(
+            problem(preflight(&read, &writes, &buses, &ledger, head, 2)),
+            FactProblem::OutOfScope {
+                field: ScopeField::Unit
+            }
+        );
+    }
+
+    /// `confirm` refuses when the fact versions differ on a rerun even though
+    /// the decision is the same and the generation did not move.
+    #[test]
+    fn regression_231_policy_confirm_refuses_changed_fact_versions() {
+        let head = ChainHead([0; 32]);
+        let (writes, buses, mut ledger, request) = world();
+        let token = preflight(&request, &writes, &buses, &ledger, head, 2).unwrap();
+        let key = write_key(&request);
+        ledger.facts.get_mut(&key).unwrap().version = FactVersion(9_999);
+        let refused = confirm(token, &request, &writes, &buses, &ledger, head, 2).unwrap_err();
+        assert_eq!(
+            refused,
+            PreflightRefusal::Token {
+                problem: TokenProblem::DecisionChanged
+            }
+        );
+    }
 }
