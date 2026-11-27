@@ -3,6 +3,19 @@
 //! module, a manifest or the session appears in a name, description or
 //! schema (#204, cards inj-014 and inj-016), and no input field can carry a
 //! class, a tier, an approval or a lease (card inj-018).
+//!
+//! The tool list is stable: it does not change per connection, per module
+//! or as a side effect of a call, because clients cache it and may miss a
+//! list-changed notification. Hot-plugged modules appear as data, through
+//! `inventory` and `describe`, and `read` takes a module id that must name
+//! a module that is available now; anything else gets an error that tells
+//! the agent to call `inventory`.
+//!
+//! The list is still built through a registry ([`registry`]): the core
+//! tools, then what each [`ToolSource`] contributes. v0 has no sources
+//! ([`SOURCES`] is empty). The seam is for coarse events only, such as a
+//! plugin installed under a signed approval, never for a module coming or
+//! going, and a source must contribute constants, as the core tools are.
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -132,17 +145,44 @@ const _: () = {
     }
 };
 
-/// The tool named `name`, if v0 has one.
-#[must_use]
-pub fn find(name: &str) -> Option<&'static ToolDef> {
-    TOOLS.iter().find(|t| t.name == name)
+/// Something that contributes tools on a coarse event (a plugin
+/// installed, later). Its tools must be constants, read class in v0, with
+/// no text from a module or the session in them. The registry keeps only
+/// read-class tools from it, and never one whose name is already taken.
+pub trait ToolSource: Sync {
+    /// Its tools, for the bench as it is now.
+    fn tools(&self, bench: &SimBench) -> Vec<&'static ToolDef>;
 }
 
-/// The `tools/list` result: constants only.
+/// The sources v0 builds its registry from, after the core tools: none.
+pub static SOURCES: [&dyn ToolSource; 0] = [];
+
+/// The registry: the core tools, then each source's, read class only, the
+/// first of a name kept. In v0 it is exactly [`TOOLS`].
 #[must_use]
-pub fn list() -> Value {
-    let tools: Vec<Value> = TOOLS
-        .iter()
+pub fn registry(bench: &SimBench) -> Vec<&'static ToolDef> {
+    let mut out: Vec<&'static ToolDef> = TOOLS.iter().collect();
+    for source in &SOURCES {
+        for tool in source.tools(bench) {
+            if tool.class == ToolClass::Read && !out.iter().any(|t| t.name == tool.name) {
+                out.push(tool);
+            }
+        }
+    }
+    out
+}
+
+/// The tool named `name`, if the registry has one.
+#[must_use]
+pub fn find(bench: &SimBench, name: &str) -> Option<&'static ToolDef> {
+    registry(bench).into_iter().find(|t| t.name == name)
+}
+
+/// The `tools/list` result.
+#[must_use]
+pub fn list(bench: &SimBench) -> Value {
+    let tools: Vec<Value> = registry(bench)
+        .into_iter()
         .map(|t| {
             json!({
                 "name": t.name,
@@ -286,7 +326,7 @@ fn yes_no(b: bool) -> &'static str {
 /// quarantine names its kind, not what the device claimed.
 fn state_name(state: ModuleState) -> &'static str {
     match state {
-        ModuleState::Absent => "absent",
+        ModuleState::Absent => "absent, nothing on its hub port",
         ModuleState::Discovered => "discovered, identity not proved yet",
         ModuleState::Available => "available",
         ModuleState::Lost => "lost",
@@ -412,15 +452,19 @@ fn ask(
 
 fn refusal_text(module: ModuleId, refusal: QueryRefusal) -> String {
     match refusal {
-        QueryRefusal::NotEnrolled => format!("module {} is not enrolled", module.0),
-        QueryRefusal::Unavailable(state) => {
-            format!(
-                "module {} is not available: {}",
-                module.0,
-                state_name(state)
-            )
-        }
-        QueryRefusal::Busy => format!("module {} has too many questions waiting", module.0),
+        QueryRefusal::NotEnrolled => format!(
+            "module {} is not enrolled; call inventory for the modules on the bench now",
+            module.0
+        ),
+        QueryRefusal::Unavailable(state) => format!(
+            "module {} is not available: {}; call inventory for the modules present now",
+            module.0,
+            state_name(state)
+        ),
+        QueryRefusal::Busy => format!(
+            "module {} has too many questions waiting; try again",
+            module.0
+        ),
     }
 }
 
@@ -476,14 +520,17 @@ fn describe(bench: &mut SimBench, store: &mut Store, arguments: Value) -> Envelo
             },
             Ok(QueryOutcome::TimedOut) => {
                 env.host(format!(
-                    "module {} did not answer for page {page}",
+                    "module {} did not answer for page {page}; call inventory for its state",
                     module.0
                 ));
                 env.set_error();
                 return env;
             }
             Ok(QueryOutcome::Dropped) => {
-                env.host(format!("module {} went away before answering", module.0));
+                env.host(format!(
+                    "module {} went away before answering; call inventory for the modules present now",
+                    module.0
+                ));
                 env.set_error();
                 return env;
             }
@@ -632,6 +679,17 @@ fn read(bench: &mut SimBench, store: &mut Store, arguments: Value) -> Envelope {
     }
     if values == 0 {
         env.set_error();
+        if timed_out + dropped > 0 {
+            env.host(format!(
+                "module {} stopped answering; call inventory for the modules present now",
+                module.0
+            ));
+        } else {
+            env.host(format!(
+                "module {} gave no value for key 0x{:04x}; its manifest (describe) lists its readings and settings",
+                module.0, a.key
+            ));
+        }
     }
     env
 }

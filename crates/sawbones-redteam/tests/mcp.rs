@@ -175,7 +175,7 @@ fn redteam_inj_031_hostile_manifest_text_is_fenced_and_trips_the_latch() {
     assert!(!list.contains("SYSTEM"));
     assert_eq!(
         serde_json::from_str::<Value>(&list).unwrap()["result"],
-        sawbones_mcp::list()
+        sawbones_mcp::list(server.bench())
     );
 }
 
@@ -253,7 +253,10 @@ fn redteam_inj_018_tool_input_cannot_carry_a_class_or_an_approval() {
         );
     }
     assert_eq!(server.bench().supervisor.tainted_by(), None);
-    for tool in sawbones_mcp::list()["tools"].as_array().unwrap() {
+    for tool in sawbones_mcp::list(server.bench())["tools"]
+        .as_array()
+        .unwrap()
+    {
         assert_eq!(tool["inputSchema"]["additionalProperties"], false);
     }
 }
@@ -308,7 +311,10 @@ fn redteam_inj_029_the_server_offers_no_sampling_or_other_server_requests() {
 fn redteam_103_no_tool_outside_the_read_class_is_listed_or_callable() {
     assert!(TOOLS.iter().all(|t| t.class == ToolClass::Read));
     let mut server = clear_server(&standard());
-    let list = sawbones_mcp::list();
+    assert!(sawbones_mcp::registry(server.bench())
+        .iter()
+        .all(|t| t.class == ToolClass::Read));
+    let list = sawbones_mcp::list(server.bench());
     let names: Vec<&str> = list["tools"]
         .as_array()
         .unwrap()
@@ -317,7 +323,7 @@ fn redteam_103_no_tool_outside_the_read_class_is_listed_or_callable() {
         .collect();
     for reserved in RESERVED_INVOKE_NAMES {
         assert!(!names.contains(&reserved));
-        assert!(sawbones_mcp::find(reserved).is_none());
+        assert!(sawbones_mcp::find(server.bench(), reserved).is_none());
         let request = json!({
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",
             "params": { "name": reserved, "arguments": { "module": 1 } },
@@ -328,4 +334,54 @@ fn redteam_103_no_tool_outside_the_read_class_is_listed_or_callable() {
     }
     assert_eq!(server.bench().supervisor.tainted_by(), None);
     assert_eq!(server.bench().supervisor.open_turn(), None);
+}
+
+/// Hot plug (#103): modules come and go as data, never as tools. The tool
+/// list stays byte-identical when a module is unplugged and plugged back,
+/// `inventory` shows the change on the next call, and a read of an absent
+/// module is an error that tells the agent to call inventory. Nothing is
+/// sent unasked.
+#[test]
+fn redteam_103_hot_plug_changes_data_not_the_tool_list() {
+    let mut server = clear_server(&standard());
+    let before = sawbones_mcp::list(server.bench());
+    let port = sawbones_supervisor::HubPort(0);
+    let link = server.bench_mut().hub.links.remove(&port).unwrap();
+
+    let (inventory, _) = call(&mut server, 1, "inventory", json!({}));
+    assert!(
+        inventory.contains("module 1 'dc-meter' on hub port 0: absent"),
+        "{inventory}"
+    );
+    assert_eq!(sawbones_mcp::list(server.bench()), before);
+    let (text, err) = call(&mut server, 2, "read", json!({ "module": 1, "key": 256 }));
+    assert!(err);
+    assert!(
+        text.starts_with(
+            "module 1 is not available: absent, nothing on its hub port; call inventory"
+        ),
+        "{text}"
+    );
+    let (text, err) = call(&mut server, 3, "describe", json!({ "module": 1 }));
+    assert!(err);
+    assert!(text.contains("call inventory"), "{text}");
+    let (text, err) = call(&mut server, 4, "read", json!({ "module": 7, "key": 256 }));
+    assert!(err);
+    assert!(
+        text.starts_with("module 7 is not enrolled; call inventory"),
+        "{text}"
+    );
+
+    server.bench_mut().hub.links.insert(port, link);
+    server
+        .bench_mut()
+        .advance(sawbones_supervisor::POLL_PERIOD_TICKS + 5);
+    let (inventory, _) = call(&mut server, 5, "inventory", json!({}));
+    assert!(
+        inventory.contains("module 1 'dc-meter' on hub port 0: available"),
+        "{inventory}"
+    );
+    let (text, err) = call(&mut server, 6, "read", json!({ "module": 1, "key": 256 }));
+    assert!(!err, "{text}");
+    assert_eq!(sawbones_mcp::list(server.bench()), before);
 }

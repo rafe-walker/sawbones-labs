@@ -1,7 +1,8 @@
 //! The simulated bench v0 serves: three simulated modules on a hub, the real
 //! interlock state machine behind a link, and the supervisor on top.
 //!
-//! Simulated time advances only while a call is being served, one tick per
+//! Simulated time advances only while a call is being served (one pass
+//! before every tool runs, and as many as a tool waits for), one tick per
 //! main-loop pass, so a run is repeatable. Module keys and identify
 //! challenges come from [`OsRandom`]; nothing else is random.
 

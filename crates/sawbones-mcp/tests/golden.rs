@@ -1,5 +1,6 @@
-//! The tool definitions and the capabilities are pinned (#103, #204; cards
-//! inj-014, inj-016, inj-018, inj-029). Any change is a visible diff in
+//! The tool definitions (for the standard simulated bench) and the
+//! capabilities are pinned (#103, #204; cards inj-014, inj-016, inj-018,
+//! inj-029). Any change is a visible diff in
 //! `tests/golden/`. Rewrite the files with `SAWBONES_BLESS=1 cargo test -p
 //! sawbones-mcp --test golden` and review the diff.
 
@@ -24,7 +25,8 @@ fn check(file: &str, got: &Value) {
 
 #[test]
 fn the_tool_list_is_pinned() {
-    let list = sawbones_mcp::list();
+    // The standard simulated bench, all three modules available.
+    let list = sawbones_mcp::list(&SimBench::standard().unwrap());
     check("tools_list.json", &list);
     let mut names: Vec<&str> = list["tools"]
         .as_array()
@@ -81,7 +83,7 @@ fn no_input_field_can_carry_authority() {
         "permission",
         "grant",
     ];
-    for (tool, field) in properties(&sawbones_mcp::list()) {
+    for (tool, field) in properties(&sawbones_mcp::list(&SimBench::standard().unwrap())) {
         let lower = field.to_ascii_lowercase();
         for word in FORBIDDEN {
             assert!(!lower.contains(word), "{tool}.{field} looks like authority");
@@ -107,12 +109,15 @@ fn a_hostile_manifest_does_not_change_the_tool_list() {
         ]),
         ..ModuleSpec::of(ModuleKind::DcMeter)
     };
-    let mut plain = Server::new(SimBench::standard().unwrap());
-    let mut bad = Server::new(SimBench::new(
-        &[hostile],
-        Box::new(OsRandom::open().unwrap()),
-        OsRandom::open().unwrap(),
-    ));
+    let one = |spec: ModuleSpec| {
+        Server::new(SimBench::new(
+            &[spec],
+            Box::new(OsRandom::open().unwrap()),
+            OsRandom::open().unwrap(),
+        ))
+    };
+    let mut plain = one(ModuleSpec::of(ModuleKind::DcMeter));
+    let mut bad = one(hostile);
     // Read the hostile manifest first, so it is in the session.
     bad.handle(br#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{}}"#);
     let described = bad

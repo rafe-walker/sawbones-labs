@@ -20,6 +20,14 @@
 //! description or a schema, and no input field carries a class, a tier, an
 //! approval or a lease.
 //!
+//! The list is stable: not per connection, not per module, not changed by a
+//! call, so `listChanged` is not advertised. Hot-plugged modules appear as
+//! data in `inventory` and `describe`, and `read` takes a module id that
+//! must name a module available now. Every call first runs one pass of the
+//! main loop, so availability is current. The list goes through a registry
+//! ([`registry`]) with a [`ToolSource`] seam for coarse events (a plugin
+//! installed, later); v0 has no sources.
+//!
 //! ## Results
 //!
 //! Every result is a host-written summary, a handle to stored data
@@ -75,4 +83,7 @@ pub use server::{
     initialize_result, serve, Server, INSTRUCTIONS, MAX_MESSAGE_BYTES, PROTOCOL_VERSIONS,
     SERVER_NAME,
 };
-pub use tools::{find, list, ToolClass, ToolDef, MAX_SAMPLES, RESERVED_INVOKE_NAMES, TOOLS};
+pub use tools::{
+    find, list, registry, ToolClass, ToolDef, ToolSource, MAX_SAMPLES, RESERVED_INVOKE_NAMES,
+    SOURCES, TOOLS,
+};

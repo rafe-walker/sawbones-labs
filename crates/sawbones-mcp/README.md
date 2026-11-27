@@ -16,6 +16,8 @@ The MCP surface v0 for the Sawbones bench ([#103](https://github.com/rafe-walker
 
 Every result is a host-written summary, a host line on the latch, then any outside text: one fence per item, escaped onto one line, within a 4096-byte budget, with anything left out counted by the host. The tool list and the `initialize` result are pinned in `tests/golden/`. Bless changes with `SAWBONES_BLESS=1 cargo test -p sawbones-mcp --test golden` and review the diff.
 
+**The tool list is stable.** It does not change per connection, per module or as a side effect of a call, because clients cache tool lists and can miss a list-changed notification, so `listChanged` is not advertised. Hot-plugged modules show up as data: `inventory` and `describe` show what is present now, and `read` takes a module id that must name a module available now. An absent, lost or unenrolled module gets an error that tells the agent to call `inventory`. Every call first runs one pass of the supervisor's main loop, so availability is current. The list is built through a registry with a `ToolSource` seam fed from the bench, kept for coarse events such as a plugin installed later. v0 has no sources.
+
 Each `tools/call` is one turn of the latch (`begin_turn` before the tool runs, `end_turn` once the result is made). The latch starts tripped and only an arm cycle or a fresh lease clears it, so in v0 it stays tripped on the simulated bench unless a test turns the switch.
 
 Simulated time moves only while a call is served. Module keys and identify challenges come from `/dev/urandom` when the server starts. No key lives in the source.

@@ -201,7 +201,10 @@ fn only_read_class_tools_exist_and_the_invoke_names_are_not_callable() {
     let list = c.request("tools/list", json!({}));
     for tool in list["result"]["tools"].as_array().unwrap() {
         let name = tool["name"].as_str().unwrap();
-        let def = sawbones_mcp::find(name).expect("listed tool is registered");
+        let def = sawbones_mcp::TOOLS
+            .iter()
+            .find(|t| t.name == name)
+            .expect("listed tool is registered");
         assert_eq!(def.class, sawbones_mcp::ToolClass::Read, "{name}");
         assert_eq!(tool["annotations"]["readOnlyHint"], true, "{name}");
         assert_eq!(tool["annotations"]["destructiveHint"], false, "{name}");
