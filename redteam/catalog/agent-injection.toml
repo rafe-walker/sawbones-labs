@@ -23,8 +23,8 @@ severity = "high"
 sources = ["https://arxiv.org/abs/2503.18813", "https://arxiv.org/html/2506.08837v3"]
 status = "partial"
 test = "CI test that greps the workspace for as_untrusted_str and compares call sites to a checked-in allow-list (file, function), failing on any new site without a reviewer comment. Add a unit test that an Ident derived from a hostile topic is only ever used as an exact lookup key and is rendered to the agent inside fenced WorldText or as a store-assigned numeric id, never as a free label."
-issue = 103
-note = "Re-checked: redteam_inj_002_as_untrusted_str_call_sites_are_allow_listed now pins every call site (redteam/as_untrusted_str.allow). Still open: an Ident derived from a topic reaches the agent as a label once the tool layer exists."
+issue = 204
+note = "Re-checked: redteam_inj_002_as_untrusted_str_call_sites_are_allow_listed now pins every call site (redteam/as_untrusted_str.allow). The MCP surface v0 (#103) renders no identifier derived from outside text: module labels come from the owner's enrollment, ids and handles are host-made, and module text is fenced. Still open: when readings with topic-derived Idents reach a tool, they must appear fenced or as store ids, never as free labels."
 
 [[attack]]
 id = "inj-003"
@@ -72,9 +72,9 @@ how = "Each WorldText is capped at 4096 bytes, but a response can hold hundreds 
 expected = "Untrusted text has a global budget per response; host-generated safety fields always survive and come first."
 severity = "medium"
 sources = ["https://www.cyberark.com/resources/threat-research/poison-everywhere-no-output-from-your-mcp-server-is-safe", "https://unit42.paloaltonetworks.com/model-context-protocol-attack-vectors/"]
-status = "gap"
-test = "Build a response from 10,000 hostile WorldText items. Assert the builder enforces a total byte budget per response, truncates with an explicit 'N items omitted' marker computed by the host, and never drops safety fields (hazard class, trust tier, approval state) to make room."
-issue = 103
+status = "blocked"
+test = "sawbones-redteam::redteam_inj_006_a_flood_of_module_text_is_cut_to_the_budget_and_host_fields_come_first + sawbones-mcp::ten_thousand_hostile_items_stay_within_the_budget"
+note = "Was gap. The MCP surface v0 (#103) builds every result through one envelope: host lines first, then a host line on the latch, then fenced outside text within a 4096-byte budget per result; what does not fit is left out and counted by the host. Host text has its own budget. Proven with the largest manifest a module may serve and with 10,000 hostile items."
 
 [[attack]]
 id = "inj-007"
@@ -178,9 +178,9 @@ how = "Tool descriptions are put into the model's context when the client lists 
 expected = "The tool list is a compile-time constant, small and reviewed; any change is a visible diff."
 severity = "high"
 sources = ["https://invariantlabs.ai/blog/mcp-security-notification", "https://blog.trailofbits.com/2025/04/21/jumping-the-line-how-mcp-servers-can-attack-you-before-you-ever-use-them/", "https://community.owasp.org/attacks/MCP_Tool_Poisoning"]
-status = "gap"
-test = "Snapshot test: serialise the full tools/list result (names, descriptions, schemas, annotations) and compare to a checked-in golden file; CI fails on any diff. Assert no description or schema string is derived from runtime data and none names another server's tool or contains imperative text addressed to the model beyond usage. Add a lint: tool names are unique and namespaced."
-issue = 204
+status = "blocked"
+test = "sawbones-mcp::the_tool_list_is_pinned + sawbones-mcp::a_hostile_manifest_does_not_change_the_tool_list"
+note = "Was gap. The v0 tool list (#103) is constants in crates/sawbones-mcp/src/tools.rs, pinned with the initialize result in crates/sawbones-mcp/tests/golden/ (any change is a diff to bless), with unique names; a session that has read a hostile manifest lists byte-identical tools. Clients namespace the names per server (mcp__sawbones__read)."
 
 [[attack]]
 id = "inj-015"
@@ -194,7 +194,7 @@ sources = ["https://arxiv.org/html/2601.07395v1", "https://arxiv.org/abs/2510.09
 status = "partial"
 test = "Property test on the invoke path: for any sequence of tool calls (random, including ones made 'because a description said so'), an EffectRequest of class 2 or above is classified with the same Requirement regardless of which tool calls preceded it or what text is in the session. Deterministic, no model needed."
 issue = 204
-note = "The taint latch (#210) makes session text matter only one way: sawbones-redteam::redteam_inj_015_session_inputs_only_ever_tighten_the_invoke_path drives random sequences of turns, outside inputs, measured numbers and ticks through the supervisor; the class and requirement of a write never change, and once outside text has entered, no class 2 action goes through without a person's fresh approval. Still open: the same property over the MCP tool calls, once the surface exists (#103, #204)."
+note = "The taint latch (#210) makes session text matter only one way: sawbones-redteam::redteam_inj_015_session_inputs_only_ever_tighten_the_invoke_path drives random sequences of turns, outside inputs, measured numbers and ticks through the supervisor; the class and requirement of a write never change, and once outside text has entered, no class 2 action goes through without a person's fresh approval. Still open: the same property over the MCP tool calls, with the invoke tools (#204); v0 has read tools only (#103)."
 
 [[attack]]
 id = "inj-016"
@@ -205,9 +205,9 @@ how = "Poisoning is not limited to the description field: instructions placed in
 expected = "Manifest-derived text never appears in tool definitions; it appears only in fenced result data."
 severity = "high"
 sources = ["https://www.cyberark.com/resources/threat-research/poison-everywhere-no-output-from-your-mcp-server-is-safe"]
-status = "gap"
-test = "Schema generation test with a hostile manifest (instruction text in channel name, unit, enum member, default). Assert the generated tool schemas are byte-identical to those for a benign manifest (manifest data travels only in result payloads as WorldText, never in the schema), and that manifest text fields are validated to Ident or Unit shapes or wrapped as WorldText."
-issue = 204
+status = "blocked"
+test = "sawbones-mcp::a_hostile_manifest_does_not_change_the_tool_list + sawbones-redteam::redteam_inj_031_hostile_manifest_text_is_fenced_and_trips_the_latch"
+note = "Was gap. No schema is generated: the v0 tool definitions (#103) are constants, and manifest text travels only in describe results, as fenced world text."
 
 [[attack]]
 id = "inj-017"
@@ -232,9 +232,9 @@ how = "MCP treats tool annotations (read-only, destructive, idempotent) as hints
 expected = "Classification, trust and approval are computed by the host from facts; no request field can supply them."
 severity = "high"
 sources = ["https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/", "https://owasp.org/www-community/attacks/MCP%5FTool%5FPoisoning"]
-status = "partial"
-test = "Static test over the tool schemas: no input field named or typed as confirm, approve, trust, tier, class, force, override, skip. Compile-time test that Trust and HazardClass are not Deserialize-able from tool input types. Behavioural test: invoke with a client-supplied hazard_class field is rejected as unknown field (deny_unknown_fields)."
-issue = 103
+status = "blocked"
+test = "sawbones-redteam::redteam_inj_018_tool_input_cannot_carry_a_class_or_an_approval + sawbones-mcp::no_input_field_can_carry_authority"
+note = "Was partial. v0 (#103): every tool input type has deny_unknown_fields and holds only integers and a handle string, so no Trust or HazardClass can be deserialised from one; every schema has additionalProperties false; a static test refuses any property named like confirm, approve, trust, tier, class, hazard, force, override, skip, lease, arm, permission or grant. Annotations are constants. The invoke tools must keep all of this."
 
 [[attack]]
 id = "inj-019"
@@ -378,9 +378,9 @@ how = "In sampling, a server asks the client's model to generate text; published
 expected = "No server-to-model request path exists in either direction."
 severity = "low"
 sources = ["https://unit42.paloaltonetworks.com/model-context-protocol-attack-vectors/"]
-status = "gap"
-test = "Protocol test: the Sawbones server advertises no sampling or elicitation client capabilities and rejects any such request with a method-not-found style error; the same for any Sawbones MCP client component. Golden test of the capabilities object."
-issue = 103
+status = "blocked"
+test = "sawbones-redteam::redteam_inj_029_the_server_offers_no_sampling_or_other_server_requests + sawbones-mcp::the_initialize_result_is_pinned_and_offers_only_tools"
+note = "Was gap. The v0 server (#103) advertises only tools, answers sampling, elicitation, roots, resources, prompts, completion and logging methods as not found, ignores responses, and never writes a message with a method (checked over stdio in crates/sawbones-mcp/tests/e2e_stdio.rs). Sawbones has no MCP client component."
 
 [[attack]]
 id = "inj-030"
@@ -405,6 +405,6 @@ expected = "Once outside content has entered the turn, class 2 and higher are re
 severity = "high"
 sources = ["https://ai.meta.com/blog/practical-ai-agent-security/", "https://arxiv.org/abs/2503.18813"]
 status = "partial"
-test = "Still to write, with the MCP surface: a test over every tool that returns outside content, asserting that it reports the content to the latch before the model sees it, and that invoke tools call latch_check with the open turn."
-issue = 103
-note = "The supervisor half is proven (#210): sawbones-redteam::redteam_inj_031_a_standing_arm_is_not_spent_after_outside_text, redteam_inj_031_a_live_lease_from_before_the_taint_is_not_spent and redteam_inj_031_a_supervisor_restart_does_not_clear_it, with the latch tests in crates/sawbones-supervisor/tests/latch.rs. The latch is only as complete as the MCP layer's reports, and the interlock report has no sequence number, so a report delayed across a taint could make an earlier arm look fresh (#172)."
+test = "Still to write, with the invoke tools: each invoke tool calls latch_check with the open turn, and a class 2 invoke after a read-class result with module content is refused until an arm cycle."
+issue = 204
+note = "The supervisor half is proven (#210): sawbones-redteam::redteam_inj_031_a_standing_arm_is_not_spent_after_outside_text, redteam_inj_031_a_live_lease_from_before_the_taint_is_not_spent and redteam_inj_031_a_supervisor_restart_does_not_clear_it, with the latch tests in crates/sawbones-supervisor/tests/latch.rs. The MCP half for v0's read tools is proven (#103): sawbones-redteam::redteam_inj_031_every_tool_reports_module_content_to_the_latch_before_returning and redteam_inj_031_hostile_manifest_text_is_fenced_and_trips_the_latch; each tools/call is a turn, and results take module content only through a builder that trips the latch first. The interlock report has no sequence number, so a report delayed across a taint could make an earlier arm look fresh (#172)."
