@@ -238,6 +238,27 @@ mod sim {
         }
     }
 
+    /// Each simulated module has one terminal, isolated, behind an
+    /// isolator on the hub.
+    fn declaration() -> sawbones_isolation::ModuleDeclaration {
+        sawbones_isolation::ModuleDeclaration::new(vec![
+            sawbones_isolation::TerminalSpec::isolated("port", 1000),
+        ])
+    }
+
+    fn bench_config() -> sawbones_isolation::BenchConfig {
+        use sawbones_isolation::{BenchConfig, Edge, MacPower, Node, Role};
+        let terminals = || declaration().terminals;
+        BenchConfig::new(MacPower::OnBattery)
+            .node(Node::new("pi", Role::Brain))
+            .node(Node::new("hub", Role::Other))
+            .edge(Edge::bonded("pi-usb", "pi", "hub"))
+            .edge(Edge::isolated("isolator-pod", "hub", "pod", 1000))
+            .edge(Edge::isolated("isolator-meter", "hub", "meter", 1000))
+            .module(POD.0, "pod", terminals())
+            .module(METER.0, "meter", terminals())
+    }
+
     pub struct Bench {
         pub s: Supervisor,
         pub hub: SimHub,
@@ -256,10 +277,15 @@ mod sim {
                     ],
                     writes: WriteMap::new([write_entry(HazardClass::Class2)]).unwrap(),
                     buses: BusFacts::new([bus_fact()]).unwrap(),
+                    bench: bench_config(),
                 },
                 Box::new(Counter(0)),
             )
             .unwrap();
+            let mut s = s;
+            for m in [POD, METER] {
+                s.declare_terminals(m, declaration()).unwrap();
+            }
             let mut hub = SimHub::default();
             hub.links.insert(POD_PORT, SimLink::new(pod(1), pod_line));
             hub.links.insert(METER_PORT, SimLink::new(meter(2), None));

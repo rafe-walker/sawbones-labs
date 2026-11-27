@@ -398,16 +398,19 @@ pub fn bus_fact() -> BusFact {
 }
 
 pub fn supervisor(class: HazardClass) -> Supervisor {
-    Supervisor::new(
+    let mut s = Supervisor::new(
         Config {
             ledger: LedgerId(1),
             enrollments: vec![pod_enrollment(), meter_enrollment()],
             writes: WriteMap::new([write_entry(class)]).unwrap(),
             buses: BusFacts::new([bus_fact()]).unwrap(),
+            bench: bench_config(sawbones_isolation::MacPower::OnBattery),
         },
         Box::new(Counter(0)),
     )
-    .unwrap()
+    .unwrap();
+    declare_all(&mut s);
+    s
 }
 
 pub fn device() -> DeviceIdentity {
@@ -462,24 +465,62 @@ pub fn record_facts(s: &mut Supervisor, class: HazardClass, now: Tick) {
     .unwrap();
 }
 
-/// A clean connection plan: the brain, a hub, and an isolated meter.
-pub fn clean_plan() -> sawbones_isolation::IsolationMap {
-    use sawbones_isolation::{Edge, MapSpec, Node, Role};
-    MapSpec::new()
+/// The owner's bench config for the fake bench: the brain, a hub, the
+/// meter and the pod each behind a USB isolator, a pack bus tied to the
+/// pack domain and a truck chassis tied to the chassis domain.
+pub fn bench_config(mac: sawbones_isolation::MacPower) -> sawbones_isolation::BenchConfig {
+    use sawbones_isolation::{BenchConfig, Edge, GroundDomain, Node, Role, TerminalSpec};
+    BenchConfig::new(mac)
         .node(Node::new("pi", Role::Brain))
         .node(Node::new("hub", Role::Other))
-        .node(Node::new("meter", Role::MeasuringModule).must_float())
+        .node(Node::new("pack-bus", Role::Other))
+        .node(Node::new("truck-chassis", Role::Other))
         .edge(Edge::bonded("pi-usb", "pi", "hub"))
-        .edge(Edge::isolated("usb-isolator", "hub", "meter", 1000))
-        .build()
-        .unwrap()
+        .edge(Edge::isolated("usb-isolator-meter", "hub", "meter", 1000))
+        .edge(Edge::isolated("usb-isolator-pod", "hub", "pod", 1000))
+        .edge(Edge::bonded(
+            "pack-bus-tie",
+            "pack-bus",
+            GroundDomain::Pack.node(),
+        ))
+        .edge(Edge::bonded(
+            "chassis-tie",
+            "truck-chassis",
+            GroundDomain::VehicleChassis.node(),
+        ))
+        .module(
+            METER.0,
+            "meter",
+            vec![TerminalSpec::isolated("probe", 1000)],
+        )
+        .module(
+            POD.0,
+            "pod",
+            vec![
+                TerminalSpec::isolated("rs232", 1000),
+                TerminalSpec::ground("clip", GroundDomain::MainsEarth),
+            ],
+        )
 }
 
-/// The same plan with a ground clip from the hub to the meter: a Stop.
-pub fn clipped_plan() -> sawbones_isolation::IsolationMap {
-    clean_plan()
-        .with_edge(sawbones_isolation::Edge::bonded("clip", "hub", "meter"))
-        .unwrap()
+/// What the fake modules declare: the same as the config says.
+pub fn declaration(module: ModuleId) -> sawbones_isolation::ModuleDeclaration {
+    use sawbones_isolation::{GroundDomain, ModuleDeclaration, TerminalSpec};
+    ModuleDeclaration::new(if module == METER {
+        vec![TerminalSpec::isolated("probe", 1000)]
+    } else {
+        vec![
+            TerminalSpec::isolated("rs232", 1000),
+            TerminalSpec::ground("clip", GroundDomain::MainsEarth),
+        ]
+    })
+}
+
+/// Records both fake modules' declarations.
+pub fn declare_all(s: &mut Supervisor) {
+    for m in [METER, POD] {
+        s.declare_terminals(m, declaration(m)).unwrap();
+    }
 }
 
 /// A bench: the supervisor, a hub with the pod and the meter plugged in,
@@ -560,7 +601,7 @@ impl Bench {
         self.interlock.arm_switch_on = false;
         self.run(2);
         assert!(!self.interlock.outputs.rail_a, "rail A did not go off");
-        self.s.arm(&clean_plan(), &mut self.interlock).unwrap();
+        self.s.arm(&[], &mut self.interlock).unwrap();
         self.interlock.arm_switch_on = true;
         self.run(2);
         assert!(self.interlock.outputs.rail_a, "rail A did not come up");
@@ -581,7 +622,7 @@ impl Bench {
     /// and a clean plan armed.
     pub fn arm(&mut self) {
         self.run(3);
-        self.s.arm(&clean_plan(), &mut self.interlock).unwrap();
+        self.s.arm(&[], &mut self.interlock).unwrap();
         self.interlock.arm_switch_on = true;
         self.run(2);
         assert!(self.interlock.outputs.rail_a, "rail A did not come up");

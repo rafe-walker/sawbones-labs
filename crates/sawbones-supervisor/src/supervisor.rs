@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use sawbones_interlock::{HeartbeatChallenge, Tick};
-use sawbones_isolation::Report;
+use sawbones_isolation::{BenchConfig, ModuleDeclaration, Report};
 use sawbones_module_protocol::{
     Challenge, HostLink, IdentityClaim, ImageDigest, ModuleId, Request, Response, MAX_FRAME_LEN,
 };
@@ -61,6 +61,10 @@ pub struct Config {
     pub writes: WriteMap,
     /// The bus facts.
     pub buses: BusFacts,
+    /// The owner's bench config: fixed wiring, the Mac's power state, and
+    /// what each enrolled module's terminals are. Every enrolled module
+    /// must be in it, and nothing else may be.
+    pub bench: BenchConfig,
 }
 
 #[derive(Debug)]
@@ -117,6 +121,10 @@ pub struct Supervisor {
     pub(crate) ledger: FactLedger,
     pub(crate) chain_head: ChainHead,
     pub(crate) armed: Option<ArmedPlan>,
+    pub(crate) bench: BenchConfig,
+    /// What each module claims about its terminals. A claim, used at arm
+    /// time only for a module that is available.
+    pub(crate) declarations: BTreeMap<ModuleId, ModuleDeclaration>,
     pub(crate) pending: BTreeMap<PortId, PendingWrite>,
     pub(crate) latch: Latch,
 }
@@ -142,6 +150,24 @@ pub(crate) fn firmware_label(digest: &ImageDigest) -> ScopeLabel {
     }
     // 64 hex digits always pass the label rule.
     ScopeLabel::parse(&hex).unwrap_or_else(|_| unreachable!("hex is a valid label"))
+}
+
+/// The bench config names exactly the enrolled modules.
+fn check_bench(
+    bench: &BenchConfig,
+    enrollments: &BTreeMap<ModuleId, Enrollment>,
+) -> Result<(), ConfigError> {
+    for wiring in &bench.modules {
+        if !enrollments.contains_key(&ModuleId(wiring.id)) {
+            return Err(ConfigError::BenchModuleNotEnrolled(ModuleId(wiring.id)));
+        }
+    }
+    for module in enrollments.keys() {
+        if !bench.modules.iter().any(|w| ModuleId(w.id) == *module) {
+            return Err(ConfigError::ModuleNotInBench(*module));
+        }
+    }
+    Ok(())
 }
 
 impl Supervisor {
@@ -172,6 +198,7 @@ impl Supervisor {
             }
             enrollments.insert(e.module, e);
         }
+        check_bench(&config.bench, &enrollments)?;
         Ok(Supervisor {
             enrollments,
             quarantine: BTreeMap::new(),
@@ -185,6 +212,8 @@ impl Supervisor {
             ledger: FactLedger::new(config.ledger),
             chain_head: ChainHead([0; 32]),
             armed: None,
+            bench: config.bench,
+            declarations: BTreeMap::new(),
             pending: BTreeMap::new(),
             latch: Latch::at_start(),
         })
@@ -284,12 +313,55 @@ impl Supervisor {
         self.quarantine.remove(&module);
         self.firmware.remove(&module);
         self.losses.remove(&module);
+        // A claim made under the old enrollment is not the new one's.
+        if self.declarations.remove(&module).is_some() {
+            self.armed = None;
+        }
         self.enrollments.insert(module, enrollment);
         for slot in self.slots.values_mut() {
             if slot.state == PortState::Refused(PortRefusal::Quarantined(module)) {
                 slot.state = PortState::Lost;
             }
         }
+        Ok(())
+    }
+
+    /// Records what a module claims about its terminals. It is a claim: at
+    /// arm time it counts only while the module is available, and only as
+    /// far as the bench config backs it (see
+    /// [`sawbones_isolation::build_plan`]). A changed declaration drops the
+    /// armed plan. The manifest pages that will carry the claim are not
+    /// here yet, so the caller that reads them calls this.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError::UnknownModule`] if the module is not enrolled.
+    pub fn declare_terminals(
+        &mut self,
+        module: ModuleId,
+        declaration: ModuleDeclaration,
+    ) -> Result<(), ConfigError> {
+        if !self.enrollments.contains_key(&module) {
+            return Err(ConfigError::UnknownModule(module));
+        }
+        if self.declarations.get(&module) != Some(&declaration) {
+            self.armed = None;
+        }
+        self.declarations.insert(module, declaration);
+        Ok(())
+    }
+
+    /// Replaces the bench config (the owner moved the charger, rewired the
+    /// bench). The armed plan is dropped: arm again to check the new one.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigError`] if the config does not match the enrolled modules;
+    /// the old config stays.
+    pub fn set_bench(&mut self, bench: BenchConfig) -> Result<(), ConfigError> {
+        check_bench(&bench, &self.enrollments)?;
+        self.bench = bench;
+        self.armed = None;
         Ok(())
     }
 

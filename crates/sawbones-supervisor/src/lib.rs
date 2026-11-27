@@ -83,14 +83,22 @@
 //! reasons are in the [`latch`] module.
 //!
 //! Class 2 and 3 also need a connection plan checked by
-//! [`Supervisor::arm`]: the isolation checker runs on it and any finding of
-//! severity Stop refuses. A write that goes out with no reply leaves its
+//! [`Supervisor::arm`]. The supervisor builds the plan's map itself
+//! (`sawbones_isolation::build_plan`) from the owner's bench config (fixed
+//! wiring, the Mac on its charger or on battery), the terminals each
+//! available module declared ([`Supervisor::declare_terminals`]) and the
+//! connections proposed; a caller cannot pass a map. A module's declaration
+//! is a claim: the stricter of it and the config wins, and a module,
+//! terminal or isolation claim without both sides refuses the plan
+//! ([`ArmRefusal::Plan`]). The isolation checker then runs on the built map
+//! and any finding of severity Stop refuses. A write that goes out with no reply leaves its
 //! effect unknown, so its port takes nothing but a read of the same signal
 //! until a read back answers ([`Outcome::ReadBack`]).
 //!
 //! ## Not here yet
 //!
-//! Drivers as child processes, the MCP server (the latch models its turn
+//! A re-check when the wiring changes after arming (no event source), and
+//! telling the trust root about a refused plan. Also: drivers as child processes, the MCP server (the latch models its turn
 //! boundary, but nothing calls it yet), module write commands
 //! (config writes and actuations: the policy engine classifies bus requests
 //! only, so the supervisor offers none), the manifest pages and their
