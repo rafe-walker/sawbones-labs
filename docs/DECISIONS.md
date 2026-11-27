@@ -115,6 +115,12 @@ Tracked in #166. The plugin and store index design itself is written up after th
 | --- | --- |
 | T.R.I.A.G.E. benchmark losses | Published alongside the wins, under the pre-registered plan. Every scenario where our design loses to a plain MCP becomes an issue: either we change the design until it matches or beats the baseline, or we record it here as a deliberate trade-off of the safety design (for example extra steps a safety gate costs) with the measured cost. A loss is never left unexplained. |
 
+## 26 November 2026, working standard
+
+| Topic | Decision |
+| --- | --- |
+| HWS 0.1 is our working standard; released versions are immutable | Hardware Write Safety 0.1 (`standards/hws/0.1/`) is the versioned working standard we measure Sawbones against. It is a working draft, not a certification, and makes no SIL or PL claim. A version is released when its folder has a `RELEASED` file; after that nothing in the folder changes, and fixes go in a new version. Requirement IDs are never reused or renumbered. |
+
 ## Reversals and corrections
 
 | Was | Now | Why |
