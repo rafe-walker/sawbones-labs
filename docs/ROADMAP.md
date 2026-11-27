@@ -5,8 +5,12 @@ The project is cut into numbered stages. Each stage ends in a **check-in**: a sh
 There are no dates. Order comes from what each stage needs first. Live progress is on the [milestones page](https://github.com/rafe-walker/sawbones-labs/milestones) and in the [project](https://github.com/users/rafe-walker/projects/2), view "By phase".
 
 - **P0** is everything that can be built and proved without hardware: software, firmware logic, and the blueprints, tested in simulation.
-- **P1** is the Bench Core: seven rungs of real hardware, each proved by the rung below it.
-- **Later phases** are named at the end and are not broken down yet.
+- **P1, Prove the Interlock on the bench,** is only the hardware needed to prove the safety design on a bench. Nothing is built for the field in P1.
+- **Funding and credits** comes after P1, once there is bench evidence to show. It does not start before P1 exits.
+- **P2, Make it mobile,** is everything else from the old Bench Core and the later phases: the pack, the modules and field use.
+- **P3 and later** are named at the end and are not broken down yet.
+
+Decision of 26 November 2026 ([DECISIONS.md](DECISIONS.md)): the first hardware shrinks again, to the bench proof of the Interlock. Less money is at risk before the safety design is proved, and the hardware data (and so the research paper) arrives sooner.
 
 ## How the stages depend on each other
 
@@ -24,9 +28,14 @@ flowchart LR
   P1_2["P1.2 Build tools"]
   P1_3["P1.3 The trust root"]
   P1_4["P1.4 Ground truth"]
-  P1_5["P1.5 Module 1: the DC meter"]
-  P1_6["P1.6 Module 2: the listen-only comms pod"]
-  P1_7["P1.7 The investigation"]
+  P1_5["P1.5 Bus guard on the bench"]
+  P1_6["P1.6 P1 exit: bench evidence"]
+  FUND["Funding and credits"]
+  P2_1["P2.1 The pack"]
+  P2_2["P2.2 Module 1: the DC meter"]
+  P2_3["P2.3 Module 2: the listen-only comms pod"]
+  P2_4["P2.4 The investigation"]
+  P2_5["P2.5 More modules and field use"]
   P0_1 --> P0_2
   P0_2 --> P0_3
   P0_3 --> P0_4
@@ -46,14 +55,22 @@ flowchart LR
   P0_2 --> P1_3
   P0_6 --> P1_3
   P1_1 --> P1_4
-  P1_2 --> P1_5
-  P1_4 --> P1_5
-  P0_3 --> P1_5
+  P1_3 --> P1_5
   P1_3 --> P1_6
-  P1_5 --> P1_7
-  P1_6 --> P1_7
-  P0_4 --> P1_7
-  P0_5 --> P1_7
+  P1_4 --> P1_6
+  P1_5 --> P1_6
+  P1_6 --> FUND
+  P1_6 --> P2_1
+  P1_2 --> P2_2
+  P1_4 --> P2_2
+  P0_3 --> P2_2
+  P1_3 --> P2_3
+  P2_2 --> P2_4
+  P2_3 --> P2_4
+  P0_4 --> P2_4
+  P0_5 --> P2_4
+  P2_1 --> P2_5
+  P2_4 --> P2_5
 ```
 
 Read it as: an arrow means "has to be done first". Three things follow from the shape.
@@ -61,6 +78,7 @@ Read it as: an arrow means "has to be done first". Three things follow from the 
 - The software stages (P0.2 to P0.5) and the blueprint stages (P0.6, P0.7) run side by side.
 - The brain and the build tools (P1.1, P1.2) need only the checked parts list and the simulated bench, so real hardware can start well before P0 ends.
 - The trust root (P1.3) waits for the safety core and the simulated circuits. Nothing that can energise a rail is built before its rules and its circuit are tested.
+- The pack (P2.1) is not built until the bench has proved the Interlock (P1.6). The funding stage also waits for P1.6, and runs beside P2.1 rather than blocking P2 modules that need no new money.
 
 ## Stages
 
@@ -74,13 +92,18 @@ Read it as: an arrow means "has to be done first". Three things follow from the 
 | **P0.6 Blueprint: electrical** | The wiring, designed and tested in software before any is laid out. | #156 | P0.1 |
 | **P0.7 Blueprint: physical and radio** | The case, the cooling and the radio side, designed and tested in software. | #157 | P0.6 |
 | **P0.8 P0 exit** | One pack of blueprints, and the design document rewritten to match it. | #158 | P0.2, P0.3, P0.4, P0.5, P0.6, P0.7 |
-| **P1.1 The brain** | Rung 1. The Pi 5 on the bench from mains, running the P0 supervisor unchanged. | #159 | P0.1, P0.3 |
-| **P1.2 Build tools** | Rung 2. The brain can flash, debug and watch every later board. | #160 | P1.1 |
-| **P1.3 The trust root** | Rung 3. The interlock in hardware, proved on a lamp. | #161 | P1.2, P0.2, P0.6 |
-| **P1.4 Ground truth** | Rung 4. A known voltage on the bench, checked against the meter on hand. | #162 | P1.1 |
-| **P1.5 Module 1: the DC meter** | Rung 5. The first built instrument, isolated from the brain. | #163 | P1.2, P1.4, P0.3 |
-| **P1.6 Module 2: the listen-only comms pod** | Rung 6. Reading the inverter directly, unable to transmit unless armed. | #164 | P1.3 |
-| **P1.7 The investigation** | Rung 7. One real question about the EG4 answered end to end, read-only. The Bench Core's acceptance test. | #165 | P1.5, P1.6, P0.4, P0.5 |
+| **P1.1 The brain** | The Pi 5 (4 GB) on the bench from mains, running C.O.R.T.E.X. and the P0 supervisor unchanged. | #159 | P0.1, P0.3 |
+| **P1.2 Build tools** | The brain can flash, debug and watch the RP2350 boards; the logic analyzer captures timing. | #160 | P1.1 |
+| **P1.3 The trust root** | The Interlock in hardware on RP2350 boards, with the independent watchdog cut, the operator panel and rail A/B switches, proved on a lamp or resistor load. | #161 | P1.2, P0.2, P0.6 |
+| **P1.4 Ground truth** | A known voltage on the bench, checked against the handheld meter, for calibration. | #162 | P1.1 |
+| **P1.5 Bus guard on the bench** | An RS485 loopback where the bus guard passes only the byte-exact approved frame. | #278 | P1.3, P1.2 |
+| **P1.6 P1 exit: bench evidence** | The six exit tests run and recorded; evidence feeds the HWS 0.1 rows and the technical report. | #280 | P1.3, P1.4, P1.5 |
+| **Funding and credits** | Apply for free usage, credits and funding, using the P1 bench data and the site technical report. | #285 | P1.6 |
+| **P2.1 The pack** | The S.A.W. pack: case, battery, BMS, cooling, indicators, speaker and hub. | #282 | P1.6 |
+| **P2.2 Module 1: the DC meter** | The first built instrument, isolated from the brain. | #163 | P1.2, P1.4, P0.3 |
+| **P2.3 Module 2: the listen-only comms pod** | Reading the inverter directly (the Solar Assistant read path for the EG4), unable to transmit unless armed. | #164 | P1.3 |
+| **P2.4 The investigation** | One real question about the EG4 answered end to end, read-only. | #165 | P2.2, P2.3, P0.4, P0.5 |
+| **P2.5 More modules and field use** | Vehicle pod, mic array, radio modules, field use, LoRa, the T.A.B.L.E. overhead camera and toolkit hardware. | #284 | P2.1, P2.4 |
 
 ## P0: prove it without hardware
 
@@ -110,7 +133,7 @@ The rules that decide whether anything may be energised, written and tested befo
 
 - The interlock rules as a table, with a test behind each one.
 - Random runs that never find a rail on in a forbidden state.
-- The ground map of the Bench Core, with what it found.
+- The ground map of the P1 bench, with what it found.
 - The threat model, and the checklist the real hardware has to pass.
 - A bus guard in simulation that passes only the exact frame you approved.
 - The approval scale written down, with test keys for the trust root and your phone.
@@ -223,11 +246,32 @@ One pack of blueprints, and the design document rewritten to match it.
 - Go for the trust-root build?
 - #140: publish the outside review documents?
 
-## P1: the Bench Core
+## P1: Prove the Interlock on the bench
+
+Only the hardware needed to prove the safety design on a bench:
+
+- a Raspberry Pi 5 (4 GB) running C.O.R.T.E.X.;
+- RP2350 board(s) as the Interlock trust root;
+- the independent watchdog cut part (#144), an MCU-independent dead-man's switch that drops rail power if the chip freezes;
+- the operator panel: arm switch, key switch, lease button and e-stop mushroom;
+- rail A and rail B relays (or MOSFET switches) driving a harmless lamp or resistor load;
+- a bench supply;
+- an RS485 loopback for the bus guard;
+- a voltage reference and the cheap handheld meter, for calibration;
+- a logic analyzer, to capture timing evidence.
+
+**P1 exit tests.** Each must produce recorded evidence, which feeds the HWS 0.1 "verify / not yet" rows and the technical report:
+
+1. Rails are off at boot and during brownout.
+2. A lost P.U.L.S.E. heartbeat opens the rails within the stated bound.
+3. A lease is single-use and bound to its action digest; a replay is refused.
+4. The e-stop opens the rails with the Pi powered off.
+5. The watchdog cut fires when the RP2350 is frozen or hung.
+6. The bus guard refuses any frame that is not byte-exact.
 
 ### P1.1 The brain
 
-Rung 1. The Pi 5 on the bench from mains, running the P0 supervisor unchanged.
+The Pi 5 (4 GB) on the bench from mains, running C.O.R.T.E.X. and the P0 supervisor unchanged.
 
 **Work:** #142
 
@@ -244,7 +288,7 @@ Rung 1. The Pi 5 on the bench from mains, running the P0 supervisor unchanged.
 
 ### P1.2 Build tools
 
-Rung 2. The brain can flash, debug and watch every later board.
+The brain can flash, debug and watch every RP2350 board, and the logic analyzer captures timing.
 
 **Work:** #143
 
@@ -252,6 +296,7 @@ Rung 2. The brain can flash, debug and watch every later board.
 
 - The brain flashes and debugs an RP2350 board.
 - It captures and decodes a serial line.
+- The logic analyzer records a timing trace the evidence store accepts.
 
 **You decide:**
 
@@ -259,16 +304,17 @@ Rung 2. The brain can flash, debug and watch every later board.
 
 ### P1.3 The trust root
 
-Rung 3. The interlock in hardware, proved on a lamp.
+The Interlock in hardware, proved on a lamp or resistor load: RP2350 trust root, operator panel, rail A/B switches and the independent watchdog cut.
 
 **Work:** #144
 
 **Check-in (#161). You will see:**
 
-- The lamp stays off through boot, reset, brownout and a hung Pi.
-- The stop works with the Pi powered off.
-- A lost heartbeat drops the rail.
-- An expired or reused approval is refused.
+- The load stays off through boot, reset, brownout and a hung Pi (exit test 1).
+- A lost heartbeat drops the rail within the stated bound (exit test 2).
+- An expired or reused lease is refused, and a lease is bound to its action digest (exit test 3).
+- The stop works with the Pi powered off (exit test 4).
+- The watchdog cut drops the rail when the RP2350 is frozen (exit test 5).
 - Firmware cannot change without the jumper.
 
 **You decide:**
@@ -278,9 +324,9 @@ Rung 3. The interlock in hardware, proved on a lamp.
 
 ### P1.4 Ground truth
 
-Rung 4. A known voltage on the bench, checked against the meter on hand.
+A known voltage on the bench, checked against the handheld meter, for calibration.
 
-**Work:** #145
+**Work:** #145 (and #11, the brand and model of the meter on hand)
 
 **Check-in (#162). You will see:**
 
@@ -291,9 +337,79 @@ Rung 4. A known voltage on the bench, checked against the meter on hand.
 
 - Nothing to decide. A look is enough.
 
-### P1.5 Module 1: the DC meter
+### P1.5 Bus guard on the bench
 
-Rung 5. The first built instrument, isolated from the brain.
+An RS485 loopback where the bus guard passes the approved frame byte for byte and refuses everything else.
+
+**Work:** #277
+
+**Check-in (#278). You will see:**
+
+- The approved frame crosses the loopback unchanged.
+- A frame that is not allow-listed, a write with no lease, a changed byte, a bad CRC and a broadcast are all refused and never reach the wire (exit test 6).
+- The logic-analyzer captures are in the session store.
+
+**You decide:**
+
+- Nothing to decide. A look is enough.
+
+### P1.6 P1 exit: bench evidence
+
+The six exit tests are run and recorded, and the evidence is written into the standard and the report.
+
+**Work:** #279
+
+**Check-in (#280). You will see:**
+
+- Six exit tests, each with a recording or capture.
+- The HWS 0.1 rows updated from that evidence.
+- The site technical report updated with the bench data.
+
+**You decide:**
+
+- Is P1 closed?
+- Start the funding and credits stage?
+- When to prepare the arXiv or formal submission?
+
+## Funding and credits
+
+After P1 evidence exists, apply for free usage, credits and funding: Anthropic, Microsoft Azure, AWS, Cloudflare and others. The applications use the P1 bench data and the site technical report. Where it is relevant, disclose that Sawbones Labs and IsoKron share a founder. **Not started before P1 exits.**
+
+**Work:** #285
+
+**Check-in:** closed together with P1.6 (#280), which asks whether to start this stage.
+
+**You decide:**
+
+- Which programmes to apply to, and in what order?
+
+## The research paper
+
+The site technical report is published now. The arXiv or formal submission waits for P1 hardware data (P1.6): the claims about the Interlock should rest on measurements, not simulation alone.
+
+## P2: Make it mobile
+
+Everything else from the old Bench Core and the later phases. Nothing in P2 is bought before P1 has exited. The home-built DC meter is here, since P1 does not need it: the voltage reference and the handheld meter cover P1 calibration.
+
+### P2.1 The pack
+
+The S.A.W. pack: case, battery, BMS, cooling (aluminium heatsink and a temperature-switched fan), status LEDs and panel light, speaker, and the hub. Folds in the old "Portability: the battery, the case and cooling" item.
+
+**Work:** #281, #248 (supervisor reads its own temperatures and sheds load), #249 (Interlock-driven status LED strip)
+
+**Check-in (#282). You will see:**
+
+- The proved bench runs from the battery inside the case.
+- Heat stays inside the budget with the fan switched by temperature.
+- Status lights and the speaker report the Interlock state.
+
+**You decide:**
+
+- Print the case?
+
+### P2.2 Module 1: the DC meter
+
+The first built instrument, isolated from the brain.
 
 **Work:** #146
 
@@ -308,11 +424,11 @@ Rung 5. The first built instrument, isolated from the brain.
 
 - Nothing to decide. A look is enough.
 
-### P1.6 Module 2: the listen-only comms pod
+### P2.3 Module 2: the listen-only comms pod
 
-Rung 6. Reading the inverter directly, unable to transmit unless armed.
+Reading the inverter directly, unable to transmit unless armed. This includes the Solar Assistant read path for the EG4.
 
-**Work:** #147
+**Work:** #147, #70 (confirm baud rate and pinout on the real units)
 
 **Check-in (#164). You will see:**
 
@@ -324,9 +440,9 @@ Rung 6. Reading the inverter directly, unable to transmit unless armed.
 
 - Nothing to decide. A look is enough.
 
-### P1.7 The investigation
+### P2.4 The investigation
 
-Rung 7. One real question about the EG4 answered end to end, read-only. The Bench Core's acceptance test.
+One real question about the EG4 answered end to end, read-only.
 
 **Work:** #148
 
@@ -339,20 +455,33 @@ Rung 7. One real question about the EG4 answered end to end, read-only. The Benc
 
 **You decide:**
 
-- Is the Bench Core accepted?
-- What comes first in P2?
+- Is the investigation accepted?
+- What comes first in P2.5?
 
-## Later phases
+### P2.5 More modules and field use
 
-Named, not broken down. They are laid out after the Bench Core is accepted (tracked in #1).
+Modules and use outside the bench: the K-line vehicle pod, the mic array, radio modules (including #5, the Bluetooth dongle question), field use, LoRa later, the T.A.B.L.E. overhead camera and toolkit hardware.
+
+**Work:** #283
+
+**Check-in (#284). You will see:**
+
+- Each added module passes the module standard.
+- A field session recorded end to end.
+
+**You decide:**
+
+- Which module comes first?
+
+## Later phases (P3 and after)
+
+Named, not broken down. They are laid out after P2.4 is accepted (tracked in #1). The old "Portability" and "Radio, receive only" items are now part of P2 (P2.1 and P2.5) and are not repeated here.
 
 - Analog capture, in two bands
 - The thrust stand
 - The site port
-- Senses: sound, vision, thermal, air
-- Radio, receive only
-- Portability: the battery, the case and cooling
-- The vehicle
+- Senses: sound, vision, thermal, air (the mic array and the T.A.B.L.E. camera start in P2.5)
+- The vehicle (the K-line pod starts in P2.5)
 - Idea parked: reading aircraft transponders overhead (#12)
 
 ## Rules of the roadmap

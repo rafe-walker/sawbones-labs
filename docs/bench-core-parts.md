@@ -1,4 +1,6 @@
-# Bench Core parts list (P1)
+# Bench Core parts list
+
+**Phase split (26 November 2026).** P1 is now only the bench proof of the Interlock ([ROADMAP.md](ROADMAP.md)). Of the rungs below, rungs 1 to 4 (brain, build tools, trust root, ground truth) are P1, together with an RS485 loopback for the bus guard. Rung 5 (DC meter), rung 6 (comms pod) and rung 7 (the investigation) are P2, as are the pack, case, battery and modules. Order only what the current stage needs.
 
 Prices and delivery dates as seen on Amazon on 26 November 2026, delivering to southern Arizona. They will move. Every line was added to a private Amazon list from its product page, so the live list is the authority on price.
 

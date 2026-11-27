@@ -4,15 +4,15 @@ An open-source, agent-first Maker's bench, and a portable test bench that docks 
 
 Sawbones is Old West slang for a field surgeon. This is one for machines: a carry-case of instruments that an AI agent operates over MCP, so it can observe, measure and, behind a safety layer, act on the thing under test. Inverters, battery packs, older vehicles, radios, appliances, a breadboard on the bench.
 
-**Status: P0.** The software is built and tested in simulation; nothing has run on real hardware yet. The design has been through a first round of outside review. P0 is under way: the software, the firmware and the hardware blueprints, all built and tested without hardware. The first build after that is a small Bench Core.
+**Status: P0.** The software is built and tested in simulation; nothing has run on real hardware yet. The design has been through a first round of outside review. P0 is under way: the software, the firmware and the hardware blueprints, all built and tested without hardware. The first build after that is P1: the Interlock proved on a bench, before anything is built for the field.
 
 ## What is in here
 
 | Path | What it is |
 | --- | --- |
 | [`docs/project-document.md`](docs/project-document.md) | The design document: concept, architecture, module standard, knowledge store, safety layer, hardware, budget, risks. |
-| [`docs/ROADMAP.md`](docs/ROADMAP.md) | The numbered stages of P0 and P1, what each needs first, and the check-in that closes it. |
-| [`docs/bench-core-parts.md`](docs/bench-core-parts.md) | The priced parts list for the first hardware phase. |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | The numbered stages (P0, P1 bench proof, funding and credits, P2 mobile), what each needs first, and the check-in that closes it. |
+| [`docs/bench-core-parts.md`](docs/bench-core-parts.md) | The priced parts list for the first hardware (the Bench Core ladder). Rungs 1 to 4 and the bus-guard loopback are P1; the rest is P2. |
 | [`docs/bench-core-cross-reference.md`](docs/bench-core-cross-reference.md) | Every part on that list: why it is needed, what it belongs to, how it works in the system, and what must be checked before ordering. |
 | [`docs/DECISIONS.md`](docs/DECISIONS.md) | The decision log, including the calls that were reversed and why. |
 | [`docs/reviews/`](docs/reviews/review-round-1-response.md) | The response to the first round of outside reviews: every point accepted, changed or disputed, and the phases that came out of it. |
