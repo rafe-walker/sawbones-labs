@@ -47,8 +47,8 @@ use core::num::NonZeroU64;
 
 pub use record::{RecordWords, RECORD_WORDS};
 use sawbones_interlock::{
-    step, ClearSource, Event, FaultRecord, HazardClass, HeartbeatReply, Inputs, LeaseTarget, Mode,
-    Outputs, PanelToken, Port, State, Tick, RAIL_B_PORTS,
+    step, Approval, ClearSource, Event, FaultRecord, HazardClass, HeartbeatReply, Inputs,
+    LeaseTarget, Mode, Outputs, PanelToken, Port, State, Tick, RAIL_B_PORTS,
 };
 
 /// The pins the trust root samples on each tick, already turned into what
@@ -191,25 +191,58 @@ pub struct TickReport {
     pub event: EventSource,
 }
 
+/// Which rails may be driven on: a rail turns on only if two independent
+/// reads agree, so one corrupted or glitched value fails safe (rail off).
+///
+/// - Read 1 is the [`Outputs`] that [`step`] returned.
+/// - Read 2 is the [`State`] mode the same step returned: rail A needs
+///   [`Mode::Armed`], and rail B needs a live lease in that mode for the same
+///   port.
+///
+/// A rail is on only if both say on. Either one saying off, or the two
+/// disagreeing, gives off. This is a design-level defence against a single
+/// flipped bool or skipped instruction (docs/THREAT-MODEL.md, section 4a,
+/// #238). It does not stop a determined attacker with the board on a bench.
+#[must_use]
+pub fn permitted(outputs: &Outputs, state: &State) -> Driven {
+    let (armed, lease_port) = match state.mode {
+        Mode::Armed {
+            approval: Approval::Live { target, .. },
+            ..
+        } => (true, Some(target.port)),
+        Mode::Armed { .. } => (true, None),
+        _ => (false, None),
+    };
+    let rail_a = outputs.rail_a && armed && outputs.fault.is_none();
+    let rail_b = match (outputs.rail_b, lease_port) {
+        (Some(a), Some(b)) if a == b && rail_a => Some(a),
+        _ => None,
+    };
+    Driven { rail_a, rail_b }
+}
+
+/// What the rail enables are driven to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Driven {
-    rail_a: bool,
-    rail_b: Option<Port>,
+pub struct Driven {
+    /// Rail A enable.
+    pub rail_a: bool,
+    /// Rail B's port, if enabled.
+    pub rail_b: Option<Port>,
 }
 
 impl Driven {
-    const OFF: Driven = Driven {
+    pub(crate) const OFF: Driven = Driven {
         rail_a: false,
         rail_b: None,
     };
 
-    const fn any_on(self) -> bool {
+    pub(crate) const fn any_on(self) -> bool {
         self.rail_a || self.rail_b.is_some()
     }
 
     /// What stays on when moving from `self` to `next`: only what is on in
     /// both.
-    fn common(self, next: Driven) -> Driven {
+    pub(crate) fn common(self, next: Driven) -> Driven {
         Driven {
             rail_a: self.rail_a && next.rail_a,
             rail_b: if self.rail_b == next.rail_b {
@@ -308,10 +341,7 @@ impl<B: Board> TrustRoot<B> {
         let (next, outputs) = step(self.state, inputs, event);
         self.state = next;
 
-        let want = Driven {
-            rail_a: outputs.rail_a,
-            rail_b: outputs.rail_b,
-        };
+        let want = permitted(&outputs, &next);
 
         // Cut first: whatever goes off goes off now, before any write.
         let keep = self.driven.common(want);
