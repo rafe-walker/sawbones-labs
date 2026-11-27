@@ -23,6 +23,7 @@ supply_net = "V12_IN"
 board = "PWR"
 trigger_polarity = "n/a"
 open_when = "overcurrent > 1 A"
+out_nets = ["V12_F1"]
 
 [[path.series_elements]]
 order = 2
@@ -35,6 +36,7 @@ supply_net = "V12_F1"
 board = "PANEL"
 trigger_polarity = "n/a"
 open_when = "pressed, wire off"
+out_nets = ["ESTOP_OUT"]
 
 [[path.series_elements]]
 order = 3
@@ -47,6 +49,7 @@ supply_net = "ESTOP_OUT"
 board = "PANEL"
 trigger_polarity = "n/a"
 open_when = "toggle off, wire off"
+out_nets = ["ARM_OUT"]
 
 [[path.series_elements]]
 order = 4
@@ -59,6 +62,7 @@ supply_net = "V5"
 board = "RLY1"
 trigger_polarity = "held only while GP14 toggles"
 open_when = "pump stops (freeze, reset, brownout, unpowered, pin stuck), Q51 open, 5 V lost"
+out_nets = ["MID"]
 
 [[path.series_elements]]
 order = 5
@@ -71,6 +75,8 @@ supply_net = "V5"
 board = "RLY2"
 trigger_polarity = "held only while PB3 toggles (only after a correct, fresh Q&A answer)"
 open_when = "ATtiny trip, freeze, reset, BOD, supply lost; Q61 open; 5 V lost"
+out_nets = ["K2_OUT", "RAIL_BUS"]
+fed_by = ["RP_TR"]                # the Q&A answers come from the RP2350: K2 is a liveness monitor of it (HW-019, A39)
 
 [[path.series_elements]]
 order = 6
@@ -83,6 +89,7 @@ supply_net = "RAIL_BUS"
 board = "MOS-A"
 trigger_polarity = "active-high"
 open_when = "GP12 low/pulled-down/unpowered, logic GND off, rail A not armed"
+out_nets = ["LAMP_A_NEG"]
 
 [[path]]
 id = "PA_B"
@@ -101,6 +108,7 @@ supply_net = "V12_IN"
 board = "PWR"
 trigger_polarity = "n/a"
 open_when = "overcurrent"
+out_nets = ["V12_F1"]
 
 [[path.series_elements]]
 order = 2
@@ -113,6 +121,7 @@ supply_net = "V12_F1"
 board = "PANEL"
 trigger_polarity = "n/a"
 open_when = "pressed"
+out_nets = ["ESTOP_OUT"]
 
 [[path.series_elements]]
 order = 3
@@ -125,6 +134,7 @@ supply_net = "ESTOP_OUT"
 board = "PANEL"
 trigger_polarity = "n/a"
 open_when = "off"
+out_nets = ["ARM_OUT"]
 
 [[path.series_elements]]
 order = 4
@@ -137,6 +147,7 @@ supply_net = "V5"
 board = "RLY1"
 trigger_polarity = "held only while GP14 toggles"
 open_when = "pump stops"
+out_nets = ["MID"]
 
 [[path.series_elements]]
 order = 5
@@ -149,6 +160,8 @@ supply_net = "V5"
 board = "RLY2"
 trigger_polarity = "held only while PB3 toggles"
 open_when = "ATtiny trip"
+out_nets = ["K2_OUT", "RAIL_BUS"]
+fed_by = ["RP_TR"]                # the Q&A answers come from the RP2350: K2 is a liveness monitor of it (HW-019, A39)
 
 [[path.series_elements]]
 order = 6
@@ -161,6 +174,7 @@ supply_net = "RAIL_BUS"
 board = "PANEL"
 trigger_polarity = "n/a"
 open_when = "key off"
+out_nets = ["RAIL_B_HI"]
 
 [[path.series_elements]]
 order = 7
@@ -173,14 +187,16 @@ supply_net = "RAIL_B_HI"
 board = "MOS-B"
 trigger_polarity = "active-high"
 open_when = "no lease, GP13 low, key off (no gate supply)"
+out_nets = ["LAMP_B_NEG"]
 
-# Variant B paths: same series elements; K2 additionally opened by U4 via the Q63 clamp on the Q61 base, and by Q64 resetting the ATtiny.
-# Revised after independent review: RESET is a 140-280 ms pulse, so the cut is pulse-latched, never held (B3a).
+# Variant B paths: same series elements; K2 additionally opened by U4 via the Q63 clamp on the Q61 base.
+# RESET is a 140-280 ms pulse, so the cut is pulse-latched, never held, and the latch is hardware (LATCH_WD, Q65/Q66) that a person clears
+# (revised after review 3, B4: the review-2 Q64 resetting the ATtiny opened an ISP reflash window and its "latch" was RP2350 firmware).
 [[path]]
 id = "PB_A"
 load = "Lamp A (rail A)"
 variant = "B"
-description = "Identical to PA_A; K2 hold node HOLD2 can also be pulled low by Q63 (MAX813L RESET) through J_B"
+description = "Identical to PA_A; the K2 driver base (Q61) can also be pulled low by Q63 (held on by the MAX813L latch) through J_B"
 
 [[path.series_elements]]
 order = 1
@@ -193,6 +209,7 @@ supply_net = "V12_IN"
 board = "PWR"
 trigger_polarity = "n/a"
 open_when = "overcurrent"
+out_nets = ["V12_F1"]
 
 [[path.series_elements]]
 order = 2
@@ -205,6 +222,7 @@ supply_net = "V12_F1"
 board = "PANEL"
 trigger_polarity = "n/a"
 open_when = "pressed"
+out_nets = ["ESTOP_OUT"]
 
 [[path.series_elements]]
 order = 3
@@ -217,6 +235,7 @@ supply_net = "ESTOP_OUT"
 board = "PANEL"
 trigger_polarity = "n/a"
 open_when = "off"
+out_nets = ["ARM_OUT"]
 
 [[path.series_elements]]
 order = 4
@@ -229,6 +248,7 @@ supply_net = "V5"
 board = "RLY1"
 trigger_polarity = "held only while GP14 toggles"
 open_when = "pump stops"
+out_nets = ["MID"]
 
 [[path.series_elements]]
 order = 5
@@ -243,7 +263,10 @@ trigger_polarity = "held only while PB3 toggles and U4 RESET is low"
 open_when = "ATtiny trip; U4 RESET high (5 V < 4.50-4.75 V, PFI < 1.20-1.30 V i.e. 3V3_WD < 2.64-2.86 V, WDI idle 1.00-2.25 s, MR low, 140-280 ms after power-up)"
 cut_sources = ["U4_MAX813L:RESET", "U4_MAX813L:WDO"]
 cut_claim = "pulse-latched"
-latch = "Q64 resets the ATtiny on a MAX813L RESET pulse (PB3 tri-states until a fresh Q&A) and the RP2350 firmware latches OutputMismatch on any unexpected loss of VBUS while armed"
+latch = "hardware"
+latch_part = "LATCH_WD"
+out_nets = ["K2_OUT", "RAIL_BUS"]
+fed_by = ["RP_TR"]                # the Q&A answers come from the RP2350: K2 is a liveness monitor of it (HW-019, A39)
 
 [[path.series_elements]]
 order = 6
@@ -256,6 +279,7 @@ supply_net = "RAIL_BUS"
 board = "MOS-A"
 trigger_polarity = "active-high"
 open_when = "GP12 low"
+out_nets = ["LAMP_A_NEG"]
 
 [[path]]
 id = "PB_B"
@@ -274,6 +298,7 @@ supply_net = "V12_IN"
 board = "PWR"
 trigger_polarity = "n/a"
 open_when = "overcurrent"
+out_nets = ["V12_F1"]
 
 [[path.series_elements]]
 order = 2
@@ -286,6 +311,7 @@ supply_net = "V12_F1"
 board = "PANEL"
 trigger_polarity = "n/a"
 open_when = "pressed"
+out_nets = ["ESTOP_OUT"]
 
 [[path.series_elements]]
 order = 3
@@ -298,6 +324,7 @@ supply_net = "ESTOP_OUT"
 board = "PANEL"
 trigger_polarity = "n/a"
 open_when = "off"
+out_nets = ["ARM_OUT"]
 
 [[path.series_elements]]
 order = 4
@@ -310,6 +337,7 @@ supply_net = "V5"
 board = "RLY1"
 trigger_polarity = "held only while GP14 toggles"
 open_when = "pump stops"
+out_nets = ["MID"]
 
 [[path.series_elements]]
 order = 5
@@ -324,7 +352,10 @@ trigger_polarity = "held only while PB3 toggles and U4 RESET is low"
 open_when = "ATtiny trip or U4 RESET high"
 cut_sources = ["U4_MAX813L:RESET", "U4_MAX813L:WDO"]
 cut_claim = "pulse-latched"
-latch = "Q64 resets the ATtiny on a MAX813L RESET pulse (PB3 tri-states until a fresh Q&A) and the RP2350 firmware latches OutputMismatch on any unexpected loss of VBUS while armed"
+latch = "hardware"
+latch_part = "LATCH_WD"
+out_nets = ["K2_OUT", "RAIL_BUS"]
+fed_by = ["RP_TR"]                # the Q&A answers come from the RP2350: K2 is a liveness monitor of it (HW-019, A39)
 
 [[path.series_elements]]
 order = 6
@@ -337,6 +368,7 @@ supply_net = "RAIL_BUS"
 board = "PANEL"
 trigger_polarity = "n/a"
 open_when = "key off"
+out_nets = ["RAIL_B_HI"]
 
 [[path.series_elements]]
 order = 7
@@ -349,6 +381,7 @@ supply_net = "RAIL_B_HI"
 board = "MOS-B"
 trigger_polarity = "active-high"
 open_when = "no lease"
+out_nets = ["LAMP_B_NEG"]
 
 # ---------------- Single-fault table, variant A (applies to PA_A and PA_B unless path says otherwise) ----------------
 # Rows A1-A30 mirror compatibility.md 3.2. Paths are matched as glob patterns on the path id: "P?_*" is every path.
@@ -361,11 +394,13 @@ path = "P?_*"
 variant = "both"
 fault = "RP2350 frozen / SWD halt"
 element = "RP_TR"
-effect = "GP12/13 frozen (maybe high). GP14 stops, so K1 opens after its pump drop-out of about 0.03-0.22 s at the real 50 Hz toggle (revised after independent review B1). No Q&A answers, so PB3 stops and K2 opens within 2 x 50 ms + about 15 ms: K2, not K1, meets the 120 ms bound"
+effect = "GP12/13 frozen (maybe high). GP14 stops, so K1 opens after its pump drop-out (computed by HW-031) plus its relay release. No Q&A answers: the first missing answer is seen within one 25 ms period, PB3 stops, and K2 opens: budget BUD_K2 is 2 x 25 ms x 1.01 + the K2 drop-out + 10 ms relay release, about 70 ms. K2, not K1, meets the 120 ms bound (revised after review 3, B3)"
 load_state = "off"
 bound_ms = 120
 detected_by = "MID_SENSE, ATtiny trip"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
+budget = "BUD_K2"
 
 [[fault]]
 id = "A2"
@@ -377,6 +412,7 @@ effect = "Pads pull-down + ISO; ext 4.7 k pull-down -> Q_A off; pump stops -> K1
 load_state = "off"
 detected_by = "fault record"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A3"
@@ -388,6 +424,7 @@ effect = "The RP2350 brownout detector watches DVDD only; between about 1.8 and 
 load_state = "off"
 detected_by = "fault record"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A4"
@@ -399,6 +436,7 @@ effect = "No opto current into MOS_A; no pump; no back-feed path because no rela
 load_state = "off"
 detected_by = "ATtiny trip"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A5"
@@ -410,6 +448,7 @@ effect = "Pull-down + ISO until firmware drives outputs low first; ext pull-down
 load_state = "off"
 detected_by = "exit test 1 capture"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A6"
@@ -422,6 +461,8 @@ load_state = "off"
 bound_ms = 210
 detected_by = "fault latched"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
+budget = "BUD_A6"
 
 [[fault]]
 id = "A7"
@@ -429,11 +470,13 @@ path = "P?_*"
 variant = "both"
 fault = "ATtiny frozen"
 element = "U3_ATTINY85"
-effect = "PB3 DC -> K2 opens"
+effect = "PB3 held high or low: the K2 pump stops at once and K2 opens after its drop-out plus its relay release (budget BUD_A7, revised after review 3, B3)"
 load_state = "off"
-bound_ms = 20
+bound_ms = 25
 detected_by = "MID_SENSE high with VBUS 0"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
+budget = "BUD_A7"
 
 [[fault]]
 id = "A8"
@@ -445,6 +488,7 @@ effect = "Port B tri-state -> pump stops -> K2 opens"
 load_state = "off"
 detected_by = "VBUS 0"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A9"
@@ -456,6 +500,7 @@ effect = "As A8"
 load_state = "off"
 detected_by = "VBUS 0"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A10"
@@ -467,6 +512,8 @@ effect = "Erratic AVR at low VCC may keep pumping; K1 and Q_A remain under RP235
 load_state = "off"
 detected_by = "bring-up fuse read-back (avrdude) recorded as evidence"
 verdict = "WARN"
+remaining_cuts = ["K1", "Q_*"]
+fault_mode = "holds"
 
 [[fault]]
 id = "A11"
@@ -478,6 +525,8 @@ effect = "K2 and Q_A still cut"
 load_state = "off-detected"
 detected_by = "MID_SENSE live while K1 commanded off (firmware addition needed)"
 verdict = "PASS"
+remaining_cuts = ["K2", "Q_*"]
+fault_mode = "holds"
 
 [[fault]]
 id = "A12"
@@ -489,6 +538,8 @@ effect = "K1 and Q_A still cut; invisible without an arm-time self-test (deliber
 load_state = "off"
 detected_by = "arm-time self-test (not written)"
 verdict = "WARN"
+remaining_cuts = ["K1", "Q_*"]
+fault_mode = "holds"
 
 [[fault]]
 id = "A13"
@@ -500,6 +551,8 @@ effect = "Lamp A on whenever armed (= commanded state); off when disarmed via K1
 load_state = "off-detected"
 detected_by = "RAIL_A_SENSE vs command after disarm"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2"]
+fault_mode = "holds"
 
 [[fault]]
 id = "A14"
@@ -507,11 +560,12 @@ path = "P?_B"
 variant = "both"
 fault = "MOS_B drain-source short"
 element = "Q_B"
-effect = "Lamp B on with armed + key and no lease; RAIL_B_SENSE live while commanded off -> firmware drops K1 and Q_A on that tick, latches"
+effect = "Lamp B on with armed + key and no lease; RAIL_B_SENSE live while commanded off -> firmware drops K1 and Q_A on the next tick, and K1 opens after its pump drop-out and relay release (budget BUD_A14: 10 ms tick + drop-out + 10 ms). The firmware should also send one deliberate wrong answer so K2 opens in about 55 ms: recommended, not relied on (revised after review 3, B3)"
 load_state = "on-bounded"
-bound_ms = 30
+bound_ms = 340
 detected_by = "RAIL_B_SENSE"
 verdict = "PASS"
+budget = "BUD_A14"
 
 [[fault]]
 id = "A15"
@@ -523,6 +577,8 @@ effect = "K1 held; K2 and Q_A cut"
 load_state = "off-detected"
 detected_by = "MID_SENSE"
 verdict = "PASS"
+remaining_cuts = ["K2", "Q_*"]
+fault_mode = "holds"
 
 [[fault]]
 id = "A16"
@@ -534,6 +590,8 @@ effect = "K2 held; K1 and Q_A cut"
 load_state = "off"
 detected_by = "arm-time self-test only"
 verdict = "WARN"
+remaining_cuts = ["K1", "Q_*"]
+fault_mode = "holds"
 
 [[fault]]
 id = "A17"
@@ -545,6 +603,7 @@ effect = "Relay follows DC pin level; the other relay still cuts"
 load_state = "off"
 detected_by = "per-cut self-test"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A18"
@@ -556,6 +615,7 @@ effect = "With K1 and K2 on separate relay modules, IN2 unused and tied to VCC t
 load_state = "off"
 detected_by = "arm-time self-test"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A19"
@@ -567,6 +627,7 @@ effect = "NC2 opens -> firmware drops all"
 load_state = "off-detected"
 detected_by = "ESTOP_SENSE vs VBUS"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A20"
@@ -578,6 +639,7 @@ effect = "Open circuit"
 load_state = "off"
 detected_by = "VBUS / sense"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A21"
@@ -589,6 +651,7 @@ effect = "Pull-up reads pressed -> fault"
 load_state = "off"
 detected_by = "fault"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A22"
@@ -600,6 +663,7 @@ effect = "Never seen off-then-on after restart -> never arms"
 load_state = "off"
 detected_by = "-"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A24"
@@ -611,6 +675,7 @@ effect = "Opto not driven"
 load_state = "off-detected"
 detected_by = "commanded on + sensed dead -> fault after OUTPUT_SETTLE"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A25"
@@ -622,6 +687,7 @@ effect = "Reads dead; hides a later stuck-on (second fault)"
 load_state = "off"
 detected_by = "arm-time (commanded on, sensed dead)"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A26"
@@ -629,10 +695,11 @@ path = "P?_*"
 variant = "both"
 fault = "5 V buck fails shorted (12 V on 5 V rail)"
 element = "M1_BUCK5"
-effect = "With the SCR crowbar (TL431A + BT151-500R, trips at 5.32-5.66 V) the rail is pulled to about 1.2 V, all logic is unpowered, the coils release, and F2 blows (at 350 % or more within 0.5 s) or the adapter hiccups. The SCR survives the adapter's short-circuit current. The 1N5339B zener it replaces could fail before the fuse and clamped at 6.5-8 V (revised after independent review B2)"
+effect = "With the SCR crowbar (TL431A anode to GND driving a 2N3906 that fires the BT151-500R; trips at 5.37-5.66 V, computed by HW-029) the rail is pulled to about 1.2 V, all logic is unpowered and the coils release. A shorted switch blows F2 (adapter) and F3 (buck output); a live buck current-limits at 3.5-7.5 A into the SCR, which F3 clears in 0.02-0.5 s (revised after review 3, B1 and B2: the review-2 anode-to-gate wiring tripped at 6-16 V, and a live buck never blew F2)"
 load_state = "off"
 detected_by = "-"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A30"
@@ -644,6 +711,7 @@ effect = "Coils de-energise; RP2350 and ATtiny unpowered"
 load_state = "off"
 detected_by = "-"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A27"
@@ -655,6 +723,7 @@ effect = "No VBUS feedback; firmware must latch a fault (gap)"
 load_state = "off"
 detected_by = "I2C error (firmware addition needed)"
 verdict = "WARN"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A28"
@@ -673,10 +742,11 @@ path = "P?_*"
 variant = "both"
 fault = "12 V adapter overvoltage (24 V class) or the buck trimpot bumped high"
 element = "PSU12"
-effect = "The SCR crowbar also catches a buck set above 5.66 V. Lamps are rated 12-24 V; buck input rating UNVERIFIED (revised after independent review B2)"
+effect = "The SCR crowbar also catches a buck set above 5.66 V, and F3 clears the live buck. Lamps are rated 12-24 V; buck input rating UNVERIFIED (revised after review 3, B1 and B2)"
 load_state = "off"
 detected_by = "-"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 
 [[fault]]
@@ -689,6 +759,7 @@ effect = "Open circuit"
 load_state = "off"
 detected_by = "VBUS / sense"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 # ---------------- Variant B: all A rows apply to PB_* unchanged, plus/changed: ----------------
 
@@ -698,11 +769,13 @@ path = "PB_*"
 variant = "B"
 fault = "ATtiny runaway that keeps toggling PB3 but stops toggling PB4"
 element = "U3_ATTINY85"
-effect = "WDO goes low after 1.00-2.25 s, MR pulls RESET high for 140-280 ms, Q63 clamps the Q61 base and Q64 resets the ATtiny, so PB3 tri-states and K2 opens. RESET is a pulse, not a latch: the RP2350 latches OutputMismatch on the VBUS loss and the cut becomes permanent until re-arm (revised after independent review B3a; the original text said OFF after 2.25 s without a latch)"
+effect = "WDO goes low after 1.00-2.25 s and MR pulls RESET high for 140-280 ms. The Q65/Q66 hardware latch sets on that pulse and holds the Q63 clamp on, so the Q61 base stays low and K2 stays open until a person presses the panel RESET button. The RP2350 firmware is not part of the latch (revised after review 3, B4: Q64 let a compromised RP2350 reflash the ATtiny, and the review-2 'latch' was firmware)"
 load_state = "off"
 bound_ms = 2250
 detected_by = "U4 RESET"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
+budget = "BUD_B1"
 
 [[fault]]
 id = "B2"
@@ -714,6 +787,7 @@ effect = "PFI < 1.20-1.30 V (3V3_WD < 2.64-2.86 V) -> PFO low -> MR -> RESET -> 
 load_state = "off"
 detected_by = "U4 RESET"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "B3"
@@ -725,6 +799,7 @@ effect = "RESET high -> clamp -> K2 off"
 load_state = "off"
 detected_by = "U4 RESET"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "B4"
@@ -736,6 +811,7 @@ effect = "RESET high 140-280 ms after threshold -> K2 held off during boot"
 load_state = "off"
 detected_by = "exit test 1 D7"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "B5"
@@ -747,6 +823,7 @@ effect = "Layer B unreliable; variant A unchanged"
 load_state = "off"
 detected_by = "bench acceptance test (compatibility.md 5.3)"
 verdict = "WARN"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "B6"
@@ -758,6 +835,7 @@ effect = "Only a broken WDI wire floats the pin, and a floating WDI disables the
 load_state = "off"
 detected_by = "periodic test 5f (latent otherwise)"
 verdict = "WARN"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "B7"
@@ -769,6 +847,7 @@ effect = "Layer B gone; falls back to variant A"
 load_state = "off"
 detected_by = "periodic test 5f (latent otherwise)"
 verdict = "WARN"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "B8"
@@ -780,6 +859,7 @@ effect = "K2 can never close (availability loss)"
 load_state = "off"
 detected_by = "cannot arm"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "B9"
@@ -791,6 +871,7 @@ effect = "As B8"
 load_state = "off"
 detected_by = "cannot arm"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "B10"
@@ -802,17 +883,19 @@ effect = "Q63 base 100 k pull-down -> off -> variant A behaviour"
 load_state = "off"
 detected_by = "-"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "B11"
 path = "PB_*"
 variant = "B"
 fault = "Any single fault inside layer B"
-element = "U4_MAX813L|Q62|Q63|D63|D64"
-effect = "Layer B outputs can only sink HOLD2 or assert reset; none can hold K2 closed"
+element = "U4_MAX813L|Q62|Q63|D63|D64|LATCH_WD"
+effect = "Layer B outputs can only pull the Q61 base low or set the latch; none can hold K2 closed"
 load_state = "off"
 detected_by = "-"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 # ---------------- Rows added after the independent review (A31-A39, B12, B13) and by the design CI (A40) ----------------
 # A31-A39 and B12-B13 are the independent reviewer's rows (hardware/p1/independent-review.md section 4), with the verdict of the
@@ -824,10 +907,11 @@ path = "P?_*"
 variant = "both"
 fault = "Relay IN shorted to GND (off-by-one Dupont housing, stray strand, solder splash)"
 element = "K1|K2"
-effect = "That relay is held regardless of its pump. Keyed JST-XH connectors and separate modules mean one slip holds one cut only; the arm-time per-cut self-test finds it"
+effect = "That relay is held regardless of its pump. Separate modules and shrouded keyed plugs of different families (B4B-XH-A on module 1, B5B-XH-A with a blank position on module 2) mean the plugs cannot swap and one slip holds one cut only; the arm-time per-cut self-test finds it (HW-020, HW-037; revised after review 3, B7)"
 load_state = "off"
 detected_by = "MID_SENSE (K1); arm-time self-test (K2)"
 verdict = "WARN"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A32"
@@ -839,6 +923,7 @@ effect = "Same as a welded relay (A11, A12): the other cut and the MOSFET still 
 load_state = "off"
 detected_by = "MID_SENSE (K1); arm-time self-test (K2)"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A33"
@@ -850,6 +935,7 @@ effect = "The relay is open, so the bench cannot arm"
 load_state = "off"
 detected_by = "arm-time check"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A34"
@@ -857,10 +943,11 @@ path = "P?_*"
 variant = "both"
 fault = "Debug or ISP channel connected to the supervisor host (SWD, ATtiny ISP, BOOT)"
 element = "RP_TR"
-effect = "Code on the host could halt the RP2350, answer the Q&A and drive GP12, defeating K1, K2 and the MOSFET together. With the probe hosted on the Mac only, a keyed lead unplugged except for flashing and test 5a, and no Pi path to ISP, there is no path (HW-030)"
+effect = "Code on the host could halt the RP2350, answer the Q&A and drive GP12, defeating K1, K2 and the MOSFET together. The probe is hosted on the Mac only, its keyed lead unplugged except for flashing and test 5a, there is no Pi path to ISP or SWD, and the analyzer (whose firmware the host uploads and whose buffer is unverified) is hosted on the Mac and treated as drive-capable: HW-030 finds no path"
 load_state = "off"
 detected_by = "procedure and physical disconnect; HW-030 in CI"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A35"
@@ -872,17 +959,20 @@ effect = "The pump would survive a CPU hang until the watchdog. Firmware rule: P
 load_state = "off"
 detected_by = "firmware rule (not yet in CI)"
 verdict = "WARN"
+remaining_cuts = ["K1", "Q_*"]
+fault_mode = "holds"
 
 [[fault]]
 id = "A36"
 path = "P?_*"
 variant = "both"
-fault = "E-stop pressed then released with a firmware sense fault"
+fault = "E-stop pressed then released with one firmware sense fault"
 element = "ESTOP_NC1"
-effect = "NC1 cuts power. Preventing restart on release rests on RP2350 firmware (ESTOP_SENSE and the arm off-then-on rule): single-fault tolerant at the sensing level (NC2 and ARM_SENSE) but not in hardware. The recommended K0 seal-in relay closes it (open owner decision)"
+effect = "NC1 cuts power. Releasing it looks like an arm off-then-on at ARM_SENSE, so one sense fault used to restart rail A. U-EOUT (a PC817 on ESTOP_OUT, between NC1 and the arm toggle, read on GP17) is now a second independent sense: an arm cycle counts only if ESTOP_OUT stayed live throughout, and ESTOP_OUT dead while GP2 reads released latches SenseMismatch. One sense fault no longer restarts the rail; two would, and only the K0 seal-in relay (open owner decision) removes that. HW-036 checks the topology; test 4c"
 load_state = "off"
-detected_by = "ESTOP_SENSE, ARM_SENSE; test 4c"
+detected_by = "ESTOP_OUT (GP17), ESTOP_SENSE, ARM_SENSE; test 4c"
 verdict = "WARN"
+remaining_cuts = ["K1", "Q_*"]
 
 [[fault]]
 id = "A37"
@@ -890,10 +980,11 @@ path = "P?_*"
 variant = "both"
 fault = "Buck trimpot bumped high (5.5-12 V on the 5 V rail)"
 element = "M1_BUCK5"
-effect = "As A26: only the SCR crowbar catches a rail above its trip point. The 1N5339B zener would not"
+effect = "As A26: the SCR crowbar catches a rail above 5.66 V and F3 clears the live buck. A zener would not, and a fuse in front of the buck alone never sees the crowbar current (revised after review 3, B2)"
 load_state = "off"
 detected_by = "SCR crowbar blows F2"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A38"
@@ -905,6 +996,7 @@ effect = "Rail B is gated by MOS-B and a live lease only (as A13)"
 load_state = "off"
 detected_by = "KEY_SENSE stays on after key-off"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "A39"
@@ -912,10 +1004,11 @@ path = "P?_*"
 variant = "both"
 fault = "RP2350 answers the Q&A while the safety logic is stalled (dual core, interrupt or FIFO)"
 element = "RP_TR"
-effect = "K1, K2 and the MOSFET are all held. K2 is a liveness monitor, not a second decision-maker: two cuts, one decision-maker. Rules: the answer is a function of the ATtiny's unpredictable challenge, at most one SPI TX FIFO word per pass, produced in the same pass as the pump toggle"
-load_state = "off"
-detected_by = "firmware rules; P2: the ATtiny gets its own view of the e-stop"
-verdict = "WARN"
+effect = "K1, K2 and the MOSFET are all held: the stalled RP2350 keeps its pump, its answers and GP12 alive. K2 is a liveness monitor of the RP2350, not a second decision-maker: two cuts, one decision-maker. A stated limit, not a pass (exit test 5g). Mitigations are firmware: the answer is a function of the ATtiny's unpredictable challenge, at most one SPI TX FIFO word per pass, produced in the same pass as the pump toggle; P2: the ATtiny gets its own view of the e-stop"
+load_state = "on"
+detected_by = "exit test 5g (a limit); firmware rules"
+verdict = "FAIL"
+fault_mode = "holds"
 
 [[fault]]
 id = "A40"
@@ -927,6 +1020,7 @@ effect = "The load is not energised by this fault. The 22 AWG wire (3 A) is prot
 load_state = "off"
 detected_by = "BOM check: only 1 A and 2 A fuses are fitted"
 verdict = "WARN"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "B12"
@@ -934,10 +1028,11 @@ path = "PB_*"
 variant = "B"
 fault = "WDO to MR pulse train (the MAX813L watchdog resets itself through MR)"
 element = "U4_MAX813L"
-effect = "RESET is a 140-280 ms pulse every 1.2-2.5 s, not a held cut. Fixed by Q64 resetting the ATtiny (PB3 stays tri-stated until a fresh Q&A) and the RP2350 latching on the VBUS loss (HW-033)"
+effect = "RESET is a 140-280 ms pulse every 1.2-2.5 s, not a held cut. Fixed by the hardware latch LATCH_WD (Q65/Q66) that a person clears; HW-033 requires a hardware latch part on the cut's own board that no other cut controls or feeds (revised after review 3, B4)"
 load_state = "off"
-detected_by = "RP2350 OutputMismatch latch"
+detected_by = "HW-033; latch test in test 5f"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
 
 [[fault]]
 id = "B13"
@@ -949,59 +1044,253 @@ effect = "VCC about 4.2 V is below the 4.50-4.75 V threshold, so U4 sits in rese
 load_state = "off"
 detected_by = "bring-up: U4 VCC at least 4.9 V"
 verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
+
+[[fault]]
+id = "A41"
+path = "P?_*"
+variant = "both"
+fault = "Logic analyzer able to drive its probe wires (host-uploaded FX2 firmware, input buffer wiring unverified, buffer-less clones exist)"
+element = "LA"
+effect = "A compromised AI host could pull a relay input low, pump a relay with the RP2350 in reset, or raise GP12. The analyzer is hosted on the Mac for every test and the checker treats it as drive-capable until input_only_verified is set after a meter check; the evidence for tests 2 and 5 is recorded by a host that is not an AI host (HW-030, HW-022; review 3, B6)"
+load_state = "off"
+detected_by = "HW-030, HW-022 in CI; meter check of the 74LVC245 DIR and OE pins"
+verdict = "PASS"
+remaining_cuts = ["K1", "K2", "Q_*"]
+
+[[fault]]
+id = "A42"
+path = "P?_*"
+variant = "both"
+fault = "Crowbar SCR destroyed (possibly open) by a live buck current-limiting into it"
+element = "M6_SCR|F3"
+effect = "F3 (1 A, between the buck output and the rail) clears the buck's 3.5-7.5 A limit in 0.02-0.5 s, inside the SCR's rated time, so the SCR is not left to carry 5-9 W (HW-029; review 3, B2). A destroyed SCR that fails open leaves the rail unclamped, which is the single-fault case the buck short row A26 covers only while the SCR lives"
+load_state = "off"
+detected_by = "HW-029; crowbar acceptance test"
+verdict = "WARN"
+remaining_cuts = ["K1", "K2", "Q_*"]
+
+[[fault]]
+id = "B14"
+path = "PB_*"
+variant = "B"
+fault = "Latch LATCH_WD fails (Q65 or Q66 open, short, or the RESET button stuck)"
+element = "LATCH_WD|Q63"
+effect = "Stuck set: K2 can never close (availability). Stuck clear or open: variant A behaviour, K2 is still cut by the ATtiny pump alone. The button held down clears the latch, which only matters while U4 is also asserting RESET, and then K2 follows U4 again within one pulse period"
+load_state = "off"
+detected_by = "latch test in test 5f"
+verdict = "PASS"
+remaining_cuts = ["K1", "Q_*"]
 
 # ---------------- Charge pumps (HW-031) ----------------
-# HOLD is solved from the pump frequency, series capacitor, diode drops, store capacitor, bleed and base resistors and the relay
-# input current. The toggle period is the firmware's: GP14 toggles once per 10 ms tick (50 Hz); the ATtiny bit-bangs PB3 at about 1 kHz.
-# Revised after independent review B1. Set 1 serves a relay input current up to 3 mA, set 2 up to 9 mA; measure I_IN first.
+# HW-031 computes the hold voltage at the worst corner of these component values and the dropout window from the last edge
+# to the relay hold current, from the component values below (event model, ci/check_hardware.py sim_pump). Nothing here is a
+# typed-in result except dropout_ms, which must bracket the computed window or the rule FAILs.
+# GP14 toggles once per 10 ms tick (50 Hz); the ATtiny bit-bangs PB3 at about 1 kHz. Revised after review 3: corner values,
+# set 1 for I_IN of 2 mA or less, set 2 for 5 mA or less (the review-2 limits of 3 and 9 mA failed at worst case), C62 470 nF and R62 47 k.
 
 [[pump]]
 id = "PUMP1"
 element = "K1"
 driver = "RP_TR"
 relay = "RLY1"
+parameter_set = 1
+load_ma = 2.0
 toggle_period_us = 10000
-vpp_v = 3.3
 c_series_f = 1.0e-6
+c_series_tol = 0.10
 r_series_ohm = 470.0
-diode_vf_v = 0.25
 c_hold_f = 10.0e-6
+c_hold_tol_lo = 0.20
+c_hold_tol_hi = 0.20
 r_bleed_ohm = 47000.0
 r_base_ohm = 10000.0
-vbe_v = 0.6
-hfe_min = 70.0
-parameter_set = 1
-dropout_ms = [27, 116]
+r_tol = 0.01
+vpp_min_v = 3.2
+vpp_max_v = 3.3
+diode_vf_min_v = 0.20
+diode_vf_max_v = 0.30
+vbe_min_v = 0.60
+vbe_max_v = 0.70
+hfe_min = 60.0
+hfe_max = 200.0
+dropout_ms = [60.0, 205.0]
+
+[[pump]]
+id = "PUMP1B"
+element = "K1"
+driver = "RP_TR"
+relay = "RLY1"
+parameter_set = 2
+load_ma = 5.0
+toggle_period_us = 10000
+c_series_f = 2.2e-6
+c_series_tol = 0.10
+r_series_ohm = 470.0
+c_hold_f = 22.0e-6
+c_hold_tol_lo = 0.20
+c_hold_tol_hi = 0.20
+r_bleed_ohm = 47000.0
+r_base_ohm = 4700.0
+r_tol = 0.01
+vpp_min_v = 3.2
+vpp_max_v = 3.3
+diode_vf_min_v = 0.20
+diode_vf_max_v = 0.30
+vbe_min_v = 0.60
+vbe_max_v = 0.70
+hfe_min = 60.0
+hfe_max = 200.0
+dropout_ms = [125.0, 315.0]
 
 [[pump]]
 id = "PUMP2"
 element = "K2"
 driver = "U3_ATTINY85"
 relay = "RLY2"
-toggle_period_us = 500
-vpp_v = 3.3
-c_series_f = 220.0e-9
-r_series_ohm = 470.0
-diode_vf_v = 0.25
-c_hold_f = 1.0e-6
-r_bleed_ohm = 100000.0
-r_base_ohm = 4700.0
-vbe_v = 0.6
-hfe_min = 70.0
 parameter_set = 1
-dropout_ms = [8, 15]
+load_ma = 5.0
+toggle_period_us = 500
+c_series_f = 220.0e-9
+c_series_tol = 0.10
+r_series_ohm = 470.0
+c_hold_f = 470.0e-9
+c_hold_tol_lo = 0.10
+c_hold_tol_hi = 0.10
+r_bleed_ohm = 47000.0
+r_base_ohm = 4700.0
+r_tol = 0.01
+vpp_min_v = 3.05
+vpp_max_v = 3.3
+diode_vf_min_v = 0.20
+diode_vf_max_v = 0.30
+vbe_min_v = 0.60
+vbe_max_v = 0.70
+hfe_min = 60.0
+hfe_max = 200.0
+dropout_ms = [3.5, 8.0]
+
+# ---------------- Timing budgets (HW-035) ----------------
+# A bound is the sum of its components: the Q&A period (with its clock tolerance), the pump drop-out HW-031 computes, and the
+# relay release time. A fault row's bound_ms must be at least its budget's sum.
+
+[[budget]]
+id = "BUD_K2"
+cut = "K2"
+bound_ms = 120
+components = [ { name = "two Q&A periods, OSCCAL-calibrated clock", periods = 2, period_ms = 25.0, tol = 0.01 }, { name = "K2 pump drop-out", pump = "PUMP2" }, { name = "K2 relay release", relay = "RLY2" } ]
+
+[[budget]]
+id = "BUD_A7"
+cut = "K2"
+bound_ms = 25
+components = [ { name = "K2 pump drop-out", pump = "PUMP2" }, { name = "K2 relay release", relay = "RLY2" } ]
+
+[[budget]]
+id = "BUD_A6"
+cut = "Q_A"
+bound_ms = 210
+components = [ { name = "two heartbeat periods", periods = 2, period_ms = 100.0, tol = 0.0 }, { name = "one 10 ms tick", ms = 10.0 } ]
+
+[[budget]]
+id = "BUD_A14"
+cut = "K1"
+bound_ms = 340
+components = [ { name = "one 10 ms tick", ms = 10.0 }, { name = "K1 pump drop-out (slowest set)", pump = ["PUMP1", "PUMP1B"] }, { name = "K1 relay release", relay = "RLY1" } ]
+
+[[budget]]
+id = "BUD_B1"
+cut = "K2"
+bound_ms = 2250
+components = [ { name = "MAX813L watchdog timeout, maximum", ms = 2250.0 } ]
+
+# ---------------- Sense points (HW-036, HW-037) ----------------
+
+[[sense]]
+id = "S_ARM"
+net = "ARM_OUT"
+pin = "RP_TR:GP3"
+function = "arm"
+
+[[sense]]
+id = "S_EOUT"
+net = "ESTOP_OUT"
+pin = "RP_TR:GP17"
+function = "estop-out"
+
+[[sense]]
+id = "S_MID"
+net = "MID"
+pin = "RP_TR:GP29"
+function = "mid"
+
+[[sense]]
+id = "S_VBUS"
+net = "RAIL_BUS"
+pin = "INA228:IN-"
+function = "vbus"
+
+[[sense]]
+id = "S_RAILA"
+net = "LAMP_A_NEG"
+pin = "RP_TR:GP7"
+function = "rail"
+
+[[sense]]
+id = "S_RAILB"
+net = "LAMP_B_NEG"
+pin = "RP_TR:GP28"
+function = "rail"
+
+# Arm-time per-cut self-tests, corrected after review 3 (B7): K1 open makes MID dead, K2 open leaves MID live.
+[[selftest]]
+id = "ST_K1"
+path = "P?_*"
+element = "K1"
+expect = { S_MID = "dead", S_VBUS = "dead" }
+
+[[selftest]]
+id = "ST_K2"
+path = "P?_*"
+element = "K2"
+expect = { S_MID = "live", S_VBUS = "dead" }
+
+[[selftest]]
+id = "ST_QA"
+path = "P?_A"
+element = "Q_A"
+expect = { S_RAILA = "dead", S_VBUS = "live" }
+
+[[selftest]]
+id = "ST_QB"
+path = "P?_B"
+element = "Q_B"
+expect = { S_RAILB = "dead", S_VBUS = "live" }
 
 # ---------------- 5 V rail clamp (HW-029) ----------------
+# The trip band is computed from the divider, the TL431A reference tolerance and the gate drive: trip = Vref x (1 + R1/R2) + Iref x R1.
+# Revised after review 3 (B1): anode to GND driving a 2N3906 that fires the SCR. The review-2 anode-to-gate wiring tripped at 6-16 V.
 
 [[clamp]]
 id = "CL1"
 part = "M6_SCR"
+pin = "A"
 kind = "scr"
+trigger = "tl431-gnd-pnp"
 rail = "V5"
-trip_min_v = 5.32
+r_top_ohm = 12000.0
+r_bot_ohm = 10000.0
+r_tol = 0.01
+vref_min_v = 2.470
+vref_max_v = 2.520
+iref_max_ua = 4.0
+vgt_max_v = 1.5
+igt_max_ma = 15.0
+r_gate_ohm = 100.0
+vce_sat_v = 0.2
+trip_min_v = 5.37
 clamp_v_max = 5.66
+source_v = 12.0
 rated_a = 12.0
-rated_ms = 0
-fuse = "F2"
-source = "PSU12"
+rated_ms = 1000
 protects = ["U4_MAX813L", "M5_LDO", "RP_TR", "RLY1", "RLY2"]

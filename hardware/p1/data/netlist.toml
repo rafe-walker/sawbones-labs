@@ -20,6 +20,7 @@ domain = "12V"
 nominal_v = 12.0
 max_v = 13.0
 isolation_domain = "GND_SYS"
+safety_domain = "supply"
 
 [[net]]
 name = "V12_F1"
@@ -27,6 +28,7 @@ domain = "12V_LOAD"
 nominal_v = 12.0
 max_v = 13.0
 isolation_domain = "GND_SYS"
+safety_domain = "supply"
 
 [[net]]
 name = "V12_F2"
@@ -34,6 +36,7 @@ domain = "12V_LOGIC"
 nominal_v = 12.0
 max_v = 13.0
 isolation_domain = "GND_SYS"
+safety_domain = "supply"
 
 [[net]]
 name = "ESTOP_OUT"
@@ -41,6 +44,7 @@ domain = "12V_LOAD"
 nominal_v = 12.0
 max_v = 13.0
 isolation_domain = "GND_SYS"
+safety_domain = "chain"
 
 [[net]]
 name = "ARM_OUT"
@@ -48,6 +52,7 @@ domain = "12V_LOAD"
 nominal_v = 12.0
 max_v = 13.0
 isolation_domain = "GND_SYS"
+safety_domain = "chain"
 
 [[net]]
 name = "MID"
@@ -55,6 +60,7 @@ domain = "12V_LOAD"
 nominal_v = 12.0
 max_v = 13.0
 isolation_domain = "GND_SYS"
+safety_domain = "chain"
 
 [[net]]
 name = "K2_OUT"
@@ -62,6 +68,7 @@ domain = "12V_LOAD"
 nominal_v = 12.0
 max_v = 13.0
 isolation_domain = "GND_SYS"
+safety_domain = "chain"
 
 [[net]]
 name = "RAIL_BUS"
@@ -69,6 +76,7 @@ domain = "12V_LOAD"
 nominal_v = 12.0
 max_v = 13.0
 isolation_domain = "GND_SYS"
+safety_domain = "load"
 
 [[net]]
 name = "RAIL_B_HI"
@@ -76,6 +84,7 @@ domain = "12V_LOAD"
 nominal_v = 12.0
 max_v = 13.0
 isolation_domain = "GND_SYS"
+safety_domain = "load"
 
 [[net]]
 name = "LAMP_A_NEG"
@@ -84,6 +93,7 @@ nominal_v = 12.0
 max_v = 13.0
 isolation_domain = "GND_SYS"
 notes = "Switched node. No tool ground ever."
+safety_domain = "load"
 
 [[net]]
 name = "LAMP_B_NEG"
@@ -92,12 +102,20 @@ nominal_v = 12.0
 max_v = 13.0
 isolation_domain = "GND_SYS"
 notes = "Switched node. No tool ground ever."
+safety_domain = "load"
 
 [[net]]
 name = "V5"
 domain = "5V"
 nominal_v = 5.05
 max_v = 5.1
+isolation_domain = "GND_SYS"
+
+[[net]]
+name = "V5_RAW"
+domain = "5V"
+nominal_v = 5.05
+max_v = 12.0
 isolation_domain = "GND_SYS"
 
 [[net]]
@@ -198,6 +216,12 @@ board = "PWR"
 net = "V5"
 
 [[node]]
+name = "QCB.B"
+board = "PWR"
+net = "V5"
+notes = "Q_CB base node: TL431A cathode through 1.0 k, 680 ohm to the emitter."
+
+[[node]]
 name = "TB-ARM"
 board = "TR"
 net = "ARM_OUT"
@@ -222,22 +246,26 @@ name = "HOLD1"
 board = "TR"
 net = "LOGIC_3V3"
 notes = "Pump 1 storage node (C52)."
+drive_chain = true
 
 [[node]]
 name = "HOLD2"
 board = "WD"
 net = "LOGIC_3V3"
 notes = "Pump 2 storage node (C62)."
+drive_chain = true
 
 [[node]]
 name = "Q51.C"
 board = "TR"
 net = "RLY_IN"
+drive_chain = true
 
 [[node]]
 name = "Q61.C"
 board = "WD"
 net = "RLY_IN"
+drive_chain = true
 
 [[node]]
 name = "Q62.C"
@@ -266,21 +294,57 @@ net = "LOGIC_3V3"
 notes = "Q61 base, K2 pump hold stage. The variant B clamp pulls it low."
 
 [[node]]
-name = "Q64.C"
-board = "WD"
-net = "V3V3_WD"
-notes = "Q64 collector, to the ATtiny RESET (variant B)."
-
-[[node]]
-name = "Q64.B"
+name = "Q65.B"
 board = "WD"
 net = "LOGIC_5V_WD"
-notes = "Q64 base (variant B)."
+notes = "Q65 base: U4 RESET via 10 k, 100 k to GND, hold path from Q66 and the RESET button (variant B latch)."
+
+[[node]]
+name = "Q65.C"
+board = "WD"
+net = "LOGIC_5V_WD"
+notes = "Q65 collector (variant B latch)."
+
+[[node]]
+name = "Q66.B"
+board = "WD"
+net = "LOGIC_5V_WD"
+notes = "Q66 base (variant B latch)."
+
+[[node]]
+name = "Q66.C"
+board = "WD"
+net = "LOGIC_5V_WD"
+notes = "Q66 collector: hold path and clamp drive (variant B latch)."
+
+[[node]]
+name = "Q63.B"
+board = "WD"
+net = "LOGIC_5V_WD"
+notes = "Q63 base from the latch through R68 10 k (variant B)."
 
 [[node]]
 name = "U-ARM.C"
 board = "TR"
 net = "LOGIC_3V3"
+
+[[node]]
+name = "U-EOUT.A"
+board = "TR"
+net = "ESTOP_OUT"
+notes = "U-EOUT PC817 LED anode, 4.7 k from ESTOP_OUT (between NC1 and the arm toggle): the second, independent sense of the e-stop (review 3, B5)."
+
+[[node]]
+name = "U-EOUT.C"
+board = "TR"
+net = "LOGIC_3V3"
+notes = "U-EOUT PC817 collector, 10 k pull-up, to GP17 (bottom pad)."
+
+[[node]]
+name = "LEASE_Q.B"
+board = "TR"
+net = "LOGIC_3V3"
+notes = "Lease LED transistor base, 10 k from GP15, 4.7 k pull-down (E9)."
 
 [[node]]
 name = "U-KEY.C"
@@ -383,12 +447,24 @@ observed_by = []
 [[connection]]
 id = "C108"
 from = "M1_BUCK5:OUT+"
+to = "F3:A"
+net = "V5_RAW"
+domain = "5V"
+joint = "wired-and-soldered"
+variant = "both"
+observed_by = [1]
+notes = "Buck OUT+ into F3 (revised after review 3, B2): the crowbar and every load are downstream of F3."
+
+[[connection]]
+id = "C108b"
+from = "F3:B"
 to = "node:TB-5V"
 net = "V5"
 domain = "5V"
 joint = "wired-and-soldered"
 variant = "both"
-observed_by = [1]
+observed_by = []
+notes = "F3 1 A to the 5 V rail (revised after review 3, B2)."
 
 [[connection]]
 id = "C109"
@@ -414,28 +490,60 @@ observed_by = []
 [[connection]]
 id = "C109c"
 from = "M6B_TL431A:K"
+to = "node:QCB.B"
+net = "V5"
+domain = "5V"
+joint = "soldered-to-board"
+variant = "both"
+observed_by = []
+notes = "TL431A cathode through 1.0 k to the Q_CB base, 680 ohm base to emitter (revised after review 3, B1). REF from a 12.0 k / 10.0 k 1 % divider, 1 nF REF to GND."
+
+[[connection]]
+id = "C109d"
+from = "M6B_TL431A:A"
+to = "node:TB-GND"
+net = "GND_SYS"
+domain = "GND"
+joint = "soldered-to-board"
+variant = "both"
+observed_by = []
+notes = "TL431A ANODE TO GND (revised after review 3, B1: the review-2 anode-to-gate wiring tripped at 6-16 V)."
+
+[[connection]]
+id = "C109e"
+from = "M6C_QCB:E"
 to = "node:TB-5V"
 net = "V5"
 domain = "5V"
 joint = "soldered-to-board"
 variant = "both"
 observed_by = []
-notes = "REF from 12.0 k / 10.0 k 1 % divider (TB-5V to REF to GND), 1 nF REF to GND. Trip 5.32-5.66 V."
+notes = "Q_CB 2N3906 emitter on +5 V."
 
 [[connection]]
-id = "C109d"
-from = "M6B_TL431A:A"
+id = "C109f"
+from = "node:QCB.B"
+to = "M6C_QCB:B"
+net = "V5"
+domain = "5V"
+joint = "soldered-to-board"
+variant = "both"
+observed_by = []
+
+[[connection]]
+id = "C109g"
+from = "M6C_QCB:C"
 to = "M6_SCR:G"
 net = "V5"
 domain = "5V"
 joint = "soldered-to-board"
 variant = "both"
 observed_by = []
-notes = "Through 220 ohm, with 10 nF gate to cathode."
+notes = "Q_CB collector through 100 ohm to the SCR gate; 1.0 k and 10 nF gate to cathode."
 
 [[connection]]
 id = "C111"
-from = "LAMP:+"
+from = "L_PWR:+"
 to = "node:TB-12V-F1"
 net = "V12_F1"
 domain = "12V_LOAD"
@@ -549,7 +657,7 @@ observed_by = []
 
 [[connection]]
 id = "C212"
-from = "LAMP:+"
+from = "LAMP_A:+"
 to = "MOS_A:L+"
 net = "RAIL_BUS"
 domain = "12V_LOAD"
@@ -560,7 +668,7 @@ notes = "Lamp A (+ M15 resistor in parallel)."
 
 [[connection]]
 id = "C213"
-from = "LAMP:-"
+from = "LAMP_A:-"
 to = "MOS_A:LOAD"
 net = "LAMP_A_NEG"
 domain = "12V_LOAD_SWITCHED"
@@ -610,7 +718,7 @@ observed_by = []
 
 [[connection]]
 id = "C218"
-from = "LAMP:-"
+from = "LAMP_B:-"
 to = "MOS_B:LOAD"
 net = "LAMP_B_NEG"
 domain = "12V_LOAD_SWITCHED"
@@ -618,6 +726,48 @@ joint = "panel-terminal"
 variant = "both"
 observed_by = [3, 4]
 notes = "Lamp B; its + goes to MOS_B:L+ (RAIL_B_HI)."
+
+[[connection]]
+id = "C219"
+from = "LAMP_B:+"
+to = "MOS_B:L+"
+net = "RAIL_B_HI"
+domain = "12V_LOAD"
+joint = "panel-terminal"
+variant = "both"
+observed_by = [4]
+notes = "Lamp B +, on RAIL_B_HI (the lamps are four separate parts: one LAMP part joined the pre-e-stop 12 V to this load terminal, review 3 N3)."
+
+[[connection]]
+id = "C112"
+from = "L_PWR:-"
+to = "node:TB-GND"
+net = "GND_SYS"
+domain = "GND"
+joint = "panel-terminal"
+variant = "both"
+observed_by = []
+
+[[connection]]
+id = "C209"
+from = "L_BUS:+"
+to = "node:TB-BUS"
+net = "RAIL_BUS"
+domain = "12V_LOAD"
+joint = "panel-terminal"
+variant = "both"
+observed_by = []
+notes = "L_BUS indicator, live downstream of K2."
+
+[[connection]]
+id = "C209b"
+from = "L_BUS:-"
+to = "node:TB-GND"
+net = "GND_SYS"
+domain = "GND"
+joint = "panel-terminal"
+variant = "both"
+observed_by = []
 
 # ---------- Connections: 5 V / 3V3 ----------
 [[connection]]
@@ -648,9 +798,10 @@ to = "RLY1:VCC"
 net = "V5"
 domain = "5V"
 joint = "jst-xh"
+connector = "XH4"
 variant = "both"
 observed_by = []
-notes = "JD-VCC jumper fitted. Keyed JST-XH 4-pin on the module header (revised after independent review B5)."
+notes = "Shrouded 4-pin B4B-XH-A header on relay module 1, JD-VCC jumper fitted (revised after review 3, B7: module 2 gets a 5-pin header with a blank position so the plugs cannot swap)."
 
 [[connection]]
 id = "C305"
@@ -659,6 +810,7 @@ to = "RLY1:GND"
 net = "GND_SYS"
 domain = "GND"
 joint = "jst-xh"
+connector = "XH4"
 variant = "both"
 observed_by = []
 
@@ -669,9 +821,10 @@ to = "RLY2:VCC"
 net = "V5"
 domain = "5V"
 joint = "jst-xh"
+connector = "XH5-blank"
 variant = "both"
 observed_by = []
-notes = "Second relay module, JD-VCC jumper fitted. Keyed JST-XH."
+notes = "Relay module 2: shrouded 5-pin B5B-XH-A header with one blank position, JD-VCC jumper fitted (revised after review 3, B7)."
 
 [[connection]]
 id = "C305b"
@@ -680,6 +833,7 @@ to = "RLY2:GND"
 net = "GND_SYS"
 domain = "GND"
 joint = "jst-xh"
+connector = "XH5-blank"
 variant = "both"
 observed_by = []
 
@@ -690,6 +844,7 @@ to = "RLY1:IN2"
 net = "RLY_IN"
 domain = "5V"
 joint = "jst-xh"
+connector = "XH4"
 variant = "both"
 series_r_ohm = 1000
 observed_by = []
@@ -702,6 +857,7 @@ to = "RLY2:IN2"
 net = "RLY_IN"
 domain = "5V"
 joint = "jst-xh"
+connector = "XH5-blank"
 variant = "both"
 series_r_ohm = 1000
 observed_by = []
@@ -764,7 +920,7 @@ domain = "3V3_TR"
 joint = "soldered-to-board"
 variant = "both"
 observed_by = [1, 2, 4, 5]
-notes = "Via R51 470 / C51 100 nF / D51 D52 / C52 1 uF / R52 100 k."
+notes = "Via R51 470 / C51 1 uF film / D51 D52 BAT43 / C52 10 uF / R52 47 k / R53 10 k (set 1, I_IN 2 mA or less) or C51 2.2 uF / C52 22 uF / R53 4.7 k (set 2, 5 mA or less). 50 Hz toggle (revised after review 3)."
 
 [[connection]]
 id = "C313"
@@ -773,6 +929,7 @@ to = "RLY1:IN1"
 net = "RLY_IN"
 domain = "5V"
 joint = "jst-xh"
+connector = "XH4"
 variant = "both"
 observed_by = [1, 2, 4, 5]
 notes = "Q51 base from HOLD1 via R53 10 k."
@@ -798,6 +955,42 @@ joint = "soldered-to-board"
 variant = "both"
 observed_by = [1]
 notes = "Opto LED from ARM_OUT via 4.7 k."
+
+[[connection]]
+id = "C328"
+from = "node:U-EOUT.C"
+to = "RP_TR:GP17"
+net = "LOGIC_3V3"
+domain = "3V3_TR"
+joint = "wired-and-soldered"
+variant = "both"
+observed_by = [4]
+notes = "U-EOUT collector to GP17 (bottom pad, wired like the SWD pads); 10 k pull-up. Firmware: ESTOP_OUT dead while GP2 reads released latches SenseMismatch; an arm off-then-on counts only if ESTOP_OUT stayed live (review 3, B5)."
+
+[[connection]]
+id = "C329"
+from = "ESTOP:NC1.2"
+to = "node:U-EOUT.A"
+net = "ESTOP_OUT"
+domain = "12V_LOAD"
+joint = "crimp-spade"
+variant = "both"
+series_r_ohm = 4700
+observed_by = [4]
+notes = "LED branch of U-EOUT, 4.7 k."
+
+[[connection]]
+id = "C327b"
+from = "RP_TR:GP15"
+to = "node:LEASE_Q.B"
+net = "LOGIC_3V3"
+domain = "3V3_TR"
+joint = "soldered-to-board"
+variant = "both"
+pulldown_ohm = 4700
+safe_state = "low"
+observed_by = []
+notes = "Lease LED driver. 4.7 k pull-down (was 100 k): E9 leakage on a stepping A2 part could bias the 2N3904 and light the lease LED at reset (review 3, N4)."
 
 [[connection]]
 id = "C322"
@@ -916,7 +1109,7 @@ net = "LOGIC_3V3"
 domain = "3V3_WD"
 joint = "screw-terminal"
 variant = "both"
-series_r_ohm = 1000
+series_r_ohm = 10000
 observed_by = [5]
 notes = "USCK (ATtiny is clock master)."
 
@@ -928,7 +1121,7 @@ net = "LOGIC_3V3"
 domain = "3V3_WD"
 joint = "screw-terminal"
 variant = "both"
-series_r_ohm = 1000
+series_r_ohm = 10000
 observed_by = [5]
 notes = "DO: challenge."
 
@@ -940,7 +1133,7 @@ net = "LOGIC_3V3"
 domain = "3V3_TR"
 joint = "screw-terminal"
 variant = "both"
-series_r_ohm = 1000
+series_r_ohm = 10000
 observed_by = [5]
 notes = "Answer."
 
@@ -953,7 +1146,7 @@ domain = "3V3_WD"
 joint = "soldered-to-board"
 variant = "both"
 observed_by = [1, 2, 4, 5]
-notes = "Pump 2: R61 470 / C61 100 nF / D61 D62 / C62 1 uF / R62 100 k."
+notes = "Pump 2: R61 470 / C61 220 nF film / D61 D62 BAT43 / C62 470 nF film / R62 47 k / R63 4.7 k (revised after review 3, B3: C62 was 1 uF and R62 100 k)."
 
 [[connection]]
 id = "C614"
@@ -962,6 +1155,7 @@ to = "RLY2:IN1"
 net = "RLY_IN"
 domain = "5V"
 joint = "jst-xh"
+connector = "XH5-blank"
 variant = "both"
 observed_by = [1, 2, 4, 5]
 notes = "Channel 1 of the second relay module (revised after independent review B5)."
@@ -1033,13 +1227,67 @@ observed_by = []
 [[connection]]
 id = "C626"
 from = "U4_MAX813L:7"
-to = "node:Q63.C"
+to = "node:Q65.B"
 net = "LOGIC_5V_WD"
 domain = "5V"
 joint = "soldered-to-board"
 variant = "B"
 observed_by = [1, 5]
-notes = "RESET -> R68 10 k -> Q63 (Q_CLAMP) base, R69 100 k to GND. Endpoint is Q63 stage. RESET is a 140-280 ms pulse, not a latch: C630 resets the ATtiny and the RP2350 latches (independent review B3a)."
+notes = "U4 RESET through 10 k to the Q65 base of the hardware latch, 100 k base to GND (revised after review 3, B4). RESET is a 140-280 ms pulse; the latch holds it. Q64 and J_B2 are deleted."
+
+[[connection]]
+id = "C629"
+from = "node:Q65.C"
+to = "node:Q66.B"
+net = "LOGIC_5V_WD"
+domain = "5V"
+joint = "soldered-to-board"
+variant = "B"
+observed_by = [5]
+notes = "Q65 collector through 10 k to the Q66 base, 47 k from the Q66 base to 5 V."
+
+[[connection]]
+id = "C630"
+from = "node:Q66.C"
+to = "node:Q65.B"
+net = "LOGIC_5V_WD"
+domain = "5V"
+joint = "soldered-to-board"
+variant = "B"
+observed_by = [5]
+notes = "Hold path: Q66 collector through 10 k back to the Q65 base."
+
+[[connection]]
+id = "C631"
+from = "node:Q66.C"
+to = "node:Q63.B"
+net = "LOGIC_5V_WD"
+domain = "5V"
+joint = "soldered-to-board"
+variant = "B"
+observed_by = [5]
+notes = "R68 10 k to the Q63 (Q_CLAMP) base: while latched Q63 holds the Q61 base low and K2 open."
+
+[[connection]]
+id = "C632"
+from = "BTN_CLR:NO"
+to = "node:Q65.B"
+net = "LOGIC_5V_WD"
+domain = "5V"
+joint = "screw-terminal"
+variant = "B"
+observed_by = [5]
+notes = "Panel RESET button clears the latch. Needs a person."
+
+[[connection]]
+id = "C633"
+from = "BTN_CLR:C"
+to = "node:TB-GND"
+net = "GND_SYS"
+domain = "GND"
+joint = "screw-terminal"
+variant = "B"
+observed_by = []
 
 [[connection]]
 id = "C627"
@@ -1062,28 +1310,6 @@ joint = "soldered-to-board"
 variant = "B"
 observed_by = [1]
 
-[[connection]]
-id = "C629"
-from = "node:Q64.C"
-to = "U3_ATTINY85:1"
-net = "V3V3_WD"
-domain = "3V3_WD"
-joint = "soldered-to-board"
-variant = "B"
-observed_by = [5]
-notes = "Q64 (2N3904) pulls the ATtiny RESET low while U4 RESET is high, behind jumper J_B2 (open in variant A). A watchdog timeout then really resets the ATtiny: PB3 tri-states and a fresh Q&A is needed (independent review B3a)."
-
-[[connection]]
-id = "C630"
-from = "U4_MAX813L:7"
-to = "node:Q64.B"
-net = "LOGIC_5V_WD"
-domain = "5V"
-joint = "soldered-to-board"
-variant = "B"
-observed_by = [5]
-notes = "RESET -> 10 k -> Q64 base, 100 k base to GND."
-
 # ---------- Connections: Pi, probe, USB ----------
 [[connection]]
 id = "C701"
@@ -1093,7 +1319,7 @@ net = "PI_UART"
 domain = "3V3_PI"
 joint = "dupont"
 variant = "both"
-series_r_ohm = 1000
+series_r_ohm = 4700
 observed_by = [2, 3]
 notes = "PULSE Pi->TR."
 
@@ -1105,7 +1331,7 @@ net = "PI_UART"
 domain = "3V3_TR"
 joint = "dupont"
 variant = "both"
-series_r_ohm = 1000
+series_r_ohm = 4700
 observed_by = [2, 3]
 notes = "PULSE TR->Pi. Protects the unpowered Pi in test 4."
 
@@ -1141,17 +1367,6 @@ joint = "jst-xh"
 variant = "both"
 removable = true
 observed_by = [5]
-
-[[connection]]
-id = "C720"
-from = "PI5:USB3A"
-to = "LA:USB"
-net = "USB"
-domain = "USB"
-joint = "usb"
-variant = "both"
-observed_by = [1, 2, 3, 5, 6]
-notes = "LA on USB high speed; on the Mac for test 4."
 
 [[connection]]
 id = "C721"
@@ -1194,8 +1409,8 @@ net = "USB"
 domain = "USB"
 joint = "usb"
 variant = "both"
-observed_by = [4]
-notes = "Exit test 4 only: the Pi is off, so the analyzer is hosted on the Mac instead of C720 (compatibility.md G5)."
+observed_by = [1, 2, 3, 4, 5, 6]
+notes = "The analyzer is hosted on the Mac for every exit test (revised after review 3, B6): its firmware is uploaded by the host and its probes sit on the relay inputs. A Pi-hosted analyzer is an AI-host write path (HW-030)."
 
 [[connection]]
 id = "C730"
@@ -1207,6 +1422,66 @@ joint = "wired-and-soldered"
 variant = "both"
 observed_by = [1, 2, 3, 4, 5, 6]
 notes = "Star ground only, a short soldered lead to a TB-GND post. Cut or insulate the analyzer clip. Never LAMP_A_NEG / LAMP_B_NEG, and no meter on a current range across the MOSFET or a lamp (revised after independent review non-blocking 5)."
+
+[[connection]]
+id = "C731"
+from = "RP_TR:GP12"
+to = "LA:D0"
+net = "LOGIC_3V3"
+domain = "3V3_TR"
+joint = "dupont"
+variant = "both"
+removable = true
+observed_by = [1, 2, 4, 5]
+notes = "Probe D0 on rail A enable."
+
+[[connection]]
+id = "C732"
+from = "RP_TR:GP14"
+to = "LA:D1"
+net = "LOGIC_3V3"
+domain = "3V3_TR"
+joint = "dupont"
+variant = "both"
+removable = true
+observed_by = [1, 2, 5]
+notes = "Probe D1 on pump 1."
+
+[[connection]]
+id = "C733"
+from = "U3_ATTINY85:2"
+to = "LA:D2"
+net = "LOGIC_3V3"
+domain = "3V3_WD"
+joint = "dupont"
+variant = "both"
+removable = true
+observed_by = [1, 2, 5]
+notes = "Probe D2 on pump 2 (PB3)."
+
+[[connection]]
+id = "C734"
+from = "node:Q51.C"
+to = "LA:D3"
+net = "RLY_IN"
+domain = "5V"
+joint = "dupont"
+variant = "both"
+removable = true
+observed_by = [1, 2, 4, 5]
+notes = "Probe D3 on RLY1 IN1."
+
+[[connection]]
+id = "C735"
+from = "node:Q61.C"
+to = "LA:D4"
+net = "RLY_IN"
+domain = "5V"
+joint = "dupont"
+variant = "both"
+removable = true
+observed_by = [1, 2, 4, 5]
+notes = "Probe D4 on RLY2 IN1 (was mapped to RLY IN2, which is tied high: review 3, B6)."
 
 # ---------- Connections: RS485 loopback ----------
 [[connection]]
