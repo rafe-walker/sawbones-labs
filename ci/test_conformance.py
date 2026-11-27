@@ -793,6 +793,72 @@ fn cfg_attr_ignored() {}
         self.assertEqual({x["name"] for x in listed["tests"]}, {"unit"})  # listed without crashing...
         self.assertNotEqual(self.judge(t, "tiny::unit")[0], 0)            # ...but not credited
 
+    def hazard_run(self, extra, post=None):
+        """Run the judge over a tree with the real `sup::it_starts_tripped` ref and the given extra files."""
+        t = self.tree(recs=[self.rec("sup::it_starts_tripped")], bless=False, extra=extra)
+        if post:
+            post(t)
+        lst = cargo_list(os.path.join(t.d, "l.json"), [("sup", "crates/sup/tests/t.rs", "it_starts_tripped")])
+        return [t.run("--bless", "--rust-tests", lst), t.run("--bless")]
+
+    def assertRefused(self, extra, text, post=None):
+        for rc, out in self.hazard_run(extra, post):
+            self.assertNotEqual(rc, 0, (text, out))
+            self.assertIn("every Rust test is refused", out, text)
+            self.assertIn(text, out)
+
+    def assertAccepted(self, extra, post=None):
+        for rc, out in self.hazard_run(extra, post):
+            self.assertEqual(rc, 0, out)
+
+    HAZ_MACRO = "#[macro_export]\nmacro_rules! m { () => { mod x; }; }\n"
+
+    def test_regression_271_only_the_root_target_and_git_are_skipped(self):
+        # A path dependency or proc-macro crate under ANY nested node_modules/ or target/ is scanned.
+        self.assertRefused({"research/node_modules/helper/src/lib.rs": self.HAZ_MACRO}, "research/node_modules/helper/src/lib.rs")
+        self.assertRefused({"extra/node_modules/evil/Cargo.toml": '[package]\nname = "evil"\n[lib]\nproc-macro = true\n'}, "proc-macro")
+        self.assertRefused({"research/helper/target/lib.rs": self.HAZ_MACRO}, "research/helper/target/lib.rs")
+        self.assertRefused({"crates/sup/node_modules/x.rs": self.HAZ_MACRO}, "crates/sup/node_modules/x.rs")
+        # Only the root build output and git metadata are skipped.
+        self.assertAccepted({"target/debug/build/x/out.rs": self.HAZ_MACRO, ".git/hooks/x.rs": self.HAZ_MACRO})
+
+    def test_regression_271_a_manifest_target_that_is_not_a_rs_file_refuses_every_rust_credit(self):
+        for toml in ('[package]\nname = "d"\n[lib]\npath = "src/macros.txt"\n', '[package]\nname = "d"\n[[bin]]\nname = "b"\npath = "src/b.txt"\n',
+                     '[package]\nname = "d"\n[[test]]\nname = "t"\npath = "t/x"\n', '[package]\nname = "d"\n[[example]]\nname = "e"\npath = "e.inc"\n',
+                     '[package]\nname = "d"\n[[bench]]\nname = "b"\npath = "b.txt"\n', '[package]\nname = "d"\n[lib]\npath = 5\n'):
+            self.assertRefused({"research/txthelper/Cargo.toml": toml}, "is not a .rs file")
+        self.assertAccepted({"research/ok/Cargo.toml": '[package]\nname = "ok"\n[lib]\npath = "src/lib.rs"\n[[bin]]\nname = "b"\npath = "src/main.rs"\n'})
+
+    def test_regression_271_a_build_script_or_any_include_is_a_workspace_wide_hazard(self):
+        self.assertRefused({"crates/genhelper/Cargo.toml": '[package]\nname = "g"\n', "crates/genhelper/build.rs": "fn main() {}\n"}, "build.rs")
+        self.assertRefused({"crates/g/Cargo.toml": '[package]\nname = "g"\nbuild = "gen.rs"\n'}, "`build =` key")
+        self.assertRefused({"crates/g/Cargo.toml": '[package]\nname = "g"\nbuild = true\n'}, "`build =` key")
+        self.assertAccepted({"crates/g/Cargo.toml": '[package]\nname = "g"\nbuild = false\n'})
+        # `include` anywhere refuses credit everywhere, not just in that file's subtree.
+        self.assertRefused({"crates/other/src/lib.rs": "use std::include as inc;\n"}, "an `include` identifier")
+        self.assertRefused({"research/h/src/lib.rs": 'fn f() { let _ = r#include; }\n'}, "an `include` identifier")
+        self.assertAccepted({"crates/other/src/lib.rs": '// include\nconst S: &str = "include";\nconst T: &str = include_str!("x.txt");\n'})
+
+    def test_regression_271_a_symlink_leaving_the_repo_refuses_every_rust_credit(self):
+        if not hasattr(os, "symlink"):
+            self.skipTest("needs symlinks")
+        outside = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, outside, True)
+        with open(os.path.join(outside, "lib.rs"), "w") as fh:
+            fh.write(self.HAZ_MACRO)
+
+        def link(target, name="link"):
+            return lambda t: os.symlink(target(t) if callable(target) else target, os.path.join(t.d, "crates", name))
+        self.assertRefused({}, "a symlink points outside the repo", link(outside))
+        self.assertRefused({}, "a symlink points outside the repo", link(os.path.join(outside, "lib.rs")))
+        # Into the skipped root target/ is just as blind.
+        def into_target(t):
+            os.makedirs(os.path.join(t.d, "target", "gen"), exist_ok=True)
+            os.symlink(os.path.join(t.d, "target", "gen"), os.path.join(t.d, "crates", "tlink"))
+        self.assertRefused({}, "a symlink points outside the repo", into_target)
+        # A symlink that stays inside the scanned repo is fine.
+        self.assertAccepted({}, link(lambda t: os.path.join(t.d, "crates", "sup")))
+
     def test_regression_271_a_failed_lister_fails_both_gates_instead_of_skipping_them(self):
         with open(os.path.join(ROOT, ".github/workflows/conformance.yml")) as fh:
             wf = fh.read()

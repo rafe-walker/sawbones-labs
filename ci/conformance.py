@@ -70,7 +70,7 @@ SCAN_DIRS = ("crates", "firmware", "plugins", "ci", "fuzz")
 SCAN_SUFFIX = (".rs", ".py", ".sh")
 # Files that mention tags as examples or fixtures, not as claims.
 TAG_SKIP = {"ci/conformance.py", "ci/test_conformance.py"}
-SKIP_DIRS = {"target", ".git", "node_modules"}
+SKIP_DIRS = {"target", ".git"}  # skipped only directly under the repo root; a nested target/ or node_modules/ is scanned
 
 CLOSING = r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)"
 REQ_FLAGS = re.IGNORECASE | re.ASCII  # ASCII: Arabic-Indic digits must not parse as an issue number
@@ -107,7 +107,8 @@ def walk(root, dirs, suffixes):
     for top in dirs:
         base = os.path.join(root, top)
         for dirpath, dirnames, filenames in os.walk(base):
-            dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+            at_root = os.path.normpath(dirpath) == os.path.normpath(root)
+            dirnames[:] = sorted(d for d in dirnames if not (at_root and d in SKIP_DIRS))
             for name in sorted(filenames):
                 if name.endswith(suffixes):
                     full = os.path.join(dirpath, name)
@@ -309,6 +310,8 @@ def scan_rust(src):
       tests:   [(inline module path, fn name, ignored)]
       mods:    [(inline module path, name, attrs)] for out-of-line `mod name;`.
       tainted: None, or why this file cannot be trusted (see below).
+      include_hazard: None, or where an `include` identifier appears (anywhere in the file);
+        that is a workspace-wide hazard, like macro_hazard.
       macro_hazard: None, or where a `macro_rules!` body (read with only comments and
         strings blanked) contains `mod` or `include!`: such a macro can declare the live
         module behind the declaration the scanner follows, here or in any file that
@@ -322,6 +325,10 @@ def scan_rust(src):
     tainted file credits no test and has its `mod` children ignored."""
     code = blank_rust(src)
     hazard = None
+    inc = _INCLUDE.search(code)
+    include_hazard = None
+    if inc:
+        include_hazard = f"line {code.count(chr(10), 0, inc.start()) + 1}: an `include` identifier (`include!`, or an alias such as `use std::include as inc`)"
     for m in list(_MACRO.finditer(code)):
         code_open = m.end() - 1
         end = _match_close(code, code_open)
@@ -346,7 +353,7 @@ def scan_rust(src):
         line = code.count("\n", 0, _INCLUDE.search(code).start()) + 1
         taint = f"line {line}: `include!` pulls in text the scanner cannot see"
     if taint:
-        return {"tests": [], "mods": [], "tainted": taint, "macro_hazard": hazard}
+        return {"tests": [], "mods": [], "tainted": taint, "macro_hazard": hazard, "include_hazard": include_hazard}
     spans0 = sorted((m.start(), _match_brace(code, m.end() - 1), m.group(2)) for m in decls if m.group(3) == "{")
 
     def scope_at(p, spans):
@@ -380,7 +387,7 @@ def scan_rust(src):
         scope = scope_at(m.start(), spans0)
         if inline_ok(scope) and (tuple(scope), m.group(2)) not in refused:
             mods.append((scope, m.group(2), m.group(1)))
-    return {"tests": tests, "mods": mods, "tainted": None, "macro_hazard": hazard}
+    return {"tests": tests, "mods": mods, "tainted": None, "macro_hazard": hazard, "include_hazard": include_hazard}
 
 
 def rust_tests(src):
@@ -796,10 +803,14 @@ def harness_false_srcs(root, pkg):
     return out
 
 
-def proc_macro_manifest(root, rel):
-    """Why this Cargo.toml makes every Rust credit unsafe, or None: a proc-macro crate
-    runs PR code inside the compiler and can emit any item, including a live module
-    that no scanned text shows. An unreadable manifest is refused too."""
+def manifest_hazard(root, rel):
+    """Why this Cargo.toml makes every Rust credit unsafe, or None. Refused:
+      - a proc-macro crate (it runs PR code inside the compiler and can emit any item);
+      - a build script (a `build =` key other than false, or a build.rs next to the
+        manifest): it can write any macro into OUT_DIR;
+      - a target `path` (lib, bin, test, example, bench) that is not a `.rs` file, which
+        no `.rs` scan would read;
+      - a manifest that cannot be read."""
     try:
         with open(os.path.join(root, rel), "rb") as fh:
             manifest = tomllib.load(fh)
@@ -809,6 +820,57 @@ def proc_macro_manifest(root, rel):
     if isinstance(lib, dict) and (lib.get("proc-macro") is not False and "proc-macro" in lib
                                    or lib.get("proc_macro") is not False and "proc_macro" in lib):
         return "the crate sets `proc-macro = true`"
+    package = manifest.get("package", {})
+    if isinstance(package, dict) and package.get("build") is not False and "build" in package:
+        return "the package has a `build =` key (a build script can generate macros)"
+    if os.path.isfile(os.path.join(root, os.path.dirname(rel), "build.rs")):
+        return "the package has a build.rs (a build script can generate macros)"
+    targets = [lib] if isinstance(lib, dict) else []
+    for kind in ("bin", "test", "example", "bench"):
+        listed = manifest.get(kind, [])
+        targets += listed if isinstance(listed, list) else []
+    for t in targets:
+        if isinstance(t, dict) and "path" in t and not (isinstance(t["path"], str) and t["path"].endswith(".rs")):
+            return f"a target path ({t['path']!r}) is not a .rs file, so no source scan reads it"
+    return None
+
+
+def escaping_symlink(root):
+    """The first symlink in the repo (outside the root target/ and .git/) that points
+    outside the repo or into the skipped root target/ or .git/, or None."""
+    top = os.path.realpath(root)
+    skipped = (os.path.join(top, "target"), os.path.join(top, ".git"))
+    for dirpath, dirnames, filenames in os.walk(root):
+        if os.path.normpath(dirpath) == os.path.normpath(root):
+            dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+        for name in sorted(dirnames + filenames):
+            full = os.path.join(dirpath, name)
+            if os.path.islink(full):
+                real = os.path.realpath(full)
+                inside = real == top or real.startswith(top + os.sep)
+                if not inside or any(real == k or real.startswith(k + os.sep) for k in skipped):
+                    return os.path.relpath(full, root).replace(os.sep, "/")
+    return None
+
+
+def workspace_hazard(root, scan):
+    """(file, why) if anything in the repo can make cargo compile code that the `.rs`
+    scans never read, so that no Rust test can be trusted; else None. `scan` is the
+    per-file scanner (cached by the caller). Every manifest and every `.rs` file in the
+    repo is read, not only the workspace members: a path dependency counts."""
+    for rel in walk(root, (".",), ("Cargo.toml",)):
+        why = manifest_hazard(root, rel)
+        if why:
+            return rel, why
+    for rel in walk(root, (".",), (".rs",)):
+        info = scan(rel)
+        if info and info["macro_hazard"]:
+            return rel, info["macro_hazard"]
+        if info and info["include_hazard"]:
+            return rel, info["include_hazard"]
+    link = escaping_symlink(root)
+    if link:
+        return link, "a symlink points outside the repo (or into target/ or .git/), where nothing is scanned"
     return None
 
 
@@ -834,19 +896,10 @@ class TestIndex:
         self.refusals = []  # (file, line, statement, why): what was left out and why
         self.macro_hazard = None
         self._scans = {}
-        # Every .rs file in the repo (a path dependency outside crates/ can export a macro), and every manifest.
-        for rel in walk(root, (".",), ("Cargo.toml",)):
-            why = proc_macro_manifest(root, rel)
-            if why:
-                self.macro_hazard = f"{rel}: {why}"
-                self.refusals.append((rel, 0, "", why + "; every Rust test is refused workspace-wide"))
-                break
-        for rel in ([] if self.macro_hazard else walk(root, (".",), (".rs",))):
-            info = self._scan(rel)
-            if info and info["macro_hazard"]:
-                self.macro_hazard = f"{rel}:{info['macro_hazard']}"
-                self.refusals.append((rel, 0, "", info["macro_hazard"] + "; every Rust test is refused workspace-wide"))
-                break
+        found = workspace_hazard(root, self._scan)
+        if found:
+            self.macro_hazard = f"{found[0]}: {found[1]}"
+            self.refusals.append((found[0], 0, "", found[1] + "; every Rust test is refused workspace-wide"))
         self.entries = []   # {"lang", "package", "src", "files", "name", "leaf", "ignored"}
         if self.macro_hazard:
             pass  # no Rust test is credited; see resolve()
