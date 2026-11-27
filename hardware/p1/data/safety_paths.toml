@@ -1,0 +1,834 @@
+# Sawbones Labs P1 bench: safety paths and single-fault tables (draft, 2026-11-26). Field names stable; see method.md §5.
+# variant: "A" = ATtiny85 BOD + WDT + charge pump only; "B" = A + MAX813L (U4 fitted, J_B shorted).
+# load_state: off | off-detected | on-bounded (needs bound_ms) | on.  verdict: PASS | WARN | FAIL.
+
+schema_version = 1
+
+# ---------------- Paths ----------------
+
+[[path]]
+id = "PA_A"
+load = "Lamp A (rail A, hazard class 2)"
+variant = "A"
+description = "F1 -> ESTOP NC1 -> ARM -> K1 -> K2 -> INA228 shunt -> RAIL_BUS -> lamp A -> MOS_A (low side) -> GND"
+
+[[path.series_elements]]
+order = 1
+id = "F1"
+part = "F1"
+pins = ["A", "B"]
+kind = "fuse"
+controlled_by = "none"
+supply_net = "V12_IN"
+board = "PWR"
+trigger_polarity = "n/a"
+open_when = "overcurrent > 1 A"
+
+[[path.series_elements]]
+order = 2
+id = "ESTOP_NC1"
+part = "ESTOP"
+pins = ["NC1.1", "NC1.2"]
+kind = "contact-nc"
+controlled_by = "human"
+supply_net = "V12_F1"
+board = "PANEL"
+trigger_polarity = "n/a"
+open_when = "pressed, wire off"
+
+[[path.series_elements]]
+order = 3
+id = "ARM"
+part = "SW_ARM"
+pins = ["1", "2"]
+kind = "contact-no"
+controlled_by = "human"
+supply_net = "ESTOP_OUT"
+board = "PANEL"
+trigger_polarity = "n/a"
+open_when = "toggle off, wire off"
+
+[[path.series_elements]]
+order = 4
+id = "K1"
+part = "RLY"
+pins = ["K1.COM", "K1.NO"]
+kind = "relay-no"
+controlled_by = "RP_TR (charge pump GP14 -> Q51)"
+supply_net = "V5"
+board = "RLY"
+trigger_polarity = "held only while GP14 toggles"
+open_when = "pump stops (freeze, reset, brownout, unpowered, pin stuck), Q51 open, 5 V lost"
+
+[[path.series_elements]]
+order = 5
+id = "K2"
+part = "RLY"
+pins = ["K2.COM", "K2.NO"]
+kind = "relay-no"
+controlled_by = "U3_ATTINY85 (charge pump PB3 -> Q61)"
+supply_net = "V5"
+board = "RLY"
+trigger_polarity = "held only while PB3 toggles (only after a correct, fresh Q&A answer)"
+open_when = "ATtiny trip, freeze, reset, BOD, supply lost; Q61 open; 5 V lost"
+
+[[path.series_elements]]
+order = 6
+id = "Q_A"
+part = "MOS_A"
+pins = ["LOAD"]
+kind = "mosfet-low-side"
+controlled_by = "RP_TR (level GP12)"
+supply_net = "RAIL_BUS"
+board = "MOS-A"
+trigger_polarity = "active-high"
+open_when = "GP12 low/pulled-down/unpowered, logic GND off, rail A not armed"
+
+[[path]]
+id = "PA_B"
+load = "Lamp B (rail B port 0, hazard class 3)"
+variant = "A"
+description = "As PA_A to RAIL_BUS -> KEY NO -> RAIL_B_HI -> lamp B -> MOS_B (low side) -> GND"
+
+[[path.series_elements]]
+order = 1
+id = "F1"
+part = "F1"
+pins = ["A", "B"]
+kind = "fuse"
+controlled_by = "none"
+supply_net = "V12_IN"
+board = "PWR"
+trigger_polarity = "n/a"
+open_when = "overcurrent"
+
+[[path.series_elements]]
+order = 2
+id = "ESTOP_NC1"
+part = "ESTOP"
+pins = ["NC1.1", "NC1.2"]
+kind = "contact-nc"
+controlled_by = "human"
+supply_net = "V12_F1"
+board = "PANEL"
+trigger_polarity = "n/a"
+open_when = "pressed"
+
+[[path.series_elements]]
+order = 3
+id = "ARM"
+part = "SW_ARM"
+pins = ["1", "2"]
+kind = "contact-no"
+controlled_by = "human"
+supply_net = "ESTOP_OUT"
+board = "PANEL"
+trigger_polarity = "n/a"
+open_when = "off"
+
+[[path.series_elements]]
+order = 4
+id = "K1"
+part = "RLY"
+pins = ["K1.COM", "K1.NO"]
+kind = "relay-no"
+controlled_by = "RP_TR (charge pump GP14 -> Q51)"
+supply_net = "V5"
+board = "RLY"
+trigger_polarity = "held only while GP14 toggles"
+open_when = "pump stops"
+
+[[path.series_elements]]
+order = 5
+id = "K2"
+part = "RLY"
+pins = ["K2.COM", "K2.NO"]
+kind = "relay-no"
+controlled_by = "U3_ATTINY85 (charge pump PB3 -> Q61)"
+supply_net = "V5"
+board = "RLY"
+trigger_polarity = "held only while PB3 toggles"
+open_when = "ATtiny trip"
+
+[[path.series_elements]]
+order = 6
+id = "KEY"
+part = "SW_KEY"
+pins = ["NO1", "NO2"]
+kind = "contact-no"
+controlled_by = "human"
+supply_net = "RAIL_BUS"
+board = "PANEL"
+trigger_polarity = "n/a"
+open_when = "key off"
+
+[[path.series_elements]]
+order = 7
+id = "Q_B"
+part = "MOS_B"
+pins = ["LOAD"]
+kind = "mosfet-low-side"
+controlled_by = "RP_TR (level GP13, only with a live lease)"
+supply_net = "RAIL_B_HI"
+board = "MOS-B"
+trigger_polarity = "active-high"
+open_when = "no lease, GP13 low, key off (no gate supply)"
+
+# Variant B paths: same series elements; K2 additionally opened by U4 via Q63 clamp on HOLD2.
+[[path]]
+id = "PB_A"
+load = "Lamp A (rail A)"
+variant = "B"
+description = "Identical to PA_A; K2 hold node HOLD2 can also be pulled low by Q63 (MAX813L RESET) through J_B"
+
+[[path.series_elements]]
+order = 1
+id = "F1"
+part = "F1"
+pins = ["A", "B"]
+kind = "fuse"
+controlled_by = "none"
+supply_net = "V12_IN"
+board = "PWR"
+trigger_polarity = "n/a"
+open_when = "overcurrent"
+
+[[path.series_elements]]
+order = 2
+id = "ESTOP_NC1"
+part = "ESTOP"
+pins = ["NC1.1", "NC1.2"]
+kind = "contact-nc"
+controlled_by = "human"
+supply_net = "V12_F1"
+board = "PANEL"
+trigger_polarity = "n/a"
+open_when = "pressed"
+
+[[path.series_elements]]
+order = 3
+id = "ARM"
+part = "SW_ARM"
+pins = ["1", "2"]
+kind = "contact-no"
+controlled_by = "human"
+supply_net = "ESTOP_OUT"
+board = "PANEL"
+trigger_polarity = "n/a"
+open_when = "off"
+
+[[path.series_elements]]
+order = 4
+id = "K1"
+part = "RLY"
+pins = ["K1.COM", "K1.NO"]
+kind = "relay-no"
+controlled_by = "RP_TR (charge pump GP14 -> Q51)"
+supply_net = "V5"
+board = "RLY"
+trigger_polarity = "held only while GP14 toggles"
+open_when = "pump stops"
+
+[[path.series_elements]]
+order = 5
+id = "K2"
+part = "RLY"
+pins = ["K2.COM", "K2.NO"]
+kind = "relay-no"
+controlled_by = "U3_ATTINY85 (PB3 pump) AND NOT U4_MAX813L (RESET -> Q63 clamp)"
+supply_net = "V5"
+board = "RLY"
+trigger_polarity = "held only while PB3 toggles and U4 RESET is low"
+open_when = "ATtiny trip; U4 RESET high (5 V < 4.50-4.75 V, PFI < 1.20-1.30 V i.e. 3V3_WD < 2.64-2.86 V, WDI idle 1.00-2.25 s, MR low, 140-280 ms after power-up)"
+
+[[path.series_elements]]
+order = 6
+id = "Q_A"
+part = "MOS_A"
+pins = ["LOAD"]
+kind = "mosfet-low-side"
+controlled_by = "RP_TR (level GP12)"
+supply_net = "RAIL_BUS"
+board = "MOS-A"
+trigger_polarity = "active-high"
+open_when = "GP12 low"
+
+[[path]]
+id = "PB_B"
+load = "Lamp B (rail B port 0)"
+variant = "B"
+description = "Identical to PA_B with the variant-B K2 clamp"
+
+[[path.series_elements]]
+order = 1
+id = "F1"
+part = "F1"
+pins = ["A", "B"]
+kind = "fuse"
+controlled_by = "none"
+supply_net = "V12_IN"
+board = "PWR"
+trigger_polarity = "n/a"
+open_when = "overcurrent"
+
+[[path.series_elements]]
+order = 2
+id = "ESTOP_NC1"
+part = "ESTOP"
+pins = ["NC1.1", "NC1.2"]
+kind = "contact-nc"
+controlled_by = "human"
+supply_net = "V12_F1"
+board = "PANEL"
+trigger_polarity = "n/a"
+open_when = "pressed"
+
+[[path.series_elements]]
+order = 3
+id = "ARM"
+part = "SW_ARM"
+pins = ["1", "2"]
+kind = "contact-no"
+controlled_by = "human"
+supply_net = "ESTOP_OUT"
+board = "PANEL"
+trigger_polarity = "n/a"
+open_when = "off"
+
+[[path.series_elements]]
+order = 4
+id = "K1"
+part = "RLY"
+pins = ["K1.COM", "K1.NO"]
+kind = "relay-no"
+controlled_by = "RP_TR (charge pump GP14 -> Q51)"
+supply_net = "V5"
+board = "RLY"
+trigger_polarity = "held only while GP14 toggles"
+open_when = "pump stops"
+
+[[path.series_elements]]
+order = 5
+id = "K2"
+part = "RLY"
+pins = ["K2.COM", "K2.NO"]
+kind = "relay-no"
+controlled_by = "U3_ATTINY85 (PB3 pump) AND NOT U4_MAX813L (RESET -> Q63 clamp)"
+supply_net = "V5"
+board = "RLY"
+trigger_polarity = "held only while PB3 toggles and U4 RESET is low"
+open_when = "ATtiny trip or U4 RESET high"
+
+[[path.series_elements]]
+order = 6
+id = "KEY"
+part = "SW_KEY"
+pins = ["NO1", "NO2"]
+kind = "contact-no"
+controlled_by = "human"
+supply_net = "RAIL_BUS"
+board = "PANEL"
+trigger_polarity = "n/a"
+open_when = "key off"
+
+[[path.series_elements]]
+order = 7
+id = "Q_B"
+part = "MOS_B"
+pins = ["LOAD"]
+kind = "mosfet-low-side"
+controlled_by = "RP_TR (level GP13, only with a live lease)"
+supply_net = "RAIL_B_HI"
+board = "MOS-B"
+trigger_polarity = "active-high"
+open_when = "no lease"
+
+# ---------------- Single-fault table, variant A (applies to PA_A and PA_B unless path says otherwise) ----------------
+# Rows A1-A30 mirror compatibility.md 3.2. Paths are matched as glob patterns on the path id: "P?_*" is every path.
+# Variant "both" rows hold in variant A and in variant B (compatibility.md 3.3: "every row of table A still holds").
+# A10 stays variant A only: in variant B the MAX813L power-fail input closes it (row B2).
+
+[[fault]]
+id = "A1"
+path = "P?_*"
+variant = "both"
+fault = "RP2350 frozen / SWD halt"
+element = "RP_TR"
+effect = "GP12/13 frozen (maybe high); GP14 stops -> K1 opens after ~20 ms; no Q&A answers -> PB3 stops -> K2 opens within ~2 Q&A periods"
+load_state = "off"
+bound_ms = 120
+detected_by = "MID_SENSE, ATtiny trip"
+verdict = "PASS"
+
+[[fault]]
+id = "A2"
+path = "P?_*"
+variant = "both"
+fault = "RP2350 reset / reset loop"
+element = "RP_TR"
+effect = "Pads pull-down + ISO; ext 4.7 k pull-down -> Q_A off; pump stops -> K1 off; ATtiny trips -> K2 off; FaultStateUnknown latched"
+load_state = "off"
+detected_by = "fault record"
+verdict = "PASS"
+
+[[fault]]
+id = "A3"
+path = "P?_*"
+variant = "both"
+fault = "RP2350 brownout"
+element = "RP_TR"
+effect = "Internal brownout reset -> as A2"
+load_state = "off"
+detected_by = "fault record"
+verdict = "PASS"
+
+[[fault]]
+id = "A4"
+path = "P?_*"
+variant = "both"
+fault = "RP2350 unpowered (5 V present)"
+element = "RP_TR"
+effect = "No opto current into MOS_A; no pump; no back-feed path because no relay IN is GPIO-driven"
+load_state = "off"
+detected_by = "ATtiny trip"
+verdict = "PASS"
+
+[[fault]]
+id = "A5"
+path = "P?_*"
+variant = "both"
+fault = "GPIO state at power-up before firmware"
+element = "RP_TR"
+effect = "Pull-down + ISO until firmware drives outputs low first; ext pull-downs cover E9 (A2 stepping)"
+load_state = "off"
+detected_by = "exit test 1 capture"
+verdict = "PASS"
+
+[[fault]]
+id = "A6"
+path = "P?_*"
+variant = "both"
+fault = "Pi off / supervisor hung"
+element = "PI5"
+effect = "Heartbeat lost -> firmware drops GP12/13 and stops GP14 within 2 x HEARTBEAT_PERIOD"
+load_state = "off"
+bound_ms = 210
+detected_by = "fault latched"
+verdict = "PASS"
+
+[[fault]]
+id = "A7"
+path = "P?_*"
+variant = "both"
+fault = "ATtiny frozen"
+element = "U3_ATTINY85"
+effect = "PB3 DC -> K2 opens"
+load_state = "off"
+bound_ms = 20
+detected_by = "MID_SENSE high with VBUS 0"
+verdict = "PASS"
+
+[[fault]]
+id = "A8"
+path = "P?_*"
+variant = "both"
+fault = "ATtiny reset or BOD"
+element = "U3_ATTINY85"
+effect = "Port B tri-state -> pump stops -> K2 opens"
+load_state = "off"
+detected_by = "VBUS 0"
+verdict = "PASS"
+
+[[fault]]
+id = "A9"
+path = "P?_*"
+variant = "both"
+fault = "Watchdog supply lost"
+element = "M5_LDO"
+effect = "As A8"
+load_state = "off"
+detected_by = "VBUS 0"
+verdict = "PASS"
+
+[[fault]]
+id = "A10"
+path = "PA_*"
+variant = "A"
+fault = "ATtiny fuses left at factory (BOD off, WDTON off, 1 MHz)"
+element = "U3_ATTINY85"
+effect = "Erratic AVR at low VCC may keep pumping; K1 and Q_A remain under RP2350"
+load_state = "off"
+detected_by = "bring-up fuse read-back (avrdude) recorded as evidence"
+verdict = "WARN"
+
+[[fault]]
+id = "A11"
+path = "P?_*"
+variant = "both"
+fault = "K1 contacts welded"
+element = "K1"
+effect = "K2 and Q_A still cut"
+load_state = "off-detected"
+detected_by = "MID_SENSE live while K1 commanded off (firmware addition needed)"
+verdict = "PASS"
+
+[[fault]]
+id = "A12"
+path = "P?_*"
+variant = "both"
+fault = "K2 contacts welded"
+element = "K2"
+effect = "K1 and Q_A still cut; invisible without an arm-time self-test (deliberate wrong answer, expect VBUS 0)"
+load_state = "off"
+detected_by = "arm-time self-test (not written)"
+verdict = "WARN"
+
+[[fault]]
+id = "A13"
+path = "P?_A"
+variant = "both"
+fault = "MOS_A drain-source short"
+element = "Q_A"
+effect = "Lamp A on whenever armed (= commanded state); off when disarmed via K1/K2"
+load_state = "off-detected"
+detected_by = "RAIL_A_SENSE vs command after disarm"
+verdict = "PASS"
+
+[[fault]]
+id = "A14"
+path = "P?_B"
+variant = "both"
+fault = "MOS_B drain-source short"
+element = "Q_B"
+effect = "Lamp B on with armed + key and no lease; RAIL_B_SENSE live while commanded off -> firmware drops K1 and Q_A on that tick, latches"
+load_state = "on-bounded"
+bound_ms = 30
+detected_by = "RAIL_B_SENSE"
+verdict = "PASS"
+
+[[fault]]
+id = "A15"
+path = "P?_*"
+variant = "both"
+fault = "Q51 (K1 driver) C-E short"
+element = "K1"
+effect = "K1 held; K2 and Q_A cut"
+load_state = "off-detected"
+detected_by = "MID_SENSE"
+verdict = "PASS"
+
+[[fault]]
+id = "A16"
+path = "P?_*"
+variant = "both"
+fault = "Q61 (K2 driver) C-E short"
+element = "K2"
+effect = "K2 held; K1 and Q_A cut"
+load_state = "off"
+detected_by = "arm-time self-test only"
+verdict = "WARN"
+
+[[fault]]
+id = "A17"
+path = "P?_*"
+variant = "both"
+fault = "Pump series capacitor short (either)"
+element = "K1|K2"
+effect = "Relay follows DC pin level; the other relay still cuts"
+load_state = "off"
+detected_by = "per-cut self-test"
+verdict = "PASS"
+
+[[fault]]
+id = "A18"
+path = "P?_*"
+variant = "both"
+fault = "Bridge IN1-IN2 on one relay module"
+element = "RLY"
+effect = "Common cause: K1 stage also holds K2; ATtiny cut defeated; lamp needs a second fault (RP2350 glitch keeping GP12 on)"
+load_state = "off"
+detected_by = "arm-time self-test"
+verdict = "WARN"
+
+[[fault]]
+id = "A19"
+path = "P?_*"
+variant = "both"
+fault = "E-stop NC1 fails to open"
+element = "ESTOP_NC1"
+effect = "NC2 opens -> firmware drops all"
+load_state = "off-detected"
+detected_by = "ESTOP_SENSE vs VBUS"
+verdict = "PASS"
+
+[[fault]]
+id = "A20"
+path = "P?_*"
+variant = "both"
+fault = "E-stop power-path wire off"
+element = "chain"
+effect = "Open circuit"
+load_state = "off"
+detected_by = "VBUS / sense"
+verdict = "PASS"
+
+[[fault]]
+id = "A21"
+path = "P?_*"
+variant = "both"
+fault = "ESTOP_SENSE wire off"
+element = "ESTOP"
+effect = "Pull-up reads pressed -> fault"
+load_state = "off"
+detected_by = "fault"
+verdict = "PASS"
+
+[[fault]]
+id = "A22"
+path = "P?_*"
+variant = "both"
+fault = "Arm toggle welded closed"
+element = "ARM"
+effect = "Never seen off-then-on after restart -> never arms"
+load_state = "off"
+detected_by = "-"
+verdict = "PASS"
+
+[[fault]]
+id = "A24"
+path = "P?_*"
+variant = "both"
+fault = "Enable line or MOS logic GND off"
+element = "Q_A|Q_B"
+effect = "Opto not driven"
+load_state = "off-detected"
+detected_by = "commanded on + sensed dead -> fault after OUTPUT_SETTLE"
+verdict = "PASS"
+
+[[fault]]
+id = "A25"
+path = "P?_*"
+variant = "both"
+fault = "Rail sense wire off"
+element = "sense"
+effect = "Reads dead; hides a later stuck-on (second fault)"
+load_state = "off"
+detected_by = "arm-time (commanded on, sensed dead)"
+verdict = "PASS"
+
+[[fault]]
+id = "A26"
+path = "P?_*"
+variant = "both"
+fault = "5 V buck fails shorted (12 V on 5 V rail)"
+element = "M1_BUCK5"
+effect = "REQUIRES M6. With M6 zener crowbar: F2 blows, all logic off, all cuts open. Without M6: all MCU outputs undefined at once (common cause)"
+load_state = "off"
+detected_by = "-"
+verdict = "PASS"
+
+[[fault]]
+id = "A30"
+path = "P?_*"
+variant = "both"
+fault = "5 V rail lost"
+element = "V5"
+effect = "Coils de-energise; RP2350 and ATtiny unpowered"
+load_state = "off"
+detected_by = "-"
+verdict = "PASS"
+
+[[fault]]
+id = "A27"
+path = "P?_*"
+variant = "both"
+fault = "INA228 dead / NACK"
+element = "INA228"
+effect = "No VBUS feedback; firmware must latch a fault (gap)"
+load_state = "off"
+detected_by = "I2C error (firmware addition needed)"
+verdict = "WARN"
+
+[[fault]]
+id = "A28"
+path = "P?_*"
+variant = "both"
+fault = "Tool ground clipped to LAMP_x_NEG"
+element = "LA"
+effect = "Bypasses the low-side MOSFET"
+load_state = "on"
+detected_by = "procedure rule only"
+verdict = "FAIL"
+
+[[fault]]
+id = "A29"
+path = "P?_*"
+variant = "both"
+fault = "12 V adapter over-voltage (to 24 V class)"
+element = "PSU12"
+effect = "Lamps rated 12-24 V; logic behind buck + crowbar"
+load_state = "off"
+detected_by = "-"
+verdict = "PASS"
+
+
+[[fault]]
+id = "A23"
+path = "P?_*"
+variant = "both"
+fault = "Any wire off in the series chain"
+element = "chain"
+effect = "Open circuit"
+load_state = "off"
+detected_by = "VBUS / sense"
+verdict = "PASS"
+
+# ---------------- Variant B: all A rows apply to PB_* unchanged, plus/changed: ----------------
+
+[[fault]]
+id = "B1"
+path = "PB_*"
+variant = "B"
+fault = "ATtiny runaway that keeps PB3 toggling but stops PB4"
+element = "U3_ATTINY85"
+effect = "WDO low after 1.00-2.25 s -> MR -> RESET high -> Q63 clamps HOLD2 -> K2 opens"
+load_state = "off"
+bound_ms = 2250
+detected_by = "U4 RESET"
+verdict = "PASS"
+
+[[fault]]
+id = "B2"
+path = "PB_*"
+variant = "B"
+fault = "ATtiny fuses at factory and 3V3_WD sags (closes A10)"
+element = "U3_ATTINY85"
+effect = "PFI < 1.20-1.30 V (3V3_WD < 2.64-2.86 V) -> PFO low -> MR -> RESET -> clamp"
+load_state = "off"
+detected_by = "U4 RESET"
+verdict = "PASS"
+
+[[fault]]
+id = "B3"
+path = "PB_*"
+variant = "B"
+fault = "5 V rail below 4.50-4.75 V"
+element = "V5"
+effect = "RESET high -> clamp -> K2 off"
+load_state = "off"
+detected_by = "U4 RESET"
+verdict = "PASS"
+
+[[fault]]
+id = "B4"
+path = "PB_*"
+variant = "B"
+fault = "Power-up"
+element = "U4_MAX813L"
+effect = "RESET high 140-280 ms after threshold -> K2 held off during boot"
+load_state = "off"
+detected_by = "exit test 1 D7"
+verdict = "PASS"
+
+[[fault]]
+id = "B5"
+path = "PB_*"
+variant = "B"
+fault = "MAX813L counterfeit / out-of-spec"
+element = "U4_MAX813L"
+effect = "Layer B unreliable; variant A unchanged"
+load_state = "off"
+detected_by = "bench acceptance test (compatibility.md 5.3)"
+verdict = "WARN"
+
+[[fault]]
+id = "B6"
+path = "PB_*"
+variant = "B"
+fault = "WDI wire off / Q62 open"
+element = "U4_MAX813L"
+effect = "Floating WDI disables the MAX813L watchdog; PFI and VCC monitoring remain"
+load_state = "off"
+detected_by = "periodic test 5f (latent otherwise)"
+verdict = "WARN"
+
+[[fault]]
+id = "B7"
+path = "PB_*"
+variant = "B"
+fault = "Q63 open or J_B removed"
+element = "Q63"
+effect = "Layer B gone; falls back to variant A"
+load_state = "off"
+detected_by = "periodic test 5f (latent otherwise)"
+verdict = "WARN"
+
+[[fault]]
+id = "B8"
+path = "PB_*"
+variant = "B"
+fault = "Q63 C-E short"
+element = "Q63"
+effect = "K2 can never close (availability loss)"
+load_state = "off"
+detected_by = "cannot arm"
+verdict = "PASS"
+
+[[fault]]
+id = "B9"
+path = "PB_*"
+variant = "B"
+fault = "U4 RESET stuck high"
+element = "U4_MAX813L"
+effect = "As B8"
+load_state = "off"
+detected_by = "cannot arm"
+verdict = "PASS"
+
+[[fault]]
+id = "B10"
+path = "PB_*"
+variant = "B"
+fault = "U4 removed from socket with J_B fitted"
+element = "U4_MAX813L"
+effect = "Q63 base 100 k pull-down -> off -> variant A behaviour"
+load_state = "off"
+detected_by = "-"
+verdict = "PASS"
+
+[[fault]]
+id = "B11"
+path = "PB_*"
+variant = "B"
+fault = "Any single fault inside layer B"
+element = "U4_MAX813L|Q62|Q63|D63|D64"
+effect = "Layer B outputs can only sink HOLD2 or assert reset; none can hold K2 closed"
+load_state = "off"
+detected_by = "-"
+verdict = "PASS"
+
+# ---------------- Rows added by the hardware design CI (not in compatibility.md 3.2) ----------------
+# The checker (HW-018) found no row for the fuse or the key switch. These follow the reasoning of rows A19, A22 and
+# compatibility.md P2. They carry verdict WARN until the clean-room reviewer signs them off.
+
+[[fault]]
+id = "A31"
+path = "P?_*"
+variant = "both"
+fault = "F1 too large for the wire, or fails to open on overload"
+element = "F1"
+effect = "The load is not energised by this fault. The 22 AWG wire (3 A) is protected only by a 1 A fuse (M4); the 5-30 A Nilight kit does not protect it. K1, K2 and the MOSFET still cut"
+load_state = "off"
+detected_by = "BOM check: only 1 A and 2 A fuses are fitted"
+verdict = "WARN"
+
+[[fault]]
+id = "A32"
+path = "P?_B"
+variant = "both"
+fault = "Key switch welded closed"
+element = "KEY"
+effect = "Rail B is enabled by the arm chain without the key. Q_B still needs a live lease and a GP13 level, and K1 and K2 still cut, so lamp B stays off. Same reasoning as A22 for the arm toggle"
+load_state = "off"
+detected_by = "KEY_SENSE stays on after key-off"
+verdict = "WARN"

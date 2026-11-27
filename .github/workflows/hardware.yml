@@ -1,0 +1,32 @@
+name: Hardware design
+
+# Runs the hardware design checker (ci/check_hardware.py, rules HW-001 to HW-028)
+# on hardware/*/data and then its unit tests. See hardware/p1/README.md.
+
+on:
+  pull_request:
+    paths: ["hardware/**", "ci/*hardware*", ".github/workflows/hardware.yml"]
+  push:
+    branches: [main]
+    paths: ["hardware/**", "ci/*hardware*", ".github/workflows/hardware.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hardware-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  hardware:
+    name: hardware design checks (HW-001 to HW-028)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the hardware design
+        run: python3 -I ci/check_hardware.py
+      - name: Unit-test the checker
+        run: python3 -I -m unittest discover -s ci -p 'test_check_hardware.py' -v

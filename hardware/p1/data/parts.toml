@@ -1,0 +1,873 @@
+# Sawbones Labs P1 bench: parts (draft, 2026-11-26). Field names are stable; see method.md §5.
+# verified = true means at least one field was read from datasheet_url; verified_fields lists which.
+# Values not in verified_fields are UNVERIFIED (from a reference design, the listing or engineering judgement).
+
+schema_version = 1
+
+# ---------- On the P1 Amazon list ----------
+
+[[part]]
+id = "U4_MAX813L"
+maker = "Maxim/ADI (no-name marketplace pack)"
+model = "MAX813L DIP-8"
+asin = "B0BJKH7ZDB"
+qty = 1
+status = "on-list"
+role = "Variant B supervisor for the watchdog cut (socket U4)"
+board = "WD"
+supply_min_v = 1.1
+supply_max_v = 5.5
+supply_ma_max = 0.35
+power_group = "5V"
+logic_v = 5.0
+vih_min_v = 3.5          # WDI
+vil_max_v = 0.8          # WDI
+voh_min_v = 3.5          # RESET/WDO at 800 uA source: VCC-1.5
+vol_max_v = 0.4
+trigger_polarity = "RESET active-high; WDO active-low; PFO active-low; MR active-low"
+default_state = { power_up = "RESET high 140-280 ms after VCC > 4.50-4.75 V", reset = "n/a", brownout = "RESET high below 4.50-4.75 V", unpowered = "outputs low (Q_CLAMP off -> variant A behaviour)", wire_off = "WDI floating disables the watchdog" }
+interfaces = ["gpio"]
+isolation_domain = "GND_SYS"
+pins = [ { name = "1", function = "MR" }, { name = "2", function = "VCC" }, { name = "3", function = "GND" }, { name = "4", function = "PFI" }, { name = "5", function = "PFO" }, { name = "6", function = "WDI" }, { name = "7", function = "RESET" }, { name = "8", function = "WDO" } ]
+datasheet_url = "https://www.analog.com/media/en/technical-documentation/data-sheets/MAX705-MAX813L.pdf"
+verified = true
+verified_fields = ["supply_min_v", "supply_max_v", "supply_ma_max", "vih_min_v", "vil_max_v", "voh_min_v", "vol_max_v", "trigger_polarity", "pins", "default_state.power_up", "default_state.brownout", "default_state.wire_off"]
+counterfeit_risk = true
+acceptance_passed = false
+notes = "Thresholds 4.50/4.65/4.75 V; reset 140/200/280 ms; WDT 1.00/1.60/2.25 s; PFI 1.20/1.25/1.30 V; MR pull-up 100-600 uA. Counterfeit risk: bench acceptance test required (compatibility.md 5.3)."
+
+[[part]]
+id = "U3_ATTINY85"
+maker = "Microchip (Atmel)"
+model = "ATTINY85-20PU"
+asin = "B06W9JBJJ6"
+qty = 1
+status = "on-list"
+role = "Independent Q&A watchdog; drives charge pump 2 (K2)"
+board = "WD"
+supply_min_v = 2.7
+supply_max_v = 5.5
+supply_ma_max = 5.0
+power_group = "3V3_WD"
+logic_v = 3.3
+vih_frac = 0.6
+vil_frac = 0.3
+voh_min_v = 2.5          # at -5 mA, VCC 3 V
+vol_max_v = 0.5          # at 5 mA, VCC 3 V
+abs_max_input_v = 3.8    # VCC + 0.5
+io_max_ma = 40.0
+trigger_polarity = "n/a (pump output is AC; any DC level = cut)"
+default_state = { power_up = "port B tri-state until code runs", reset = "port B tri-state", brownout = "held in reset by BOD (fuse 101: 2.5-2.9 V); BOD disabled at factory", unpowered = "no output", wire_off = "pump stops" }
+interfaces = ["usi-3wire", "isp"]
+isolation_domain = "GND_SYS"
+pins = [ { name = "1", function = "PB5/RESET" }, { name = "2", function = "PB3 pump2" }, { name = "3", function = "PB4 WD_TOGGLE" }, { name = "4", function = "GND" }, { name = "5", function = "PB0 DI/MOSI" }, { name = "6", function = "PB1 DO/MISO" }, { name = "7", function = "PB2 USCK/SCK" }, { name = "8", function = "VCC" } ]
+datasheet_url = "https://ece-classes.usc.edu/ee459/library/documents/Atmel-2586-AVR-8-bit-Microcontroller-ATtiny25-ATtiny45-ATtiny85_Datasheet.pdf"
+verified = true
+verified_fields = ["supply_min_v", "supply_max_v", "vih_frac", "vil_frac", "voh_min_v", "vol_max_v", "io_max_ma", "default_state.reset", "default_state.brownout", "pins"]
+fuse_bytes = { lfuse = "0xE2", hfuse = "0xCD", efuse = "0xFF", lock = "0xFC", datasheet_checked = false }
+notes = "Fuse bytes are a design choice, not yet decoded against the datasheet. RC +/-10 % factory -> synchronous link. Signature 0x1E930B."
+
+[[part]]
+id = "CBL_USBC_3PK"
+maker = "Umefly"
+model = "UC01M004"
+asin = "B08HV7GT4H"
+qty = 1
+status = "on-list"
+role = "USB-A to C for RP2350 #2 (guard); never on the trust root"
+interfaces = ["usb"]
+isolation_domain = "GND_SYS"
+datasheet_url = ""
+verified = false
+verified_fields = []
+notes = "Check each cable carries data."
+
+[[part]]
+id = "HW_STANDOFF"
+maker = "AvrestYPT"
+model = "FY-365-A144"
+asin = "B0FPMC9917"
+qty = 1
+status = "on-list"
+role = "M2.5 nylon standoffs"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "HW_TERMINALS"
+kind = "terminal"
+maker = "JSZAAHZ"
+model = "102 pcs 2.54/5.08 mm terminal kit"
+asin = "B0H41RQ3LH"
+qty = 1
+status = "on-list"
+role = "Screw terminals"
+ampacity_a = 6.0
+datasheet_url = ""
+verified = false
+verified_fields = []
+notes = "2.54 mm: 26-18 AWG, 150 V, 6 A (listing)."
+
+[[part]]
+id = "HW_DUPONT"
+maker = "ELEGOO"
+model = "EL-CP-004"
+asin = "B01EV70C78"
+qty = 1
+status = "on-list"
+role = "Logic and probe jumpers only; never the load path"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "WIRE_22AWG"
+kind = "wire"
+maker = "DEKIEVALE"
+model = "22 AWG silicone"
+asin = "B0CQP2JZSN"
+qty = 1
+status = "on-list"
+role = "All rail and panel wiring"
+ampacity_a = 3.0
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "PCB_PROTO"
+maker = "Smraza"
+model = "104 pcs proto kit"
+asin = "B07NM68FXK"
+qty = 1
+status = "on-list"
+role = "TR, WD, PWR, GUARD boards"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "IU485"
+maker = "iiunius"
+model = "Isolated TTL-RS485 (C)"
+asin = "B0DBCF4ZNZ"
+qty = 1
+status = "on-list"
+role = "Guard-side RS485 transceiver (auto direction)"
+board = "GUARD"
+supply_min_v = 3.3
+supply_max_v = 5.0
+supply_ma_max = 60.0
+power_group = "3V3_GUARD"
+logic_v = 3.3
+isolator = true
+isolator_domains = ["GND_GUARD", "ISO_RS485"]
+interfaces = ["uart", "rs485"]
+isolation_domain = "GND_GUARD"
+pins = [ { name = "VCC", function = "TTL supply" }, { name = "GND", function = "TTL GND" }, { name = "TXD", function = "UART in" }, { name = "RXD", function = "UART out" }, { name = "A+", function = "bus A" }, { name = "B-", function = "bus B" }, { name = "GNDISO", function = "bus ground" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+notes = "No DE pin (auto direction). Terminator/bias and pin names UNVERIFIED."
+
+[[part]]
+id = "WS485"
+maker = "Waveshare"
+model = "USB TO RS232/485/TTL (FT232RL, isolated)"
+asin = "B07L2VLY5D"
+qty = 1
+status = "on-list"
+role = "Pi-side RS485 end of the bus-guard loopback"
+supply_ma_max = 80.0
+power_group = "PI_USB"
+isolator = true
+isolator_domains = ["GND_SYS", "ISO_RS485"]
+interfaces = ["usb", "rs485", "rs232", "ttl"]
+isolation_domain = "GND_SYS"
+pins = [ { name = "USB", function = "USB-B to Pi" }, { name = "A+", function = "bus A" }, { name = "B-", function = "bus B" }, { name = "GND", function = "isolated ground" } ]
+datasheet_url = "https://waveshare.com/wiki/USB_TO_RS232/485/TTL"
+verified = true
+verified_fields = ["role", "notes"]
+notes = "On-board 120 ohm terminator; VCC out 3.3/5 V at 50 mA; one mode at a time. USB-B cable in box UNVERIFIED."
+
+[[part]]
+id = "SHG01A"
+maker = "DSD TECH"
+model = "SH-G01A (ADuM3160)"
+asin = "B093LKN3YH"
+qty = 1
+status = "on-list"
+role = "Not used in P1 (kept for P2 module 1)"
+supply_out_ma = 200.0
+isolator = true
+isolator_domains = ["GND_SYS", "ISO_USB"]
+interfaces = ["usb"]
+isolation_domain = "GND_SYS"
+datasheet_url = "https://www.desertcart.co.za/products/327395033-dsd-tech-sh-g01a-usb-isolator-with-adum3160-chip-12m"
+verified = true
+verified_fields = ["supply_out_ma", "notes"]
+notes = "Full and low speed only; never in front of the logic analyzer."
+
+[[part]]
+id = "INA228"
+maker = "GODIYMODULES (TI INA228)"
+model = "INA228 module, R002 shunt"
+asin = "B0GX5HM4X3"
+qty = 1
+status = "on-list"
+role = "High-side current and VBUS on RAIL_BUS; stuck-relay feedback"
+board = "PLATE"
+supply_min_v = 2.7
+supply_max_v = 5.5
+supply_ma_max = 1.0
+power_group = "3V3_TR"
+logic_v = 3.3
+abs_max_input_v = 85.0   # IN+/IN-/VBUS common mode
+interfaces = ["i2c"]
+i2c_addr = "0x40"
+isolation_domain = "GND_SYS"
+pins = [ { name = "VS", function = "3V3" }, { name = "GND", function = "GND" }, { name = "SDA", function = "I2C" }, { name = "SCL", function = "I2C" }, { name = "IN+", function = "shunt +" }, { name = "IN-", function = "shunt -" }, { name = "ALERT", function = "alert (if brought out)" } ]
+datasheet_url = "https://www.ti.com/product/INA228"
+verified = true
+verified_fields = ["supply_min_v", "supply_max_v", "abs_max_input_v"]
+notes = "16 addresses; module default 0x40 UNVERIFIED; VBUS tie UNVERIFIED; +/-163.84 / +/-40.96 mV ranges, offset +/-1 uV."
+
+[[part]]
+id = "AD584"
+maker = "Acxico (ADI AD584)"
+model = "AD584 reference module"
+asin = "B0B4WN2Q91"
+qty = 1
+status = "on-list"
+role = "P1.4 ground truth; MAX813L PFI acceptance test source"
+supply_min_v = 4.5
+supply_max_v = 30.0
+power_group = "12V_LOGIC"
+datasheet_url = "https://www.analog.com/en/products/ad584.html"
+verified = true
+verified_fields = ["notes"]
+notes = "10/7.5/5/2.5 V, 10 mA. 10 V output needs >=12.5 V in (repo cross-ref)."
+
+[[part]]
+id = "FUSE_KIT"
+kind = "fuse-kit"
+maker = "Nilight"
+model = "50029R 5-30 A"
+asin = "B07Q9PL4R6"
+qty = 1
+status = "on-list"
+role = "Spares only: too large for the 22 AWG load path"
+rating_a = 5.0
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "F1"
+kind = "fuse"
+maker = "Anyongora holder + M4 fuse"
+model = "Inline ATC holder, 1 A fuse"
+asin = "B0CL7MLY6T"
+qty = 1
+status = "on-list"
+role = "Load branch fuse"
+board = "PWR"
+rating_a = 1.0
+pins = [ { name = "A", function = "in" }, { name = "B", function = "out" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+notes = "Holder lead is 12 AWG; fuse value from M4."
+
+[[part]]
+id = "F2"
+kind = "fuse"
+maker = "Anyongora holder + M4 fuse"
+model = "Inline ATC holder, 1 A fuse"
+asin = "B0CL7MLY6T"
+qty = 1
+status = "on-list"
+role = "Logic branch fuse (taken before the e-stop); blown by the M6 crowbar"
+board = "PWR"
+rating_a = 1.0
+pins = [ { name = "A", function = "in" }, { name = "B", function = "out" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "LAMP"
+maker = "Gebildet"
+model = "AD16-22D/S 12-24 V 20 mA"
+asin = "B0816FMP9B"
+qty = 1
+status = "on-list"
+role = "Loads (lamp A, lamp B) and indicators (L_PWR, L_BUS)"
+supply_min_v = 12.0
+supply_max_v = 24.0
+supply_ma_max = 20.0
+pins = [ { name = "+", function = "terminal" }, { name = "-", function = "terminal" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "RLY"
+maker = "SunFounder"
+model = "2-channel 5 V relay, opto, low-level trigger"
+asin = "B00E0NTPP4"
+qty = 1
+status = "on-list"
+role = "K1 (RP2350 dead-man) and K2 (ATtiny watchdog cut); COM-NO in series"
+board = "RLY"
+supply_min_v = 4.75
+supply_max_v = 5.25
+supply_ma_max = 150.0
+power_group = "5V"
+logic_v = 5.0
+input_current_ma = 3.0
+trigger_polarity = "active-low (IN low = energised)"
+default_state = { power_up = "IN floats high -> released", reset = "n/a", brownout = "coil may stay held down to ~10 % of 5 V once pulled in", unpowered = "released", wire_off = "IN open -> released; VCC/GND off -> released" }
+interfaces = ["gpio"]
+isolation_domain = "GND_SYS"
+pins = [ { name = "VCC", function = "input side" }, { name = "GND", function = "GND" }, { name = "IN1", function = "K1 drive" }, { name = "IN2", function = "K2 drive" }, { name = "JD-VCC", function = "coil supply" }, { name = "K1.COM", function = "contact" }, { name = "K1.NO", function = "contact" }, { name = "K1.NC", function = "unused" }, { name = "K2.COM", function = "contact" }, { name = "K2.NO", function = "contact" }, { name = "K2.NC", function = "unused" } ]
+datasheet_url = "https://components101.com/switches/5v-dual-channel-relay-module-pinout-features-applications-working-datasheet"
+verified = false
+verified_fields = []
+notes = "Reference design only. NEVER drive IN from a GPIO (back-feed and inverted sense); only from a 2N3904 open collector."
+
+[[part]]
+id = "MOS_A"
+maker = "DIYables"
+model = "AOD4184 opto MOSFET module"
+asin = "B0G5NNG1VZ"
+qty = 1
+status = "on-list"
+role = "Rail A enable (low side), GP12"
+board = "MOS-A"
+supply_min_v = 6.0
+supply_max_v = 36.0
+power_group = "RAIL_BUS"
+vih_min_v = 2.5
+input_current_ma = 2.1
+trigger_polarity = "active-high"
+default_state = { power_up = "off (gate 4.7 k pull-down)", reset = "off", brownout = "off below ~1.6 V input", unpowered = "off", wire_off = "off" }
+interfaces = ["gpio"]
+isolation_domain = "GND_SYS"
+pins = [ { name = "PWM", function = "logic in" }, { name = "GNDL", function = "logic GND" }, { name = "V+", function = "supply +" }, { name = "V-", function = "supply -" }, { name = "L+", function = "load +" }, { name = "LOAD", function = "switched -" } ]
+datasheet_url = "https://protosupplies.com/product/d4184-mosfet-control-module/"
+verified = true
+verified_fields = ["supply_min_v", "supply_max_v", "vih_min_v", "trigger_polarity", "default_state.power_up"]
+notes = "Gate ~= V+/2; no flyback diode; logic and load GND not joined on the board. LOAD is a switched node: never a ground clip."
+
+[[part]]
+id = "MOS_B"
+maker = "DIYables"
+model = "AOD4184 opto MOSFET module"
+asin = "B0G5NNG1VZ"
+qty = 1
+status = "on-list"
+role = "Rail B port 0 enable (low side), GP13"
+board = "MOS-B"
+supply_min_v = 6.0
+supply_max_v = 36.0
+power_group = "RAIL_B_HI"
+vih_min_v = 2.5
+input_current_ma = 2.1
+trigger_polarity = "active-high"
+default_state = { power_up = "off", reset = "off", brownout = "off", unpowered = "off", wire_off = "off" }
+interfaces = ["gpio"]
+isolation_domain = "GND_SYS"
+pins = [ { name = "PWM", function = "logic in" }, { name = "GNDL", function = "logic GND" }, { name = "V+", function = "supply +" }, { name = "V-", function = "supply -" }, { name = "L+", function = "load +" }, { name = "LOAD", function = "switched -" } ]
+datasheet_url = "https://protosupplies.com/product/d4184-mosfet-control-module/"
+verified = true
+verified_fields = ["trigger_polarity", "default_state.power_up"]
+
+[[part]]
+id = "OLED"
+maker = "Hosyond"
+model = "0.96 in SSD1306 I2C"
+asin = "B09T6SJBV5"
+qty = 1
+status = "on-list"
+role = "Trusted panel display"
+supply_min_v = 3.3
+supply_max_v = 5.0
+supply_ma_max = 25.0
+power_group = "3V3_TR"
+interfaces = ["i2c"]
+i2c_addr = "0x3C"
+isolation_domain = "GND_SYS"
+pins = [ { name = "VCC", function = "3V3" }, { name = "GND", function = "GND" }, { name = "SDA", function = "I2C" }, { name = "SCL", function = "I2C" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "BTN_LEASE"
+maker = "mxuteuk"
+model = "CB16AY-11D-DC12V"
+asin = "B086SPXGTS"
+qty = 1
+status = "on-list"
+role = "Lease (panel approval) button; 12 V LED"
+pins = [ { name = "C", function = "common" }, { name = "NO", function = "to GP5" }, { name = "NC", function = "spare" }, { name = "LED+", function = "12 V" }, { name = "LED-", function = "to 2N3904" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "SW_ARM"
+maker = "DaierTek"
+model = "KN3C-101 + SAC-01-R"
+asin = "B07T6YNRZS"
+qty = 1
+status = "on-list"
+role = "Arm switch, in series in the load path"
+rating_a = 20.0
+pins = [ { name = "1", function = "in" }, { name = "2", function = "out (ARM_OUT)" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "SW_KEY"
+maker = "Shopcorp"
+model = "XB2-BG21"
+asin = "B08JWP92K4"
+qty = 1
+status = "on-list"
+role = "Key switch, in series on the rail-B branch"
+pins = [ { name = "NO1", function = "in (RAIL_BUS)" }, { name = "NO2", function = "out (RAIL_B_HI)" } ]
+datasheet_url = "https://www.se.com/us/en/product/XB4BG21/"
+verified = false
+verified_fields = []
+notes = "Original Schneider XB4BG21 = 2 positions stay put 1 NO; clone UNVERIFIED."
+
+[[part]]
+id = "ESTOP"
+maker = "mxuteuk"
+model = "HB2-ES544 2NC latching"
+asin = "B07R8PTTDX"
+qty = 1
+status = "on-list"
+role = "NC1 in the load path; NC2 sense to GP2"
+rating_a = 10.0
+pins = [ { name = "NC1.1", function = "in" }, { name = "NC1.2", function = "out" }, { name = "NC2.1", function = "GP2" }, { name = "NC2.2", function = "GND" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+notes = "DC rating and positive-opening action UNVERIFIED."
+
+[[part]]
+id = "RP_TR"
+trust_root = true
+maker = "Waveshare"
+model = "RP2350-Zero (RP2350A)"
+asin = "B0DYTVCF2H"
+qty = 1
+status = "on-list"
+role = "Interlock trust root (#1 of 4)"
+board = "TR"
+supply_min_v = 4.5
+supply_max_v = 5.5
+supply_ma_max = 40.0
+supply_out_ma = 800.0     # ME6217C33 3V3 out
+supply_out_group = "3V3_TR"   # the group this part sources (power_group above is what it consumes)
+power_group = "5V"
+logic_v = 3.3
+voh_min_v = 2.6           # engineering estimate at 4 mA; datasheet table not read
+vol_max_v = 0.5
+vih_min_v = 2.0
+vil_max_v = 0.8
+abs_max_input_v = 5.5
+tolerance_condition = "powered"
+io_max_ma = 4.0           # default drive strength setting
+trigger_polarity = "n/a"
+default_state = { power_up = "pads isolated, pull-down on (~35-189 k); firmware drives outputs low before releasing ISO", reset = "pull-down, isolated", brownout = "chip reset -> as reset", unpowered = "pins ~0 V; ESD diodes conduct back-feed", wire_off = "n/a" }
+interfaces = ["gpio", "uart", "spi", "i2c", "swd", "usb"]
+isolation_domain = "GND_SYS"
+pins = [
+  { name = "5V", function = "bench 5 V in" }, { name = "GND", function = "GND" }, { name = "3V3", function = "3V3 out" },
+  { name = "GP0", function = "UART0 TX PULSE" }, { name = "GP1", function = "UART0 RX PULSE" }, { name = "GP2", function = "ESTOP sense" },
+  { name = "GP3", function = "ARM sense" }, { name = "GP4", function = "KEY sense" }, { name = "GP5", function = "PANEL_BUTTON" },
+  { name = "GP6", function = "FIRMWARE_JUMPER" }, { name = "GP7", function = "RAIL_A_SENSE" }, { name = "GP8", function = "SPI1 RX Q&A" },
+  { name = "GP9", function = "SPI1 CSn (tied low)" }, { name = "GP10", function = "SPI1 SCK Q&A" }, { name = "GP11", function = "SPI1 TX Q&A" },
+  { name = "GP12", function = "RAIL_A_ENABLE" }, { name = "GP13", function = "RAIL_B_ENABLE[0]" }, { name = "GP14", function = "CHARGE_PUMP" },
+  { name = "GP15", function = "LEASE_LED" }, { name = "GP16", function = "on-board WS2812 (reserved)" }, { name = "GP26", function = "I2C1 SDA" },
+  { name = "GP27", function = "I2C1 SCL" }, { name = "GP28", function = "RAIL_B_SENSE[0]" }, { name = "GP29", function = "MID_SENSE" },
+  { name = "SWCLK", function = "pad" }, { name = "SWDIO", function = "pad" }, { name = "USB", function = "NOT CONNECTED (no VBUS diode)" }
+]
+datasheet_url = "https://www.waveshare.com/wiki/RP2350-Zero"
+verified = true
+verified_fields = ["supply_out_ma", "pins.GP16", "tolerance_condition", "default_state.reset"]
+notes = "GP16 = WS2812 and GP17+ on pads (Zephyr dtsi). 5 V tolerant only with IOVDD powered (RPi A4 note). E9 on A2 stepping: external pull-downs."
+
+[[part]]
+id = "RP_GUARD"
+maker = "Waveshare"
+model = "RP2350-Zero (RP2350A)"
+asin = "B0DYTVCF2H"
+qty = 1
+status = "on-list"
+role = "Bus guard (#2 of 4); USB-powered from the Pi"
+board = "GUARD"
+supply_out_ma = 800.0
+power_group = "3V3_GUARD"
+logic_v = 3.3
+interfaces = ["gpio", "uart", "usb", "swd"]
+isolation_domain = "GND_GUARD"
+pins = [ { name = "GP0", function = "UART0 TX -> IU485 TXD" }, { name = "GP1", function = "UART0 RX <- IU485 RXD" }, { name = "3V3", function = "IU485 VCC" }, { name = "GND", function = "GND" }, { name = "USB", function = "Pi USB3" } ]
+datasheet_url = "https://www.waveshare.com/wiki/RP2350-Zero"
+verified = true
+verified_fields = ["pins.GP0", "pins.GP1"]
+
+[[part]]
+id = "LA"
+kind = "analyzer"
+maker = "HiLetgo"
+model = "24 MHz 8 ch (fx2lafw)"
+asin = "B077LSG5P2"
+qty = 1
+status = "on-list"
+role = "Timing evidence"
+vih_min_v = 2.0
+vil_max_v = 0.8
+abs_max_input_v = 5.25
+interfaces = ["usb-hs"]
+isolation_domain = "GND_SYS"
+pins = [ { name = "D0", function = "probe" }, { name = "D1", function = "probe" }, { name = "D2", function = "probe" }, { name = "D3", function = "probe" }, { name = "D4", function = "probe" }, { name = "D5", function = "probe" }, { name = "D6", function = "probe" }, { name = "D7", function = "probe" }, { name = "GND", function = "to TB-GND only" }, { name = "USB", function = "USB high speed to host" } ]
+datasheet_url = "https://sigrok.org/wiki/Noname_Saleae_Logic_clone"
+verified = true
+verified_fields = ["vih_min_v", "vil_max_v", "abs_max_input_v"]
+notes = "Needs USB high speed. Host on the Mac for exit test 4."
+
+[[part]]
+id = "PICO"
+maker = "Bicool (Raspberry Pi)"
+model = "Pico RP2040, headers"
+asin = "B08X7HN2VG"
+qty = 1
+status = "on-list"
+role = "SWD debug probe (debugprobe firmware)"
+logic_v = 3.3
+interfaces = ["usb", "swd"]
+isolation_domain = "GND_SYS"
+pins = [ { name = "GP2", function = "SWCLK" }, { name = "GP3", function = "SWDIO" }, { name = "GND", function = "GND" }, { name = "USB", function = "micro-USB to Pi" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "PSU12"
+kind = "adapter"
+maker = "Facmogu"
+model = "AL-1230 12 V 3 A"
+asin = "B073WSWT34"
+qty = 1
+status = "on-list"
+role = "Bench 12 V (load + logic branches)"
+supply_out_ma = 3000.0
+power_group = "12V"
+pins = [ { name = "+", function = "barrel centre" }, { name = "-", function = "barrel sleeve" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "SD32"
+maker = "SanDisk"
+model = "SDSQUA4-032G-GN6MN"
+asin = "B08L5HMJVW"
+qty = 1
+status = "on-list"
+role = "Pi boot media"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "PI5"
+maker = "iRasptek (Raspberry Pi)"
+model = "Pi 5 4 GB kit"
+asin = "B0FL21867J"
+qty = 1
+status = "on-list"
+role = "Brain: supervisor, PULSE, analyzer host (tests 1,2,3,5,6)"
+logic_v = 3.3
+supply_out_ma = 600.0     # USB total without 5 A negotiation
+power_group = "PI_USB"    # the group it sources (USB ports)
+off_in_tests = [4]        # exit test 4 runs with the Pi powered off
+interfaces = ["uart", "usb", "gpio", "spi"]
+isolation_domain = "GND_SYS"
+pins = [ { name = "6", function = "GND" }, { name = "8", function = "GPIO14 TXD0" }, { name = "10", function = "GPIO15 RXD0" }, { name = "19", function = "GPIO10 MOSI (ISP, temporary)" }, { name = "21", function = "GPIO9 MISO (ISP, temporary)" }, { name = "23", function = "GPIO11 SCLK (ISP, temporary)" }, { name = "22", function = "GPIO25 ATtiny RESET (ISP, temporary)" }, { name = "USB3A", function = "LA" }, { name = "USB3B", function = "RP_GUARD" }, { name = "USB2A", function = "PICO" }, { name = "USB2B", function = "WS485" } ]
+datasheet_url = "https://pip-assets.raspberrypi.com/categories/685-app-notes-guides-whitepapers/documents/RP-009856-WP-1-USB%20Power%20delivery%20on%20Raspberry%20Pi%205.pdf"
+verified = true
+verified_fields = ["supply_out_ma"]
+
+# ---------- Owned ----------
+
+[[part]]
+id = "MAC"
+maker = "Apple"
+model = "MacBook Pro M3"
+status = "owned"
+role = "Analyzer host for exit test 4"
+pins = [ { name = "USB", function = "USB to the logic analyzer (exit test 4 host)" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "PINEPOWER"
+maker = "PINE64"
+model = "PinePower Desktop"
+status = "owned"
+role = "Fixed USB PD steps only (not a brownout source)"
+datasheet_url = "https://pine64.org/documentation/PinePower/Versions/PinePower_Desktop/"
+verified = true
+verified_fields = ["role"]
+
+[[part]]
+id = "METER"
+maker = "unknown (#11)"
+model = "~$20 handheld"
+status = "owned"
+role = "Static voltages, continuity, uA for MAX813L ICC"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+# ---------- Missing (compatibility.md §6) ----------
+
+[[part]]
+id = "M1_BUCK5"
+kind = "buck"
+model = "12->5 V buck >=1 A (LM2596 or Pololu D24V10F5)"
+status = "missing-must"
+role = "5 V logic rail"
+board = "PWR"
+supply_min_v = 7.0
+supply_max_v = 24.0
+supply_out_ma = 1000.0
+power_group = "5V"
+pins = [ { name = "IN+", function = "from F2" }, { name = "IN-", function = "GND" }, { name = "OUT+", function = "TB-5V" }, { name = "OUT-", function = "GND" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+notes = "Failure mode: high-side short -> 12 V on 5 V; M6 required."
+
+[[part]]
+id = "M2_ADJ"
+model = "Adjustable buck 0-5.5 V (LM2596-ADJ, multi-turn) or bench supply"
+status = "missing-must"
+role = "Brownout ramp (test 1), MAX813L acceptance"
+supply_out_ma = 1000.0
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M3_BARREL"
+model = "Female 5.5x2.1 barrel to screw terminal, x2"
+status = "missing-must"
+role = "Land the 12 V adapter"
+pins = [ { name = "+", function = "+" }, { name = "-", function = "-" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M4_FUSES"
+model = "ATC 1 A and 2 A, 5 each"
+status = "missing-must"
+role = "F1, F2"
+rating_a = 1.0
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M5_LDO"
+kind = "ldo"
+model = "MCP1700-3302E/TO or AMS1117-3.3 module"
+status = "missing-must"
+role = "3V3_WD for the ATtiny (independent supply)"
+board = "WD"
+supply_out_ma = 250.0
+power_group = "3V3_WD"
+pins = [ { name = "IN", function = "WD 5 V" }, { name = "OUT", function = "3V3_WD" }, { name = "GND", function = "GND" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M6_ZENER"
+kind = "crowbar"
+model = "1N5339B 5.6 V 5 W"
+status = "missing-must"
+role = "5 V rail crowbar (blows F2 on buck short)"
+board = "PWR"
+pins = [ { name = "K", function = "+5V" }, { name = "A", function = "GND" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M7_PC817"
+model = "PC817 DIP-4 x5 (+spares)"
+status = "missing-must"
+role = "U-ARM, U-KEY, U-MID, U-RA, U-RB sense"
+board = "TR"
+pins = [ { name = "A", function = "LED anode" }, { name = "K", function = "LED cathode" }, { name = "C", function = "collector" }, { name = "E", function = "emitter" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M8_2N3904"
+model = "2N3904 NPN"
+status = "missing-must"
+role = "Q51, Q61 (pump holds), Q62 (WDI shift), Q63 (clamp), lease LED"
+pins = [ { name = "E", function = "emitter" }, { name = "B", function = "base" }, { name = "C", function = "collector" } ]
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M9_SCHOTTKY"
+model = "BAT43/BAT85/1N5817"
+status = "missing-must"
+role = "Pump diodes D51 D52 D61 D62"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M10_CAPS"
+model = "100 nF film x4, 1 uF film x2, 100 nF ceramic x8, 10 uF x4"
+status = "missing-must"
+role = "Pumps, decoupling"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M11_DIODES"
+model = "1N4148 x4, 1N4007 x2"
+status = "missing-must"
+role = "MR diode-AND (variant B), WD reverse protection, opto LED reverse clamp"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M12_SOCKETS"
+model = "DIP-8 turned-pin socket x4"
+status = "missing-must"
+role = "U3 ATtiny (off-board ISP), U4 MAX813L"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M13_MICROUSB"
+model = "USB-A to micro-B data cable"
+status = "missing-must"
+role = "Pico probe"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M14_USBB"
+model = "USB-A to USB-B cable"
+status = "missing-must"
+role = "Waveshare adapter (if not in the box)"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M15_LOAD"
+model = "47 ohm 5 W wirewound x2 (or 12 V 194 bulb + socket x2)"
+status = "missing-should"
+role = "Real current for INA228 evidence"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M16_PANEL"
+model = "Printed PETG plate + 22 mm panel"
+status = "missing-must"
+role = "Mounting"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M17_FERRULES"
+model = "0.34 mm2 ferrules + crimper"
+status = "missing-should"
+role = "Stranded wire into screw terminals"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M18_SHUNTS"
+model = "2.54 mm jumper shunts"
+status = "missing-should"
+role = "Firmware jumper, J_B"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M19_FHEADER"
+model = "2.54 mm female header strips"
+status = "missing-should"
+role = "Socket the RP2350-Zero boards"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M20_RLY2"
+model = "SunFounder 2-ch relay (second board)"
+asin = "B00E0NTPP4"
+status = "missing-should"
+role = "Put K2 on its own board (common-cause split)"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M21_PDTRIG"
+model = "USB-C PD trigger 15 V"
+status = "missing-nice"
+role = "AD584 10 V output"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M22_KEYBLOCK"
+model = "ZB2-BE101 NO contact block"
+status = "missing-nice"
+role = "Dry key sense"
+datasheet_url = ""
+verified = false
+verified_fields = []
+
+[[part]]
+id = "M24_MAX813L_GENUINE"
+maker = "Analog Devices"
+model = "MAX813LCPA+ x2 (DigiKey/Mouser)"
+status = "missing-should"
+role = "Acceptance-test control and fallback for U4"
+datasheet_url = "https://www.analog.com/media/en/technical-documentation/data-sheets/MAX705-MAX813L.pdf"
+verified = false
+verified_fields = []
