@@ -14,7 +14,7 @@ None.
 
 ### All requirements
 
-**25 requirements:** 8 built, 10 partial, 7 not built.
+**26 requirements:** 8 built, 11 partial, 7 not built.
 
 | ID | Requirement | Status | Tracking | Still to prove |
 | --- | --- | --- | --- | --- |
@@ -23,7 +23,7 @@ None.
 | `SAW-CORTEX-FACTS-1` | A write rests only on facts with scope, invalidated on reflash, rewiring or change | partial | #110 | a reflashed module's facts re-earn trust against an independent reference (#110) |
 | `SAW-CORTEX-LATCH-1` | Once outside text enters a turn, class 2 and 3 actions are refused until a fresh approval; a new turn inherits the latch | partial | #210, #103 | the MCP surface reports every outside input to the latch before the model sees it (#103) |
 | `SAW-CORTEX-REC-1` | A session recorder keeps start, annotate, pause, stop and replay, with a visible gap event for a dropped sample | not built | #106 | a session recorded from the simulator replays identically (#106), a deliberately dropped sample shows up as a gap event (#106) |
-| `SAW-CORTEX-TEXT-1` | Outside text is typed, escaped and fenced, and never becomes an identifier | built | #105, #187, #202 | - |
+| `SAW-CORTEX-TEXT-1` | Outside text is typed, escaped and fenced, and never becomes an identifier | partial | #105, #187, #202 | every ingest path wraps outside text in WorldText (#105) |
 | `SAW-CORTEX-THERMAL-1` | The supervisor reads its own temperatures and sheds load | not built | #248 | load is shed least essential first above a threshold, with hysteresis (#248), the interlock is never shed (#248) |
 | `SAW-INTERLOCK-BUSGUARD-1` | Only the approved action's Modbus frame passes the bus guard | partial | #203, #169 | the guard runs on a real RP2350 in the transmit path (#169) |
 | `SAW-INTERLOCK-FAULT-1` | A latched fault survives restart, and only a panel token clears it | partial | #197, #144 | a latched fault survives a power cut through a durable store (#144) |
@@ -36,13 +36,14 @@ None.
 | `SAW-SAW-PACKMODEL-1` | One pack model file everything is generated from, with budget checks in CI | not built | #120, #121 | changing one module's entry regenerates every derived output and re-runs every check (#120), budget checks for ports, power by mode, data and cost run in CI (#121) |
 | `SAW-TRIAGE-CAP-1` | Tool results are a summary plus a link, capped at 25,000 tokens | not built | #103 | no tool result exceeds the cap and none carries raw samples (#103) |
 | `SAW-TRIAGE-SURF-1` | The MCP surface is a few fixed meta-tools, not one tool per instrument function | not built | #103, #204 | golden tool definitions list exactly the six meta-tools (#204), adding simulated modules leaves tools/list byte-identical (#103) |
-| `SAW-XRAY-CLOSURE-1` | A PR that closes an issue while a requirement tracking it is not built fails | built | #252 | - |
-| `SAW-XRAY-DRIFT-1` | Prose that changes without its record is flagged by paragraph hash | built | #252 | - |
-| `SAW-XRAY-FEEDBACK-1` | Every finding says what to update, and STATUS.md lists drifted and needs-an-issue items first | built | #252 | - |
-| `SAW-XRAY-JUDGE-1` | The judge runs from the base branch with read-only permissions, pinned actions and no secrets | built | #252 | - |
-| `SAW-XRAY-MALFORMED-1` | Malformed records, duplicate or unknown ids and checks naming missing tests fail | built | #252 | - |
-| `SAW-XRAY-STALE-1` | A stale design/STATUS.md fails the check and --bless regenerates it | built | #252 | - |
-| `SAW-XRAY-STATUS-1` | Status is computed from the code and never typed into a record | built | #252 | - |
+| `SAW-XRAY-CLOSURE-1` | A PR that closes an issue while a requirement tracking it is not built fails | built | #269, #271 | - |
+| `SAW-XRAY-DRIFT-1` | Prose that changes without its record is flagged by paragraph hash | built | #269 | - |
+| `SAW-XRAY-FEEDBACK-1` | Every finding says what to update, and STATUS.md lists drifted and needs-an-issue items first | built | #269 | - |
+| `SAW-XRAY-JUDGE-1` | The judge runs from the base branch with read-only permissions, pinned actions and no secrets | built | #269, #271 | - |
+| `SAW-XRAY-MALFORMED-1` | Malformed records, duplicate or unknown ids and checks naming missing tests fail | built | #269, #271 | - |
+| `SAW-XRAY-REAL-1` | Only tests that compile, are not ignored and really run count as built | built | #269, #271 | - |
+| `SAW-XRAY-STALE-1` | A stale design/STATUS.md fails the check and --bless regenerates it | built | #269, #271 | - |
+| `SAW-XRAY-STATUS-1` | Status is computed from the code and never typed into a record | built | #269 | - |
 
 <!-- status:end -->
 

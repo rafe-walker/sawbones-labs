@@ -6,7 +6,7 @@ title = "Status is computed from the code and never typed into a record"
 source = "CONTRIBUTING.md"
 anchor = "**Statuses.**"
 source_sha = "0f5766555ae66dd1"
-tracks = [252]
+tracks = [269]
 acceptance = [
   { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_built_when_every_check_resolves" },
   { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_partial_when_some_are_pending" },
@@ -22,8 +22,8 @@ level = "MUST"
 title = "Prose that changes without its record is flagged by paragraph hash"
 source = "CONTRIBUTING.md"
 anchor = "**Records.**"
-source_sha = "d31005cf8dc66f37"
-tracks = [252]
+source_sha = "6620b1415ed9b30a"
+tracks = [269]
 acceptance = [
   { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_drifted_when_the_design_prose_changes" },
   { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_regression_drifted_when_the_anchor_paragraph_is_removed" },
@@ -39,13 +39,17 @@ title = "Malformed records, duplicate or unknown ids and checks naming missing t
 source = "CONTRIBUTING.md"
 anchor = "**Tags.**"
 source_sha = "644f2cc7b77eb898"
-tracks = [252]
+tracks = [269, 271]
 acceptance = [
   { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_malformed_records_fail" },
   { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_regression_duplicate_id_fails" },
   { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_regression_missing_test_fails" },
   { id = "a4", kind = "test", ref = "ci/test_conformance.py::test_regression_unknown_id_in_an_impl_tag_fails" },
   { id = "a5", kind = "test", ref = "ci/test_conformance.py::test_regression_ignored_commented_and_helper_fns_do_not_count" },
+  { id = "a6", kind = "test", ref = "ci/test_conformance.py::test_regression_271_wrong_field_types_are_clean_errors" },
+  { id = "a7", kind = "test", ref = "ci/test_conformance.py::test_regression_271_only_toml_files_belong_in_the_requirements_dir" },
+  { id = "a8", kind = "test", ref = "ci/test_conformance.py::test_regression_271_file_kind_wants_a_regular_file_inside_the_repo" },
+  { id = "a9", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_source_outside_the_repo_is_refused" },
 ]
 
 [[requirement]]
@@ -56,10 +60,32 @@ title = "A stale design/STATUS.md fails the check and --bless regenerates it"
 source = "CONTRIBUTING.md"
 anchor = "**The table.**"
 source_sha = "292f7ca319ace5c5"
-tracks = [252]
+tracks = [269, 271]
 acceptance = [
   { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_stale_status_file_fails_and_bless_fixes_it" },
   { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_the_repository_is_conformant_and_its_status_is_current" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_whole_status_file_is_stale_checked" },
+]
+
+[[requirement]]
+id = "SAW-XRAY-REAL-1"
+rev = 1
+level = "MUST"
+title = "Only tests that compile, are not ignored and really run count as built"
+source = "CONTRIBUTING.md"
+anchor = "**Real tests only.**"
+source_sha = "8e7e71e4b3985a88"
+tracks = [269, 271]
+acceptance = [
+  { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_271_source_fallback_drops_comments_never_cfg_macros_and_cfg_attr_ignore" },
+  { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_test_missing_from_cargos_list_does_not_count" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_regression_271_an_ignored_test_in_cargos_list_does_not_count" },
+  { id = "a4", kind = "test", ref = "ci/test_conformance.py::test_regression_271_cargo_list_keys_by_crate_and_path" },
+  { id = "a5", kind = "test", ref = "ci/test_conformance.py::test_regression_271_globs_need_a_literal_prefix_a_crate_and_no_ignored_match" },
+  { id = "a6", kind = "test", ref = "ci/test_conformance.py::test_regression_271_real_cargo_rejects_every_trick" },
+  { id = "a7", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_tests_are_what_unittest_runs" },
+  { id = "a8", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_refs_resolve_only_in_ci_test_files" },
+  { id = "a9", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_malformed_cargo_list_fails_cleanly" },
 ]
 
 [[requirement]]
@@ -69,13 +95,16 @@ level = "MUST"
 title = "A PR that closes an issue while a requirement tracking it is not built fails"
 source = "CONTRIBUTING.md"
 anchor = "**Closure gate.**"
-source_sha = "e82b32f4bb6da284"
-tracks = [252]
+source_sha = "c09840b11501f654"
+tracks = [269, 271]
 acceptance = [
   { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_closing_an_issue_with_an_unbuilt_requirement_fails" },
   { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_an_unrelated_or_foreign_or_unclosing_reference_is_fine" },
   { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_pr_text_is_data_never_executed" },
   { id = "a4", kind = "test", ref = "ci/test_conformance.py::test_closing_keyword_parse" },
+  { id = "a5", kind = "test", ref = "ci/test_conformance.py::test_regression_271_non_ascii_digits_do_not_close_an_issue" },
+  { id = "a6", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_closure_gate_reads_commit_messages" },
+  { id = "a7", kind = "test", ref = "ci/test_regression_guard.py::test_regression_271_non_ascii_digits_do_not_close_an_issue" },
 ]
 
 [[requirement]]
@@ -85,11 +114,12 @@ level = "MUST"
 title = "The judge runs from the base branch with read-only permissions, pinned actions and no secrets"
 source = "CONTRIBUTING.md"
 anchor = "**Guarded.**"
-source_sha = "2bcdcc58863583d3"
-tracks = [252]
+source_sha = "a2a1a8a743c9c724"
+tracks = [269, 271]
 acceptance = [
   { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_the_workflow_judges_from_the_base_branch_and_holds_no_privilege" },
   { id = "a2", kind = "file", ref = ".github/workflows/conformance.yml" },
+  { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_judge_fails_closed_once_it_is_on_the_base_branch" },
 ]
 
 [[requirement]]
@@ -100,7 +130,7 @@ title = "Every finding says what to update, and STATUS.md lists drifted and need
 source = "CONTRIBUTING.md"
 anchor = "Every finding names what to update"
 source_sha = "154438d09b484f02"
-tracks = [252]
+tracks = [269]
 acceptance = [
   { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_findings_say_what_to_update" },
   { id = "a2", kind = "test", ref = "ci/test_conformance.py::test_regression_a_requirement_with_no_issue_needs_one" },

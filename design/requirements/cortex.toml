@@ -46,6 +46,7 @@ acceptance = [
   { id = "a1", kind = "test", ref = "sawbones-reading::fence_cannot_be_closed_from_inside" },
   { id = "a2", kind = "test", ref = "sawbones-reading::regression_202_*" },
   { id = "a3", kind = "test", ref = "sawbones-policy::regression_187_world_text_cannot_become_an_identifier" },
+  { id = "a4", kind = "test", ref = "every ingest path wraps outside text in WorldText", pending = 105 },
 ]
 
 [[requirement]]

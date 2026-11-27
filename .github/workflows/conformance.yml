@@ -3,14 +3,21 @@ name: Design conformance
 # The X-ray: does the code match the design? Requirement records in
 # design/requirements/ pin the design paragraph they came from and name the
 # tests that prove them. `conformance` fails on a malformed record, an unknown
-# or duplicate id, a missing test, a drifted record or a stale design/STATUS.md.
-# `closure-gate` fails a PR that says Fixes/Closes #N while a requirement
-# tracking #N is not built. See CONTRIBUTING.md, "Design conformance".
+# or duplicate id, a test that cargo does not list, a drifted record or a stale
+# design/STATUS.md. `closure-gate` fails a PR that says Fixes/Closes #N (in its
+# title, body or commit messages) while a requirement tracking #N is not built.
+# See CONTRIBUTING.md, "Design conformance".
 #
-# For a PR the judge is the copy of ci/conformance.py on the base branch, so a
-# PR cannot edit the checker to pass itself. Its own unit tests run from the PR
-# copy. No secrets, no write token, and PR text reaches only environment
-# variables that the script parses with a strict regex.
+# Rust tests are resolved against cargo's own list (`test-list` job), so a test
+# that never compiles or runs cannot count as built.
+#
+# For a PR the judge is the copy of ci/conformance.py (and ci/rust_test_list.py)
+# on the base branch, so a PR cannot edit the checker to pass itself. The PR copy
+# is used only while those files are not on the base branch yet, and that is
+# announced with a warning; any other failure to read the base copy fails the
+# job. Its own unit tests run from the PR copy. No secrets, no write token, and
+# PR text reaches only environment variables or files that the script parses
+# with a strict regex.
 
 on:
   pull_request:
@@ -26,40 +33,94 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  conformance:
-    name: design conformance
+  test-list:
+    name: list the tests cargo builds
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 25
+    env:
+      BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Install the pinned Rust toolchain
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustc --version
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - name: Build and list every workspace test with the base branch copy of the lister
+        run: |
+          lister="${RUNNER_TEMP}/rust_test_list.py"
+          if [ -n "${BASE_REF}" ]; then
+            git rev-parse --verify --quiet "${BASE_REF}^{commit}" > /dev/null || { echo "::error::base ref ${BASE_REF} is not available"; exit 1; }
+            if git cat-file -e "${BASE_REF}:ci/rust_test_list.py" 2>/dev/null; then
+              git show "${BASE_REF}:ci/rust_test_list.py" > "${lister}"
+            else
+              echo "::warning::ci/rust_test_list.py is not on the base branch yet; using the PR copy"
+              cp ci/rust_test_list.py "${lister}"
+            fi
+          else
+            cp ci/rust_test_list.py "${lister}"
+          fi
+          python3 -I "${lister}" "${RUNNER_TEMP}/rust-tests.json" --root "${GITHUB_WORKSPACE}"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rust-test-list
+          path: ${{ runner.temp }}/rust-tests.json
+          if-no-files-found: error
+          retention-days: 7
+
+  conformance:
+    name: design conformance
+    needs: test-list
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: rust-test-list
+          path: ${{ runner.temp }}/list
       - name: Unit-test the checker
         run: python3 -I -m unittest discover -s ci -p 'test_conformance.py' -v
       - name: Check the records with the base branch copy of the checker
-        env:
-          BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
         run: |
           judge="${RUNNER_TEMP}/conformance.py"
           if [ -n "${BASE_REF}" ]; then
-            git show "${BASE_REF}:ci/conformance.py" > "${judge}" 2>/dev/null || cp ci/conformance.py "${judge}"
+            git rev-parse --verify --quiet "${BASE_REF}^{commit}" > /dev/null || { echo "::error::base ref ${BASE_REF} is not available"; exit 1; }
+            if git cat-file -e "${BASE_REF}:ci/conformance.py" 2>/dev/null; then
+              git show "${BASE_REF}:ci/conformance.py" > "${judge}"
+            else
+              echo "::warning::ci/conformance.py is not on the base branch yet; judging with the PR copy"
+              cp ci/conformance.py "${judge}"
+            fi
           else
             cp ci/conformance.py "${judge}"
           fi
-          python3 -I "${judge}" --root "${GITHUB_WORKSPACE}"
+          python3 -I "${judge}" --root "${GITHUB_WORKSPACE}" --rust-tests "${RUNNER_TEMP}/list/rust-tests.json"
 
   closure-gate:
     name: closing an issue needs its requirements built
+    needs: test-list
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Judge the closing keywords with the base branch copy of the checker
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: rust-test-list
+          path: ${{ runner.temp }}/list
+      - name: Judge the closing keywords (title, body and commit messages) with the base branch copy of the checker
         env:
           REPO: ${{ github.repository }}
           PR_TITLE: ${{ github.event.pull_request.title }}
@@ -67,5 +128,14 @@ jobs:
           BASE_REF: origin/${{ github.base_ref }}
         run: |
           judge="${RUNNER_TEMP}/conformance.py"
-          git show "${BASE_REF}:ci/conformance.py" > "${judge}" 2>/dev/null || cp ci/conformance.py "${judge}"
-          python3 -I "${judge}" --root "${GITHUB_WORKSPACE}" closure
+          git rev-parse --verify --quiet "${BASE_REF}^{commit}" > /dev/null || { echo "::error::base ref ${BASE_REF} is not available"; exit 1; }
+          if git cat-file -e "${BASE_REF}:ci/conformance.py" 2>/dev/null; then
+            git show "${BASE_REF}:ci/conformance.py" > "${judge}"
+          else
+            echo "::warning::ci/conformance.py is not on the base branch yet; judging with the PR copy"
+            cp ci/conformance.py "${judge}"
+          fi
+          # GitHub also closes issues from commit messages that reach the base branch.
+          git log --format=%B "${BASE_REF}..HEAD" > "${RUNNER_TEMP}/commits.txt"
+          python3 -I "${judge}" --root "${GITHUB_WORKSPACE}" --rust-tests "${RUNNER_TEMP}/list/rust-tests.json" \
+            --commits "${RUNNER_TEMP}/commits.txt" closure

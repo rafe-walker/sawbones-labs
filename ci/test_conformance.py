@@ -5,6 +5,7 @@ Every failure mode has a regression_ test that builds a throwaway tree in a
 temp dir, so the checker is exercised exactly as CI runs it. The last class
 runs it on the real tree.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -325,6 +326,7 @@ class Feedback(Base):
         with open(os.path.join(ROOT, ".github/workflows/conformance.yml")) as fh:
             wf = fh.read()
         self.assertEqual(wf.count('git show "${BASE_REF}:ci/conformance.py"'), 2)
+        self.assertIn("--rust-tests", wf)
         self.assertIn("permissions:\n  contents: read", wf)
         self.assertNotIn("pull_request_target", wf)
         self.assertNotIn("secrets.", wf)
@@ -335,9 +337,294 @@ class Feedback(Base):
         # PR text goes through env vars only, never into a run script.
         import re
         run_blocks = re.findall(r"run: \|\n((?: {10}.*\n|\n)+)", wf)
-        self.assertEqual(len(run_blocks), 2)
+        self.assertEqual(len(run_blocks), 4)
         for b in run_blocks:
             self.assertNotIn("github.event.pull_request", b)
+
+
+
+def cargo_list(path, tests):
+    """Write a --rust-tests file. tests: (package, src, name[, ignored])."""
+    rows = [{"package": t[0], "src": t[1], "target": "t", "name": t[2], "ignored": bool(t[3]) if len(t) > 3 else False} for t in tests]
+    with open(path, "w") as fh:
+        json.dump({"version": 1, "tests": rows}, fh)
+    return path
+
+
+class Issue271(Base):
+    """Holes the clean-room review of #252 found (issue #271)."""
+
+    TRICKS = """
+#[test]
+fn real_test() {}
+
+/* outer /* nested */
+#[test]
+fn in_nested_comment() {}
+*/
+
+#[cfg(any())]
+#[test]
+fn cfg_never_fn() {}
+
+#[cfg(any())]
+mod hidden {
+    #[test]
+    fn in_cfg_never_mod() {}
+}
+
+macro_rules! never_invoked {
+    () => {
+        #[test]
+        fn in_uninvoked_macro() {}
+    };
+}
+
+#[test]
+#[cfg_attr(all(), ignore)]
+fn cfg_attr_ignored() {}
+"""
+
+    def rec(self, ref):
+        return record(acc=[("a1", "test", ref, None)])
+
+    def test_regression_271_source_fallback_drops_comments_never_cfg_macros_and_cfg_attr_ignore(self):
+        live, ign = c.rust_tests(self.TRICKS)
+        self.assertEqual(live, {"real_test"})
+        self.assertEqual(ign, {"cfg_attr_ignored"})
+        live, _ = c.rust_tests('const S: &str = "/* #[test] fn in_str() {} */";\n#[test]\nfn after() {}\n')
+        self.assertEqual(live, {"after"})
+
+    def test_regression_271_a_test_missing_from_cargos_list_does_not_count(self):
+        t = self.tree(recs=[self.rec("sup::it_starts_tripped")], bless=False)
+        good = cargo_list(os.path.join(t.d, "list.json"), [("sup", "crates/sup/tests/t.rs", "it_starts_tripped")])
+        self.assertEqual(t.run("--bless", "--rust-tests", good)[0], 0)
+        empty = cargo_list(os.path.join(t.d, "empty.json"), [("sup", "crates/sup/tests/t.rs", "something_else")])
+        rc, out = t.run("--rust-tests", empty)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("cargo's list", out)
+
+    def test_regression_271_an_ignored_test_in_cargos_list_does_not_count(self):
+        t = self.tree(recs=[self.rec("sup::it_starts_tripped")], bless=False)
+        lst = cargo_list(os.path.join(t.d, "l.json"), [("sup", "crates/sup/tests/t.rs", "it_starts_tripped", True)])
+        rc, out = t.run("--bless", "--rust-tests", lst)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("only matches ignored", out)
+
+    def test_regression_271_cargo_list_keys_by_crate_and_path(self):
+        lst_tests = [("sup", "crates/sup/tests/t.rs", "it_starts_tripped"), ("other", "crates/other/tests/o.rs", "it_starts_tripped")]
+        for ref, ok in (("sup::it_starts_tripped", True), ("other::it_starts_tripped", True), ("nope::it_starts_tripped", False),
+                        ("crates/sup/tests/t.rs::it_starts_tripped", True), ("crates/other/tests/t.rs::it_starts_tripped", False),
+                        ("it_starts_tripped", False)):  # bare and not unique across crates
+            t = self.tree(recs=[self.rec(ref)], bless=False)
+            lst = cargo_list(os.path.join(t.d, "l.json"), lst_tests)
+            rc, out = t.run("--bless", "--rust-tests", lst)
+            self.assertEqual(rc == 0, ok, (ref, out))
+
+    def test_regression_271_a_bare_name_that_is_unique_resolves(self):
+        t = self.tree(recs=[self.rec("it_starts_tripped")], bless=False)
+        lst = cargo_list(os.path.join(t.d, "l.json"), [("sup", "crates/sup/tests/t.rs", "it_starts_tripped")])
+        self.assertEqual(t.run("--bless", "--rust-tests", lst)[0], 0)
+
+    def test_regression_271_globs_need_a_literal_prefix_a_crate_and_no_ignored_match(self):
+        tests = [("sup", "crates/sup/tests/t.rs", "regression_9_a"), ("sup", "crates/sup/tests/t.rs", "regression_9_b", True)]
+        cases = (("sup::*", "literal prefix"), ("sup::?egression_9_a", "literal prefix"), ("sup::[r]egression_9_a", "literal prefix"),
+                 ("regression_9_*", "qualified"), ("sup::regression_9_*", "ignored test"))
+        for ref, why in cases:
+            t = self.tree(recs=[self.rec(ref)], bless=False)
+            lst = cargo_list(os.path.join(t.d, "l.json"), tests)
+            rc, out = t.run("--bless", "--rust-tests", lst)
+            self.assertNotEqual(rc, 0, ref)
+            self.assertIn(why, out, ref)
+            # The same rules hold for the source fallback.
+            if why != "ignored test":
+                self.assertNotEqual(self.tree(recs=[self.rec(ref)], bless=False).run("--bless")[0], 0, ref)
+        t = self.tree(recs=[self.rec("sup::regression_9_a*")], bless=False)
+        lst = cargo_list(os.path.join(t.d, "l.json"), tests[:1])
+        self.assertEqual(t.run("--bless", "--rust-tests", lst)[0], 0)
+
+    def test_regression_271_a_malformed_cargo_list_fails_cleanly(self):
+        t = self.tree()
+        for body in ("not json", "[]", '{"tests": []}', '{"tests": [{"package": 1}]}'):
+            t.write("bad.json", body)
+            rc, out = t.run("--rust-tests", os.path.join(t.d, "bad.json"))
+            self.assertNotEqual(rc, 0, body)
+            self.assertNotIn("Traceback", out)
+
+    def test_regression_271_real_cargo_rejects_every_trick(self):
+        if not shutil.which("cargo"):
+            self.skipTest("needs cargo")
+        refs = ["real_test", "in_nested_comment", "cfg_never_fn", "in_cfg_never_mod", "in_uninvoked_macro", "cfg_attr_ignored", "in_orphan_file"]
+        t = self.tree(recs=[record(acc=[("a1", "test", "tiny::" + refs[0], None)])], bless=False)
+        t.write("Cargo.toml", '[workspace]\nmembers = ["crates/*"]\nresolver = "2"\n')
+        shutil.rmtree(os.path.join(t.d, "crates/sup"))
+        t.write("design/names.toml", NAMES.replace('["sup"]', '["tiny"]'))
+        t.write("crates/tiny/Cargo.toml", '[package]\nname = "tiny"\nversion = "0.0.0"\nedition = "2021"\n')
+        t.write("crates/tiny/src/lib.rs", self.TRICKS)
+        t.write("crates/tiny/src/orphan.rs", "#[test]\nfn in_orphan_file() {}\n")  # no `mod orphan;` reaches it
+        lister = subprocess.run([sys.executable, "-I", os.path.join(HERE, "rust_test_list.py"), os.path.join(t.d, "l.json"),
+                                 "--unlocked", "--root", t.d], capture_output=True, text=True,
+                                env=dict(os.environ, CARGO_TARGET_DIR=os.path.join(t.d, "tgt")))
+        self.assertEqual(lister.returncode, 0, lister.stdout + lister.stderr)
+        with open(os.path.join(t.d, "l.json")) as fh:
+            listed = {x["name"]: x["ignored"] for x in json.load(fh)["tests"]}
+        self.assertEqual(listed.get("real_test"), False)
+        self.assertEqual(listed.get("cfg_attr_ignored"), True)
+        for hidden in ("in_nested_comment", "cfg_never_fn", "in_cfg_never_mod", "in_uninvoked_macro", "in_orphan_file"):
+            self.assertNotIn(hidden, listed, hidden)
+        lst = os.path.join(t.d, "l.json")
+        for ref in refs:
+            t.write("design/requirements/cortex.toml", toml_of([record(acc=[("a1", "test", "tiny::" + ref, None)], sha=c.unit_hash(c.source_unit(DESIGN, "The latch starts tripped")))]))
+            rc, out = t.run("--bless", "--rust-tests", lst)
+            self.assertEqual(rc == 0, ref == "real_test", (ref, out))
+
+    def test_regression_271_python_tests_are_what_unittest_runs(self):
+        src = (
+            "import unittest\n"
+            "def test_module_level(): pass\n"
+            "S = 'def test_in_string(self): pass'\n"
+            "if False:\n"
+            "    class T0(unittest.TestCase):\n"
+            "        def test_under_if_false(self): pass\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_real(self): pass\n"
+            "    async def test_async_real(self): pass\n"
+            "    @unittest.skip('x')\n"
+            "    def test_skipped(self): pass\n"
+            "    @unittest.skipIf(True, 'x')\n"
+            "    def test_skip_if(self): pass\n"
+            "    @unittest.skipUnless(False, 'x')\n"
+            "    def test_skip_unless(self): pass\n"
+            "    @unittest.expectedFailure\n"
+            "    def test_xfail(self): pass\n"
+            "    def helper(self): pass\n"
+            "class Sub(T):\n"
+            "    def test_inherited_class_member(self): pass\n"
+            "class NotATest:\n"
+            "    def test_plain_class(self): pass\n"
+            "# def test_comment(self): pass\n"
+        )
+        self.assertEqual(c.python_tests(src), {"test_real", "test_async_real", "test_inherited_class_member"})
+        self.assertEqual(c.python_tests("def broken(:\n"), set())
+
+    def test_regression_271_python_refs_resolve_only_in_ci_test_files(self):
+        good = "import unittest\nclass T(unittest.TestCase):\n    def test_x(self): pass\n"
+        for path, ok in (("ci/test_a.py", True), ("ci/helper.py", False), ("ci/sub/test_b.py", False), ("crates/x/test_c.py", False)):
+            t = self.tree(recs=[record(acc=[("a1", "test", "x_never::test_x" if False else f"{path}::test_x", None)])], extra={path: good}, bless=False)
+            self.assertEqual(t.run("--bless")[0] == 0, ok, path)
+
+    def test_regression_271_file_kind_wants_a_regular_file_inside_the_repo(self):
+        outside = tempfile.NamedTemporaryFile(delete=False)
+        self.addCleanup(os.unlink, outside.name)
+        for ref, ok in (("docs/NAMES.md", True), ("docs/../docs/NAMES.md", True), ("docs", False), ("design", False), (".", False),
+                        ("../etc/passwd", False), ("/etc/passwd", False), ("docs/../../x", False), ("link-out", False), ("link-in", True)):
+            t = self.tree(recs=[record(acc=[("a1", "file", ref, None)])], bless=False)
+            os.symlink(outside.name, os.path.join(t.d, "link-out"))
+            os.symlink(os.path.join(t.d, "docs/NAMES.md"), os.path.join(t.d, "link-in"))
+            rc, out = t.run("--bless")
+            self.assertEqual(rc == 0, ok, (ref, out))
+
+    def test_regression_271_a_source_outside_the_repo_is_refused(self):
+        t = self.tree(recs=[record(source="../outside.md", sha="0" * 16)], bless=False)
+        rc, out = t.run("--bless")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("drifted", out)
+
+    def test_regression_271_wrong_field_types_are_clean_errors(self):
+        base = {"id": '"SAW-CORTEX-LATCH-1"', "rev": "1", "title": '"t"', "source": '"docs/D.md"', "anchor": '"The latch"',
+                "source_sha": '"0000000000000000"', "tracks": "[5]"}
+        wrong = ["[]", "{}", "[[1]]", "1", "true", '"x"', "1.5", "{ a = 1 }"]
+        acc_ok = '[{ id = "a1", kind = "test", ref = "sup::it_starts_tripped" }]'
+        cases = []
+        for key in list(base) + ["level", "waiver"]:
+            for w in wrong:
+                cases.append((key, w))
+        for n, (key, w) in enumerate(cases):
+            fields = dict(base, acceptance=acc_ok)
+            fields[key] = w
+            body = "[[requirement]]\n" + "\n".join(f"{k} = {v}" for k, v in fields.items()) + "\n"
+            t = self.tree(bless=False) if n == 0 else t
+            t.write("design/requirements/cortex.toml", body)
+            rc, out = t.run("--bless")
+            self.assertNotIn("Traceback", out, (key, w))
+        for acc in ("[[1]]", '[{ id = [], kind = "test", ref = "x" }]', '[{ id = "a", kind = [], ref = "x" }]',
+                    '[{ id = "a", kind = "test", ref = [] }]', '[{ id = "a", kind = "test", ref = "x", pending = [] }]',
+                    '[{ id = "a", kind = "file", ref = {} }]', '"x"', "{}"):
+            fields = dict(base, acceptance=acc)
+            body = "[[requirement]]\n" + "\n".join(f"{k} = {v}" for k, v in fields.items()) + "\n"
+            t.write("design/requirements/cortex.toml", body)
+            rc, out = t.run("--bless")
+            self.assertNotIn("Traceback", out, acc)
+            self.assertNotEqual(rc, 0, acc)
+        t.write("design/names.toml", "component = 5\n")
+        rc, out = t.run()
+        self.assertNotIn("Traceback", out)
+        self.assertNotEqual(rc, 0)
+        t.write("design/names.toml", "component = [1, 2]\n")
+        rc, out = t.run()
+        self.assertNotIn("Traceback", out)
+        self.assertNotEqual(rc, 0)
+
+    def test_regression_271_only_toml_files_belong_in_the_requirements_dir(self):
+        for name in ("notes.md", "cortex.toml.bak", "sub"):
+            t = self.tree()
+            if name == "sub":
+                os.makedirs(os.path.join(t.d, "design/requirements/sub"))
+            else:
+                t.write(f"design/requirements/{name}", "x")
+            rc, out = t.run()
+            self.assertNotEqual(rc, 0, name)
+            self.assertIn("only .toml record files", out)
+
+    def test_regression_271_the_whole_status_file_is_stale_checked(self):
+        t = self.tree()
+        p = os.path.join(t.d, "design/STATUS.md")
+        with open(p) as fh:
+            text = fh.read()
+        for edited in (text.replace("# Design conformance status", "# Hand edited", 1), text + "\nextra\n", text.replace("A test fails", "A TEST fails")):
+            with open(p, "w") as fh:
+                fh.write(edited)
+            rc, out = t.run()
+            self.assertNotEqual(rc, 0)
+            self.assertIn("stale", out)
+        t.run("--bless")
+        self.assertEqual(t.run()[0], 0)
+
+    def test_regression_271_non_ascii_digits_do_not_close_an_issue(self):
+        r = "rafe-walker/sawbones-labs"
+        self.assertEqual(c.referenced_issues("Fixes #\u0665", r), [])  # Arabic-Indic digit five
+        self.assertEqual(c.referenced_issues("Fixes #\uff15", r), [])  # fullwidth five
+        self.assertEqual(c.referenced_issues("Fixes #5", r), [5])
+
+    def test_regression_271_the_closure_gate_reads_commit_messages(self):
+        t = self.tree(recs=[record(acc=[("a1", "test", "later", 5)])])
+        t.write("commits.txt", "Tidy\n\nCloses #5\n")
+        env = {"PR_BODY": "Part of #5", "PR_TITLE": "x", "REPO": "rafe-walker/sawbones-labs"}
+        rc, out = t.run("closure", "--commits", os.path.join(t.d, "commits.txt"), env=env)
+        self.assertNotEqual(rc, 0)
+        self.assertIn("SAW-CORTEX-LATCH-1", out)
+        t.write("commits.txt", "Tidy\n\nPart of #5\n")
+        self.assertEqual(t.run("closure", "--commits", os.path.join(t.d, "commits.txt"), env=env)[0], 0)
+        self.assertNotEqual(t.run("closure", "--commits", os.path.join(t.d, "missing.txt"), env=env)[0], 0)
+
+    def test_regression_271_the_judge_fails_closed_once_it_is_on_the_base_branch(self):
+        with open(os.path.join(ROOT, ".github/workflows/conformance.yml")) as fh:
+            wf = fh.read()
+        self.assertNotIn("|| cp ci/", wf)  # no silent fallback on any `git show` failure
+        self.assertEqual(wf.count('git cat-file -e "${BASE_REF}:ci/conformance.py"'), 2)
+        self.assertIn('git cat-file -e "${BASE_REF}:ci/rust_test_list.py"', wf)
+        self.assertEqual(wf.count("is not available"), 3)  # a missing base ref is an error, not a fallback
+        self.assertIn("::warning::", wf)
+        self.assertIn("git log --format=%B", wf)
+
+    def test_regression_271_the_real_repo_text_check_is_partial_and_xray_tracks_an_issue(self):
+        rows, errors = c.run_check(ROOT)
+        status = {r["rec"]["id"]: r["status"] for r in rows}
+        self.assertEqual(status["SAW-CORTEX-TEXT-1"], c.PARTIAL)
+        for r in rows:
+            if r["rec"]["id"].startswith("SAW-XRAY-"):
+                self.assertNotIn(252, r["rec"]["tracks"], r["rec"]["id"])
+                self.assertTrue(r["rec"]["tracks"])
 
 
 class StatusFile(Base):

@@ -47,7 +47,8 @@ def referenced_issues(text, repo=None):
     found = set()
     ref = rf"(?:(?P<repo>[\w.-]+/[\w.-]+))?#(?P<n>\d+)\b"
     url = rf"https://github\.com/(?P<urepo>[\w.-]+/[\w.-]+)/issues/(?P<un>\d+)\b"
-    pattern = re.compile(rf"(?<![\w-]){CLOSING}\b:?\s+(?:{ref}|{url})", re.IGNORECASE)
+    # re.ASCII: Arabic-Indic and other non-ASCII digits must not parse as an issue number.
+    pattern = re.compile(rf"(?<![\w-]){CLOSING}\b:?\s+(?:{ref}|{url})", re.IGNORECASE | re.ASCII)
     for m in pattern.finditer(text):
         if m.group("n"):
             if m.group("repo") is None or m.group("repo").lower() == repo:

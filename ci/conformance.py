@@ -16,7 +16,15 @@ Usage (run from the repository root, or pass --root):
   python3 -I ci/conformance.py                 check; fail if anything is wrong or STATUS.md is stale
   python3 -I ci/conformance.py --bless         also rewrite design/STATUS.md
   python3 -I ci/conformance.py hash FILE ANCHOR  print the hash to pin for a source paragraph
-  python3 -I ci/conformance.py closure         closure gate for a PR (env: PR_TITLE, PR_BODY, REPO)
+  python3 -I ci/conformance.py closure         closure gate for a PR (env: PR_TITLE, PR_BODY, REPO; --commits FILE
+                                               holds `git log --format=%B BASE..HEAD`)
+
+Rust tests are resolved against cargo's own list: pass `--rust-tests FILE`, made by
+ci/rust_test_list.py. A test that does not compile, is cfg'd out, sits in a file no
+`mod` reaches or in an uninvoked macro is not in that list, so it cannot count.
+Without the flag the checker falls back to a pure-source scan and warns, because that
+scan can still be fooled. Python tests are parsed with `ast` and must be methods of a
+TestCase in ci/test_*.py that unittest discovery really runs.
 
 Exit status is non-zero on: a malformed record, an unknown or duplicate ID, a
 record naming a test or file that does not exist, a drifted record, a stale
@@ -26,8 +34,10 @@ not all built or waived.
 Stdlib only (Python 3.11+). The closure gate reads PR text only to extract
 issue numbers with a strict regex; it never runs or interpolates that text.
 """
+import ast
 import fnmatch
 import hashlib
+import json
 import os
 import re
 import sys
@@ -58,6 +68,7 @@ TAG_SKIP = {"ci/conformance.py", "ci/test_conformance.py"}
 SKIP_DIRS = {"target", ".git", "node_modules"}
 
 CLOSING = r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)"
+REQ_FLAGS = re.IGNORECASE | re.ASCII  # ASCII: Arabic-Indic digits must not parse as an issue number
 
 
 class Problem(Exception):
@@ -70,6 +81,21 @@ class Problem(Exception):
 def read(root, rel):
     with open(os.path.join(root, rel), encoding="utf-8") as fh:
         return fh.read()
+
+
+def repo_file(root, rel):
+    """Absolute path of `rel` if it is a regular file inside the repository
+    (after normalising `..` and following symlinks), else None."""
+    if not isinstance(rel, str) or not rel or "\0" in rel or os.path.isabs(rel):
+        return None
+    norm = os.path.normpath(rel)
+    if norm == "." or norm == ".." or norm.startswith(".." + os.sep):
+        return None
+    real = os.path.realpath(os.path.join(root, norm))
+    top = os.path.realpath(root)
+    if not (real == top or real.startswith(top + os.sep)):
+        return None
+    return real if os.path.isfile(real) else None
 
 
 def walk(root, dirs, suffixes):
@@ -116,89 +142,288 @@ def unit_hash(unit):
 
 
 # ------------------------------------------------------------ test discovery
+#
+# Two sources of truth for Rust tests:
+#   * cargo's own list (--rust-tests FILE, made by ci/rust_test_list.py from
+#     `cargo test --workspace --all-targets` binaries run with --list, with and
+#     without --ignored). A test that does not compile, is cfg'd out, sits in an
+#     unreachable file or an uninvoked macro is simply not in that list.
+#   * a pure-source scan, used for local runs without cargo (labelled as a
+#     fallback, it can still be fooled) and to attribute cargo's tests to files.
+# Python tests are parsed with `ast`.
 
-_TOKEN = re.compile(r'//[^\n]*|/\*.*?\*/|r(#*)".*?"\1|"(?:\\.|[^"\\])*"|\'(?:\\.[^\']*|[^\\\'])\'', re.DOTALL)
+GLOB_CHARS = "*?["
 _FN = re.compile(r"((?:#\[[^\]]*\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?(?:async\s+|const\s+|unsafe\s+)*fn\s+(\w+)")
+_MOD = re.compile(r"((?:#\[[^\]]*\]\s*)*)(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{")
+_MACRO = re.compile(r"macro_rules\s*!\s*\w+\s*[{(\[]")
 _TEST_ATTR = re.compile(r"#\[\s*(?:\w+::)*test\b")
-_IGNORE_ATTR = re.compile(r"#\[\s*ignore\b")
-_PY_DEF = re.compile(r"^\s*(?:async\s+)?def\s+(test_\w+)\s*\(", re.MULTILINE)
+_IGNORE_ATTR = re.compile(r"#\[\s*ignore\b|cfg_attr\s*\([^\]]*\bignore\b")
+_NEVER_CFG = re.compile(r"cfg\s*\(\s*(?:any\s*\(\s*\)|false|not\s*\(\s*(?:all\s*\(\s*\)|true)\s*\))\s*\)")
+_CHAR = re.compile(r"'(?:\\.[^']*|[^\\'])'")
+_RAW = re.compile(r'b?r(#*)"')
 
 
-def _blank(m):
-    s = m.group(0)
-    if s.startswith("/"):
-        return re.sub(r"[^\n]", " ", s)
-    return re.sub(r"[^\n]", "_", s)  # string contents never count as code
+def blank_rust(src):
+    """`src` with comments (block comments nest) and string/char contents
+    replaced by spaces/underscores, same length, so regexes see only code."""
+    out = list(src)
+    n, i = len(src), 0
+
+    def fill(a, b, ch):
+        for k in range(a, b):
+            if out[k] != "\n":
+                out[k] = ch
+
+    while i < n:
+        c = src[i]
+        if src.startswith("//", i):
+            j = src.find("\n", i)
+            j = n if j == -1 else j
+            fill(i, j, " ")
+            i = j
+        elif src.startswith("/*", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if src.startswith("/*", j):
+                    depth, j = depth + 1, j + 2
+                elif src.startswith("*/", j):
+                    depth, j = depth - 1, j + 2
+                else:
+                    j += 1
+            fill(i, j, " ")
+            i = j
+        elif c in "rb" and (i == 0 or not (src[i - 1].isalnum() or src[i - 1] == "_")) and _RAW.match(src, i):
+            m = _RAW.match(src, i)
+            end = src.find('"' + m.group(1), m.end())
+            end = n if end == -1 else end + 1 + len(m.group(1))
+            fill(m.end(), max(m.end(), end - 1 - len(m.group(1))), "_")
+            i = end
+        elif c == '"':
+            j = i + 1
+            while j < n and src[j] != '"':
+                j += 2 if src[j] == "\\" else 1
+            fill(i + 1, min(j, n), "_")
+            i = j + 1
+        elif c == "'":
+            m = _CHAR.match(src, i)
+            if m:
+                fill(i + 1, m.end() - 1, "_")
+                i = m.end()
+            else:
+                i += 1
+        else:
+            i += 1
+    return "".join(out)
+
+
+def _match_brace(s, i):
+    """Index just past the `}` matching the `{` at s[i] (s is blanked code)."""
+    depth, n = 0, len(s)
+    while i < n:
+        depth += s[i] == "{"
+        depth -= s[i] == "}"
+        i += 1
+        if depth == 0:
+            break
+    return i
+
+
+def _blank_span(s, a, b):
+    return s[:a] + re.sub(r"[^\n]", " ", s[a:b]) + s[b:]
 
 
 def rust_tests(src):
-    """Names of the live `#[test]` fns in `src` (comments and strings ignored)
-    and the names of those marked `#[ignore]`."""
-    skeleton = _TOKEN.sub(_blank, src)
+    """(live, ignored): names of `#[test]` fns found by a source scan, with
+    nested comments, strings, `macro_rules!` bodies and modules or fns behind a
+    never-true cfg removed. A fallback only: cargo's list is the authority."""
+    code = blank_rust(src)
+    for m in list(_MACRO.finditer(code)):
+        code_open = m.end() - 1
+        if code[code_open] == "{":
+            code = _blank_span(code, m.start(), _match_brace(code, code_open))
+        else:
+            close = {"(": ")", "[": "]"}[code[code_open]]
+            end = code.find(close, code_open)
+            code = _blank_span(code, m.start(), len(code) if end == -1 else end + 1)
+    for m in list(_MOD.finditer(code)):
+        if _NEVER_CFG.search(m.group(1)):
+            code = _blank_span(code, m.start(), _match_brace(code, m.end() - 1))
     live, ignored = set(), set()
-    for m in _FN.finditer(skeleton):
-        # Attribute text with strings blanked is fine for test/ignore detection.
+    for m in _FN.finditer(code):
         attrs = m.group(1)
-        if not _TEST_ATTR.search(attrs):
+        if not _TEST_ATTR.search(attrs) or _NEVER_CFG.search(attrs):
             continue
         (ignored if _IGNORE_ATTR.search(attrs) else live).add(m.group(2))
     return live, ignored
 
 
+_SKIP_DECORATORS = {"skip", "skipIf", "skipUnless", "expectedFailure"}
+
+
+def _decorator_name(d):
+    if isinstance(d, ast.Call):
+        d = d.func
+    if isinstance(d, ast.Attribute):
+        return d.attr
+    if isinstance(d, ast.Name):
+        return d.id
+    return ""
+
+
+def _base_name(b):
+    return b.attr if isinstance(b, ast.Attribute) else b.id if isinstance(b, ast.Name) else ""
+
+
 def python_tests(src):
-    return set(_PY_DEF.findall(src))
+    """Names of `test_*` methods that `unittest` discovery would really run:
+    defined directly in the body of a module-level TestCase subclass, not skipped
+    or expected to fail, and not nested in `if`, strings or comments. A module-level
+    `def test_x` is never collected by unittest, so it does not count."""
+    try:
+        tree = ast.parse(src)
+    except (SyntaxError, ValueError):
+        return set()
+    testcase = {"TestCase", "IsolatedAsyncioTestCase"}
+    found = set()
+    for node in tree.body:
+        if not isinstance(node, ast.ClassDef):
+            continue
+        if not any(_base_name(b) in testcase for b in node.bases):
+            continue
+        testcase.add(node.name)  # later classes may derive from this one
+        for item in node.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name.startswith("test_"):
+                if not any(_decorator_name(d) in _SKIP_DECORATORS for d in item.decorator_list):
+                    found.add(item.name)
+    return found
+
+
+def pkg_dir(root, rel):
+    """The directory (relative to root) of the nearest Cargo.toml above `rel`."""
+    d = os.path.dirname(rel)
+    while d:
+        if os.path.isfile(os.path.join(root, d, "Cargo.toml")):
+            return d
+        d = os.path.dirname(d)
+    return ""
 
 
 class TestIndex:
-    """Which test names exist where. Built once per run."""
+    """Which tests exist, are live and are ignored. Built once per run.
 
-    def __init__(self, root):
+    `cargo` is the parsed --rust-tests JSON, or None for the source fallback."""
+
+    def __init__(self, root, cargo=None):
         self.root = root
-        self.by_file = {}      # rel path -> set of live test names
-        self.ignored = {}      # rel path -> set of ignored test names
-        for rel in walk(root, ("crates", "firmware", "plugins", "ci", "fuzz"), (".rs", ".py")):
+        self.cargo = cargo
+        self.decl = {}       # rel .rs path -> live names found by the source scan
+        self.decl_ign = {}   # rel .rs path -> ignored names found by the source scan
+        self.entries = []    # {"lang", "package", "dir", "src", "name", "leaf", "ignored"}
+        for rel in walk(root, ("crates", "firmware", "plugins", "fuzz"), (".rs",)):
             try:
-                src = read(root, rel)
+                live, ign = rust_tests(read(root, rel))
             except (OSError, UnicodeDecodeError):
                 continue
-            if rel.endswith(".rs"):
-                live, ign = rust_tests(src)
-            else:
-                live, ign = python_tests(src), set()
             if live:
-                self.by_file[rel] = live
+                self.decl[rel] = live
             if ign:
-                self.ignored[rel] = ign
+                self.decl_ign[rel] = ign
+        if cargo is None:
+            for rel, names in self.decl.items():
+                self._add("rust", self._fallback_package(rel), pkg_dir(root, rel), rel, names, False)
+            for rel, names in self.decl_ign.items():
+                self._add("rust", self._fallback_package(rel), pkg_dir(root, rel), rel, names, True)
+        else:
+            for t in cargo["tests"]:
+                self._add("rust", t["package"], pkg_dir(root, t["src"]), t["src"], [t["name"]], bool(t["ignored"]))
+        # Only files `unittest discover -s ci -p 'test_*.py'` collects.
+        for rel in walk(root, ("ci",), (".py",)):
+            base = os.path.basename(rel)
+            if "/" in rel[len("ci/"):] or not (base.startswith("test_") and base.endswith(".py")):
+                continue
+            try:
+                names = python_tests(read(root, rel))
+            except (OSError, UnicodeDecodeError):
+                continue
+            self._add("python", None, "ci", rel, names, False)
 
-    def scope(self, head):
-        """Files a ref's path part selects: a file, a crate name, or None for all."""
-        if head is None:
-            return list(self.by_file)
-        if head.endswith((".rs", ".py")) or "/" in head:
-            prefix = head.rstrip("/")
-            return [f for f in self.by_file if f == prefix or f.startswith(prefix + "/")]
-        crate = f"crates/{head}/"
-        return [f for f in self.by_file if f.startswith(crate)]
+    @staticmethod
+    def _fallback_package(rel):
+        parts = rel.split("/")
+        return parts[1] if len(parts) > 2 and parts[0] in ("crates", "firmware", "plugins", "fuzz") else parts[0]
+
+    def _add(self, lang, package, d, src, names, ignored):
+        for n in names:
+            self.entries.append({"lang": lang, "package": package, "dir": d, "src": src, "name": n,
+                                 "leaf": n.rsplit("::", 1)[-1], "ignored": ignored})
+
+    def _in_file(self, e, f):
+        """Is entry `e` declared in file `f`?"""
+        if e["src"] == f:
+            return True
+        if e["lang"] != "rust" or self.cargo is None:
+            return False
+        # Cargo names a test binary by its root file; attribute it to the file
+        # in the same package whose source declares a test of that name.
+        if pkg_dir(self.root, f) != e["dir"]:
+            return False
+        names = self.decl.get(f, set()) | self.decl_ign.get(f, set())
+        return e["leaf"] in names
 
     def resolve(self, ref):
-        """Return (matching names, problem or None) for `path::pattern`,
-        `crate::pattern` or a bare `pattern` (a name or an fnmatch glob)."""
-        head, sep, pattern = ref.rpartition("::")
+        """Return (matching test names, problem or None) for `path::pattern`,
+        `crate::pattern` or a bare `pattern`."""
+        head, _, pattern = ref.rpartition("::")
         head = head or None
-        if not pattern.strip() or pattern != pattern.strip() or " " in pattern:
+        if not pattern or pattern != pattern.strip() or re.search(r"\s", pattern):
             return [], f"'{ref}' is not a test name or glob"
-        files = self.scope(head)
-        found = sorted({n for f in files for n in self.by_file[f] if fnmatch.fnmatchcase(n, pattern)})
-        if found:
-            return found, None
-        ign = sorted({n for f in (self.scope(head) or []) for n in self.ignored.get(f, ()) if fnmatch.fnmatchcase(n, pattern)})
-        if not ign:
-            for f, names in self.ignored.items():
-                if head is None or f in self.scope(head) or f.startswith(f"crates/{head}/"):
-                    ign += [n for n in names if fnmatch.fnmatchcase(n, pattern)]
+        if pattern[0] in GLOB_CHARS:
+            return [], f"'{ref}': a glob must start with a literal prefix (a bare '*' proves nothing)"
+        is_glob = any(ch in pattern for ch in GLOB_CHARS)
+        if head is None and is_glob:
+            return [], f"'{ref}': a glob must be qualified with a crate or file (`crate::{pattern}`)"
+
+        def selected(e):
+            if head is None:
+                return True
+            if head.endswith(".py"):
+                return e["lang"] == "python" and self._in_file(e, head)
+            if head.endswith(".rs"):
+                return e["lang"] == "rust" and self._in_file(e, head)
+            if "/" in head:  # a directory
+                d = head.rstrip("/")
+                return e["src"] == d or e["src"].startswith(d + "/")
+            return e["lang"] == "rust" and e["package"] == head
+
+        hits = [e for e in self.entries if selected(e) and (fnmatch.fnmatchcase(e["leaf"], pattern) or fnmatch.fnmatchcase(e["name"], pattern))]
+        live = [e for e in hits if not e["ignored"]]
+        ign = [e for e in hits if e["ignored"]]
+        if head is None and len({(e["lang"], e["package"], e["leaf"]) for e in hits}) > 1:
+            return [], f"'{ref}' is not unique (matches {len(hits)} tests); qualify it with a crate or file"
+        if is_glob and ign:
+            return [], f"'{ref}': the glob also matches the ignored test '{ign[0]['name']}'"
+        if live:
+            return sorted({e["name"] for e in live}), None
         if ign:
             return [], f"'{ref}' only matches ignored tests"
-        return [], f"no test matches '{ref}'"
+        how = "cargo's list of runnable tests" if self.cargo is not None else "the source scan"
+        return [], f"no test matches '{ref}' in {how}"
+
+
+def load_cargo_list(path):
+    """Parse the JSON made by ci/rust_test_list.py. Raises Problem if malformed."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as e:
+        raise Problem(f"--rust-tests {path} cannot be read: {e}")
+    tests = data.get("tests") if isinstance(data, dict) else None
+    ok = isinstance(tests, list) and tests and all(
+        isinstance(t, dict) and isinstance(t.get("package"), str) and isinstance(t.get("src"), str)
+        and isinstance(t.get("name"), str) and isinstance(t.get("ignored"), bool) for t in tests)
+    if not ok:
+        raise Problem(f"--rust-tests {path} is not a non-empty list of tests from ci/rust_test_list.py")
+    return data
 
 
 # ---------------------------------------------------------------- loading
@@ -223,7 +448,14 @@ def load_names(root, errors):
     extra = set(data) - {"component"}
     if extra:
         errors.append(f"{NAMES}: unknown top-level keys {sorted(extra)}")
-    for c in data.get("component", []):
+    items = data.get("component", [])
+    if not isinstance(items, list):
+        errors.append(f"{NAMES}: component must be a list of tables")
+        return comps
+    for c in items:
+        if not isinstance(c, dict):
+            errors.append(f"{NAMES}: a component is not a table")
+            continue
         key = c.get("key")
         if not isinstance(key, str) or not re.fullmatch(r"[a-z]+", key):
             errors.append(f"{NAMES}: a component has a bad key {key!r}")
@@ -267,7 +499,7 @@ def check_shape(rec, where, comp):
     rev = rec.get("rev")
     if not isinstance(rev, int) or isinstance(rev, bool) or rev < 1:
         errs.append(f"{where}: rev must be an integer >= 1")
-    if "level" in rec and rec["level"] not in LEVELS:
+    if "level" in rec and not (isinstance(rec["level"], str) and rec["level"] in LEVELS):
         errs.append(f"{where}: level must be one of {sorted(LEVELS)}")
     for f in ("title", "source", "anchor", "source_sha"):
         if f in rec and (not isinstance(rec[f], str) or not rec[f].strip()):
@@ -278,7 +510,8 @@ def check_shape(rec, where, comp):
         tracks = []
     if "waiver" in rec:
         w = rec["waiver"]
-        if not (isinstance(w, dict) and set(w) <= {"reason", "ref"} and isinstance(w.get("reason"), str) and w["reason"].strip()):
+        if not (isinstance(w, dict) and set(w) <= {"reason", "ref"} and isinstance(w.get("reason"), str) and w["reason"].strip()
+                and isinstance(w.get("ref", ""), str)):
             errs.append(f"{where}: waiver must be a table with a non-empty reason (and optional ref)")
     acc = rec.get("acceptance")
     if not (isinstance(acc, list) and acc and all(isinstance(a, dict) for a in acc)):
@@ -294,8 +527,9 @@ def check_shape(rec, where, comp):
             continue
         if not isinstance(a["id"], str) or not a["id"].strip() or a["id"] in seen:
             errs.append(f"{aw}: id must be a unique non-empty string")
-        seen.add(a["id"])
-        if a["kind"] not in KINDS:
+        else:
+            seen.add(a["id"])
+        if not (isinstance(a["kind"], str) and a["kind"] in KINDS):
             errs.append(f"{aw}: kind must be one of {sorted(KINDS)}")
         if not isinstance(a["ref"], str) or not a["ref"].strip():
             errs.append(f"{aw}: ref must be a non-empty string")
@@ -312,7 +546,11 @@ def load_records(root, comps, errors):
     """Return the shape-valid records, each with a `_component` and `_file`."""
     recs, ids = [], {}
     d = os.path.join(root, REQ_DIR)
-    files = sorted(f for f in os.listdir(d) if f.endswith(".toml")) if os.path.isdir(d) else []
+    entries = sorted(os.listdir(d)) if os.path.isdir(d) else []
+    files = [f for f in entries if f.endswith(".toml") and os.path.isfile(os.path.join(d, f))]
+    for f in entries:
+        if f not in files:
+            errors.append(f"{REQ_DIR}/{f}: only .toml record files belong in {REQ_DIR}/ (remove it or rename it)")
     if not files:
         errors.append(f"{REQ_DIR}/ has no records")
     for f in files:
@@ -336,7 +574,10 @@ def load_records(root, comps, errors):
             if not isinstance(rec, dict):
                 errors.append(f"{where}: not a table")
                 continue
-            shape = check_shape(rec, where, comp)
+            try:
+                shape = check_shape(rec, where, comp)
+            except Exception as e:  # a malformed record must be an error, never a traceback
+                shape = [f"{where}: malformed record ({type(e).__name__}: {e})"]
             rid = rec.get("id")
             if isinstance(rid, str):
                 if rid in ids:
@@ -379,7 +620,11 @@ def evaluate(root, rec, index, errors):
     # Source paragraph: is the design the record was written from still there?
     drift = []
     try:
-        src = read(root, rec["source"])
+        src_path = repo_file(root, rec["source"])
+        if src_path is None:
+            raise OSError("not a file inside the repository")
+        with open(src_path, encoding="utf-8") as fh:
+            src = fh.read()
         try:
             unit = source_unit(src, rec["anchor"])
             if unit_hash(unit) != rec["source_sha"]:
@@ -397,9 +642,8 @@ def evaluate(root, rec, index, errors):
     resolved, pending, missing = [], [], []
     for a in rec["acceptance"]:
         if a["kind"] == "file":
-            path = a["ref"]
-            ok = not os.path.isabs(path) and ".." not in path.split("/") and os.path.exists(os.path.join(root, path))
-            problem = None if ok else f"file '{path}' does not exist"
+            ok = repo_file(root, a["ref"]) is not None
+            problem = None if ok else f"'{a['ref']}' is not a regular file inside the repository"
         else:
             found, problem = index.resolve(a["ref"])
             ok = bool(found)
@@ -433,12 +677,13 @@ def evaluate(root, rec, index, errors):
     return status, {"resolved": resolved, "pending": pending, "drift": drift, "needs_issue": needs_issue}
 
 
-def run_check(root):
-    """Return (rows, errors). rows are dicts ready for the table."""
+def run_check(root, cargo=None):
+    """Return (rows, errors). rows are dicts ready for the table. `cargo` is the
+    parsed --rust-tests list; None means the labelled pure-source fallback."""
     errors = []
     comps = load_names(root, errors)
     recs = load_records(root, comps, errors)
-    index = TestIndex(root)
+    index = TestIndex(root, cargo)
     tags = find_tags(root)
     known = {r["id"]: r for r in recs}
     rows = []
@@ -507,13 +752,6 @@ def render_table(rows):
     return "\n".join(lines)
 
 
-def with_table(doc, table):
-    a, b = doc.find(MARK_START), doc.find(MARK_END)
-    if a == -1 or b == -1 or b < a:
-        raise Problem(f"{STATUS_FILE} is missing its status:start / status:end marks")
-    return doc[:a + len(MARK_START)] + "\n\n" + table + "\n\n" + doc[b:]
-
-
 STATUS_HEAD = """# Design conformance status (the X-ray)
 
 Generated by `ci/conformance.py` from the records in `design/requirements/`. Status is computed from the code, never typed in: *built* means every acceptance check resolves to a test or file that exists, *partial* means some do and the rest wait on a tracking issue, *not built* means none do, *drifted* means the design paragraph changed without its record, *waived* means a recorded waiver. How it works is in [CONTRIBUTING.md](../CONTRIBUTING.md#design-conformance-the-x-ray); component names are in [docs/NAMES.md](../docs/NAMES.md).
@@ -529,22 +767,22 @@ def status_doc(table):
 
 
 def check_status_file(root, rows, bless):
-    table = render_table(rows)
+    """The whole of design/STATUS.md is generated, so the whole file is compared."""
+    want = status_doc(render_table(rows))
     path = os.path.join(root, STATUS_FILE)
-    try:
-        current = read(root, STATUS_FILE)
-        want = with_table(current, table)
-    except FileNotFoundError:
-        current, want = None, status_doc(table)
-    except Problem as e:
-        return [str(e)]
     if bless:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(want)
         return []
+    try:
+        current = read(root, STATUS_FILE)
+    except FileNotFoundError:
+        current = None
+    except UnicodeDecodeError:
+        current = ""
     if current != want:
-        return [f"{STATUS_FILE} is stale: run `python3 ci/conformance.py --bless`"]
+        return [f"{STATUS_FILE} is stale or edited by hand: run `python3 ci/conformance.py --bless`"]
     return []
 
 
@@ -558,7 +796,7 @@ def referenced_issues(text, repo):
     found = set()
     ref = r"(?:(?P<repo>[\w.-]+/[\w.-]+))?#(?P<n>\d+)\b"
     url = r"https://github\.com/(?P<urepo>[\w.-]+/[\w.-]+)/issues/(?P<un>\d+)\b"
-    pattern = re.compile(rf"(?<![\w-]){CLOSING}\b:?\s+(?:{ref}|{url})", re.IGNORECASE)
+    pattern = re.compile(rf"(?<![\w-]){CLOSING}\b:?\s+(?:{ref}|{url})", REQ_FLAGS)
     for m in pattern.finditer(text or ""):
         if m.group("n"):
             if m.group("repo") is None or m.group("repo").lower() == repo:
@@ -589,6 +827,15 @@ def main(argv):
         del args[i:i + 2]
     bless = "--bless" in args
     args = [a for a in args if a != "--bless"]
+    opts = {}
+    for flag in ("--rust-tests", "--commits"):
+        if flag in args:
+            i = args.index(flag)
+            if i + 1 >= len(args):
+                print(f"{flag} needs a file", file=sys.stderr)
+                return 2
+            opts[flag] = args[i + 1]
+            del args[i:i + 2]
     cmd = args[0] if args else "check"
 
     if cmd == "hash":
@@ -605,12 +852,30 @@ def main(argv):
         print(__doc__)
         return 2
 
-    rows, errors = run_check(root)
+    cargo, errors = None, []
+    if "--rust-tests" in opts:
+        try:
+            cargo = load_cargo_list(opts["--rust-tests"])
+        except Problem as e:
+            print(f"::error::{e}")
+            return 1
+    else:
+        print("::warning::No --rust-tests list: using the pure-source fallback, which can still count tests that "
+              "never compile or run. CI passes cargo's own list (ci/rust_test_list.py).")
+    rows, errors = run_check(root, cargo)
     if cmd == "check":
         errors += check_status_file(root, rows, bless)
     else:
         repo = os.environ.get("REPO") or "rafe-walker/sawbones-labs"
-        closed = referenced_issues(os.environ.get("PR_TITLE", "") + "\n" + os.environ.get("PR_BODY", ""), repo)
+        texts = [os.environ.get("PR_TITLE", ""), os.environ.get("PR_BODY", "")]
+        if "--commits" in opts:  # GitHub also closes issues from commit messages that reach the base branch
+            try:
+                with open(opts["--commits"], encoding="utf-8", errors="replace") as fh:
+                    texts.append(fh.read())
+            except OSError as e:
+                print(f"::error::--commits {opts['--commits']} cannot be read: {e}")
+                return 1
+        closed = referenced_issues("\n".join(texts), repo)
         print(f"Closing keywords name: {', '.join('#' + str(n) for n in closed) or 'no issues'}.")
         errors += closure_problems(rows, closed)
 

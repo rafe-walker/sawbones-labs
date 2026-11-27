@@ -204,6 +204,12 @@ class Parser(unittest.TestCase):
         src = 'fn helper() { let s = "}{"; }\n#[test]\nfn a() { let c = \'}\'; /* } */ }\n#[tokio::test]\nasync fn b() {}\n'
         self.assertEqual(sorted(g.test_fn_names(src)), ["a", "b"])
 
+    def test_regression_271_non_ascii_digits_do_not_close_an_issue(self):
+        # int("\u0665") is 5: without re.ASCII, "Fixes #<Arabic-Indic five>" would name issue 5.
+        self.assertEqual(g.referenced_issues("Fixes #\u0665"), [])
+        self.assertEqual(g.referenced_issues("Fixes #\uff15"), [])
+        self.assertEqual(g.referenced_issues("Fixes #5"), [5])
+
 
 if __name__ == "__main__":
     unittest.main()
