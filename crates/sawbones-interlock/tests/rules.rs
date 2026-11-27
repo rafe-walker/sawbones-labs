@@ -1932,6 +1932,53 @@ fn regression_198_a_stalled_loop_is_a_loss() {
     assert!(!out.rail_a);
 }
 
+/// The stall limit is exactly two periods (mutants #231): a sample anywhere
+/// from one period to two periods less one tick after the issue, with the
+/// challenge answered, is not a loss. Only two periods or more is.
+#[test]
+fn regression_231_interlock_stall_limit_is_exactly_two_periods() {
+    let bench = armed_bench();
+    let watch = bench.state.heartbeat;
+    assert!(watch.answered && bench.last.rail_a);
+    for age in P..2 * P {
+        let inputs = Inputs {
+            now: watch.issued_at + age,
+            rail_a_sensed: true,
+            ..ARM.inputs
+        };
+        let (_, out) = step(bench.state, inputs, None);
+        assert_eq!(out.fault, None, "age {age}: answered and under two periods");
+        assert!(out.rail_a, "age {age}: rail stays on");
+    }
+    let inputs = Inputs {
+        now: watch.issued_at + 2 * P,
+        rail_a_sensed: true,
+        ..ARM.inputs
+    };
+    let (_, out) = step(bench.state, inputs, None);
+    assert_eq!(out.fault, Some(FaultReason::HeartbeatLost));
+}
+
+/// `Outputs::rail_b_on` is true for exactly the one port rail B is enabled
+/// for, and false for every other port and when rail B is off (mutants #231).
+#[test]
+fn regression_231_interlock_rail_b_on_names_the_port() {
+    let off = State::POWER_ON.outputs();
+    assert_eq!(off.rail_b, None);
+    for p in 0..RAIL_B_PORTS as u8 {
+        assert!(!off.rail_b_on(Port(p)), "rail B off, port {p}");
+    }
+    for on in 0..RAIL_B_PORTS as u8 {
+        let out = Outputs {
+            rail_b: Some(Port(on)),
+            ..off
+        };
+        for p in 0..RAIL_B_PORTS as u8 {
+            assert_eq!(out.rail_b_on(Port(p)), p == on, "on {on}, asked {p}");
+        }
+    }
+}
+
 const P: u64 = HEARTBEAT_PERIOD_TICKS;
 
 /// What the challenge of a heartbeat "started" with nonce 0 at tick 0 would

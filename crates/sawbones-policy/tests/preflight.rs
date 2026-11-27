@@ -1505,3 +1505,135 @@ fn key_of_entry(e: &WriteEntry) -> FactKey {
         signal: e.signal.clone(),
     }
 }
+
+// --- #231: mutants the weekly mutation run found missed. ---
+
+/// Mutants: `FactLedger::invalidated_by -> None`, `is_contradicted -> false`
+/// and `condition_holds -> false`.
+#[test]
+fn regression_231_policy_ledger_queries_report_state() {
+    let mut bench = Bench::new();
+    assert!(bench.ledger.invalidated_by(&cv_key()).is_none());
+    assert!(!bench.ledger.is_contradicted(&cv_key()));
+    assert!(bench.ledger.condition_holds(&name("bank_disconnected")));
+    assert!(!bench.ledger.condition_holds(&name("no_such_condition")));
+
+    bench.event(FactEvent::ContradictionOpened { fact: cv_key() });
+    assert!(bench.ledger.is_contradicted(&cv_key()));
+    assert!(!bench.ledger.is_contradicted(&cutoff_key()));
+
+    bench.event(FactEvent::DeviceIdentified {
+        port: port(PORT),
+        unit: UNIT,
+        identity: inverter("V1.1"),
+    });
+    assert_eq!(
+        bench.ledger.invalidated_by(&cv_key()),
+        Some(&InvalidationCause::DeviceChanged {
+            port: port(PORT),
+            unit: UNIT
+        })
+    );
+    assert!(bench.ledger.invalidated_by(&mastership_key()).is_none());
+
+    bench.event(FactEvent::ConditionChanged {
+        condition: name("bank_disconnected"),
+        holds: false,
+    });
+    assert!(!bench.ledger.condition_holds(&name("bank_disconnected")));
+}
+
+/// Mutant: `<` with `<=` in `standing_problem`'s epoch check. A fact earned at
+/// the very tick of a clock discontinuity belongs to the new epoch; one tick
+/// before does not.
+#[test]
+fn regression_231_policy_a_fact_earned_at_the_epoch_start_is_accepted() {
+    let mut bench = Bench::new();
+    let template = bench.entry_record(charge_voltage(), Method::OperatorAttested, &[]);
+    let epoch = 500;
+    bench
+        .ledger
+        .apply(FactEvent::ClockDiscontinuity, epoch)
+        .unwrap();
+    bench
+        .ledger
+        .apply(
+            FactEvent::DeviceIdentified {
+                port: port(PORT),
+                unit: UNIT,
+                identity: inverter("V1.0"),
+            },
+            epoch,
+        )
+        .unwrap();
+    let before = FactRecord {
+        earned_at: epoch - 1,
+        ..template.clone()
+    };
+    assert_eq!(
+        bench.ledger.record(before, epoch).unwrap_err(),
+        RecordError::Fact {
+            problem: FactProblem::EarnedBeforeClockDiscontinuity
+        }
+    );
+    let at = FactRecord {
+        earned_at: epoch,
+        ..template
+    };
+    assert!(bench.ledger.record(at, epoch).is_ok());
+}
+
+/// Mutant: `!=` with `==` in the moved-device filter of `apply`. The same
+/// physical device (model and serial) turning up at another port, on the same
+/// unit address, means it left its old place: the old place's facts fall.
+#[test]
+fn regression_231_policy_a_device_seen_on_another_port_leaves_its_old_place() {
+    let mut bench = Bench::new();
+    bench.passes(&cv_write());
+    bench.event(FactEvent::DeviceIdentified {
+        port: port(OTHER_PORT),
+        unit: UNIT,
+        identity: inverter("V1.0"),
+    });
+    assert!(bench.ledger.device_at(&port(PORT), UNIT).is_none());
+    assert!(bench.ledger.device_at(&port(OTHER_PORT), UNIT).is_some());
+    assert_eq!(
+        bench.refused_invalidated(&cv_write(), &cv_key()),
+        InvalidationCause::DeviceChanged {
+            port: port(PORT),
+            unit: UNIT
+        }
+    );
+}
+
+/// Mutant: `Confirmed::lease_target -> None`. A confirmed class 3 write
+/// carries the lease target the interlock must be asked for, with the digest
+/// of the action; a class 2 write carries none.
+#[test]
+fn regression_231_policy_confirmed_class_3_write_has_a_lease_target() {
+    let bench = Bench::new();
+    for (request, class3) in [(cv_write(), true), (fan_write(), false)] {
+        let token = bench.check(&request).unwrap();
+        let confirmed = confirm(
+            token,
+            &request,
+            &bench.writes,
+            &bench.buses,
+            &bench.ledger,
+            HEAD,
+            bench.now,
+        )
+        .unwrap();
+        match (confirmed.lease_target(), class3) {
+            (Some(target), true) => {
+                assert_eq!(target.port.0, bench_port_of(PORT));
+                assert_eq!(
+                    target.action_digest.0,
+                    *sawbones_policy::ActionDigest::of(&expected_action(&request)).as_bytes()
+                );
+            }
+            (None, false) => {}
+            (got, _) => panic!("{request:?}: lease target {got:?}"),
+        }
+    }
+}
