@@ -111,11 +111,22 @@ jobs:
   conformance:
     name: design conformance
     needs: [test-list, python-test-list]
+    # always(): a lister that fails must FAIL this gate, not leave it skipped (a skipped job is not a failure).
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
       BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
     steps:
+      - name: Fail unless both test lists were built
+        env:
+          RUST_LIST_RESULT: ${{ needs.test-list.result }}
+          PY_LIST_RESULT: ${{ needs.python-test-list.result }}
+        run: |
+          if [ "${RUST_LIST_RESULT}" != "success" ] || [ "${PY_LIST_RESULT}" != "success" ]; then
+            echo "::error::a test lister did not succeed (rust: ${RUST_LIST_RESULT}, python: ${PY_LIST_RESULT}), so nothing can count as built"
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -150,10 +161,19 @@ jobs:
   closure-gate:
     name: closing an issue needs its requirements built
     needs: [test-list, python-test-list]
-    if: github.event_name == 'pull_request'
+    if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Fail unless both test lists were built
+        env:
+          RUST_LIST_RESULT: ${{ needs.test-list.result }}
+          PY_LIST_RESULT: ${{ needs.python-test-list.result }}
+        run: |
+          if [ "${RUST_LIST_RESULT}" != "success" ] || [ "${PY_LIST_RESULT}" != "success" ]; then
+            echo "::error::a test lister did not succeed (rust: ${RUST_LIST_RESULT}, python: ${PY_LIST_RESULT}), so nothing can count as built"
+            exit 1
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0

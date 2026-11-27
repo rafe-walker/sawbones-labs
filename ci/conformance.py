@@ -184,7 +184,7 @@ _VIS = r"(?:pub\s*(?:\(\s*[^)]*\))?\s+)?"
 _FN = re.compile(_ATTRS + _VIS + r"(?:async\s+|const\s+|unsafe\s+)*fn\s+(\w+)")
 _MODDECL = re.compile(_ATTRS + _VIS + r"(?<![\w#])mod\s+(?:r#)?(\w+)\s*([;{])")
 _MOD_TOKEN = re.compile(r"(?<![\w#])mod\b")
-_INCLUDE = re.compile(r"(?<!\w)include\s*!")
+_INCLUDE = re.compile(r"(?<![\w])include\b")  # any identifier `include`: `use std::include as inc;` hides the `!`
 _MACRO = re.compile(r"macro_rules\s*!\s*\w+\s*[{(\[]")
 _TEST_ATTR = re.compile(r"#\s*\[\s*(?:\w+::)*test\b")
 _IGNORE_ATTR = re.compile(r"#\s*\[\s*ignore\b|cfg_attr\s*\([^\]]*\bignore\b")
@@ -796,6 +796,22 @@ def harness_false_srcs(root, pkg):
     return out
 
 
+def proc_macro_manifest(root, rel):
+    """Why this Cargo.toml makes every Rust credit unsafe, or None: a proc-macro crate
+    runs PR code inside the compiler and can emit any item, including a live module
+    that no scanned text shows. An unreadable manifest is refused too."""
+    try:
+        with open(os.path.join(root, rel), "rb") as fh:
+            manifest = tomllib.load(fh)
+    except (OSError, ValueError):
+        return "the manifest cannot be read"
+    lib = manifest.get("lib", {})
+    if isinstance(lib, dict) and (lib.get("proc-macro") is not False and "proc-macro" in lib
+                                   or lib.get("proc_macro") is not False and "proc_macro" in lib):
+        return "the crate sets `proc-macro = true`"
+    return None
+
+
 def pkg_dir(root, rel):
     """The directory (relative to root) of the nearest Cargo.toml above `rel`."""
     d = os.path.dirname(rel)
@@ -818,7 +834,14 @@ class TestIndex:
         self.refusals = []  # (file, line, statement, why): what was left out and why
         self.macro_hazard = None
         self._scans = {}
-        for rel in walk(root, ("crates", "firmware", "plugins", "fuzz"), (".rs",)):
+        # Every .rs file in the repo (a path dependency outside crates/ can export a macro), and every manifest.
+        for rel in walk(root, (".",), ("Cargo.toml",)):
+            why = proc_macro_manifest(root, rel)
+            if why:
+                self.macro_hazard = f"{rel}: {why}"
+                self.refusals.append((rel, 0, "", why + "; every Rust test is refused workspace-wide"))
+                break
+        for rel in ([] if self.macro_hazard else walk(root, (".",), (".rs",))):
             info = self._scan(rel)
             if info and info["macro_hazard"]:
                 self.macro_hazard = f"{rel}:{info['macro_hazard']}"
@@ -828,7 +851,7 @@ class TestIndex:
         if self.macro_hazard:
             pass  # no Rust test is credited; see resolve()
         elif cargo is None:
-            for rel in walk(root, ("crates", "firmware", "plugins", "fuzz"), (".rs",)):
+            for rel in walk(root, (".",), (".rs",)):
                 info = self._scan(rel)
                 if info and info["tainted"]:
                     self.refusals.append((rel, 0, "", info["tainted"]))

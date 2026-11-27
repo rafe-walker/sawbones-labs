@@ -52,8 +52,29 @@ def no_harness_targets(root, locked):
     return out
 
 
+_LIB_ENV = None
+
+
+def lib_env():
+    """Environment for running a test binary. A proc-macro crate's test binary links
+    the compiler's own libraries (libstd, librustc_driver), which only the toolchain's
+    lib directories provide (`rustc --print target-libdir` and `<sysroot>/lib`); without it the binary dies and the lister crashes."""
+    global _LIB_ENV
+    if _LIB_ENV is None:
+        env = dict(os.environ)
+        libs = []
+        for what in ("target-libdir", "sysroot"):  # libstd lives in the target libdir; librustc_driver in <sysroot>/lib
+            r = subprocess.run(["rustc", "--print", what], capture_output=True, text=True)
+            if r.returncode == 0 and r.stdout.strip():
+                libs.append(r.stdout.strip() if what == "target-libdir" else os.path.join(r.stdout.strip(), "lib"))
+        for var in ("LD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH"):
+            env[var] = os.pathsep.join(libs + ([env[var]] if env.get(var) else []))
+        _LIB_ENV = env
+    return _LIB_ENV
+
+
 def listed(exe, cwd, *extra):
-    r = subprocess.run([exe, "--list", "--format", "terse", *extra], cwd=cwd, capture_output=True, text=True)
+    r = subprocess.run([exe, "--list", "--format", "terse", *extra], cwd=cwd, capture_output=True, text=True, env=lib_env())
     if r.returncode != 0:
         raise SystemExit(f"{exe} --list failed: {r.stderr.strip()[:500]}")
     return {line[:-len(": test")] for line in r.stdout.splitlines() if line.endswith(": test")}

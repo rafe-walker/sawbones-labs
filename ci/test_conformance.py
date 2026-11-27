@@ -339,7 +339,7 @@ class Feedback(Base):
         # PR text goes through env vars only, never into a run script.
         import re
         run_blocks = re.findall(r"run: \|\n((?: {10}.*\n|\n)+)", wf)
-        self.assertEqual(len(run_blocks), 6)
+        self.assertEqual(len(run_blocks), 8)
         for b in run_blocks:
             self.assertNotIn("github.event.pull_request", b)
 
@@ -476,7 +476,7 @@ fn cfg_attr_ignored() {}
         t.write("crates/tiny/src/orphan.rs", "#[test]\nfn in_orphan_file() {}\n")  # no `mod orphan;` reaches it
         lister = subprocess.run([sys.executable, "-I", os.path.join(HERE, "rust_test_list.py"), os.path.join(t.d, "l.json"),
                                  "--unlocked", "--root", t.d], capture_output=True, text=True,
-                                env=dict(os.environ, CARGO_TARGET_DIR=os.path.join(t.d, "tgt")))
+                                env=dict(os.environ, CARGO_TARGET_DIR=os.path.join(t.d, "target")))
         self.assertEqual(lister.returncode, 0, lister.stdout + lister.stderr)
         with open(os.path.join(t.d, "l.json")) as fh:
             listed = {x["name"]: x["ignored"] for x in json.load(fh)["tests"]}
@@ -541,7 +541,7 @@ fn cfg_attr_ignored() {}
         t.write("crates/tiny/examples/ex.rs", "fn main() {}\n#[test]\nfn in_example() {}\n")
         t.write("crates/tiny/benches/b.rs", "#[test]\nfn in_bench() {}\n")
         r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "rust_test_list.py"), os.path.join(t.d, "l.json"), "--unlocked",
-                            "--root", t.d], capture_output=True, text=True, env=dict(os.environ, CARGO_TARGET_DIR=os.path.join(t.d, "tgt")))
+                            "--root", t.d], capture_output=True, text=True, env=dict(os.environ, CARGO_TARGET_DIR=os.path.join(t.d, "target")))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         with open(os.path.join(t.d, "l.json")) as fh:
             names = {x["name"] for x in json.load(fh)["tests"]}
@@ -582,7 +582,7 @@ fn cfg_attr_ignored() {}
         for path, text in (extra or {}).items():
             t.write(path, text)
         r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "rust_test_list.py"), os.path.join(t.d, "l.json"), "--unlocked",
-                            "--root", t.d], capture_output=True, text=True, env=dict(os.environ, CARGO_TARGET_DIR=os.path.join(t.d, "tgt")))
+                            "--root", t.d], capture_output=True, text=True, env=dict(os.environ, CARGO_TARGET_DIR=os.path.join(t.d, "target")))
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         with open(os.path.join(t.d, "l.json")) as fh:
             return t, json.load(fh)
@@ -740,6 +740,76 @@ fn cfg_attr_ignored() {}
                 sha=c.unit_hash(c.source_unit(DESIGN, "The latch starts tripped")))]))
         t.write("ci/test_conformance.py", "import unittest\nclass T(unittest.TestCase):\n    def test_x(self): pass\n")
         self.assertEqual(t.run("--bless", "--rust-tests", lst)[0], 0)
+
+    def test_regression_271_any_include_identifier_taints_the_file(self):
+        for name, src in (("alias", 'use std::include as inc;\n#[cfg(feature = "never")]\nmod b;\ninc!("live_b.rs");\n#[test]\nfn t() {}\n'),
+                          ("core path", 'use core::include;\ninclude!("x.rs");\n#[test]\nfn t() {}\n'),
+                          ("raw identifier", 'r#include!("x.rs");\n#[test]\nfn t() {}\n'),
+                          ("macro body", 'macro_rules! m { () => { use std::include as inc; }; }\n#[test]\nfn t() {}\n')):
+            info = c.scan_rust(src)
+            self.assertTrue(info["tainted"] or info["macro_hazard"], name)
+            if name != "macro body":
+                self.assertEqual((info["tests"], info["mods"]), ([], []), name)
+        # `include_str!` and friends are different identifiers; comments and strings are not code.
+        for src in ('const A: &str = include_str!("x.txt");\n#[test]\nfn t() {}\n', '// include\nconst S: &str = "include";\n#[test]\nfn t() {}\n'):
+            info = c.scan_rust(src)
+            self.assertEqual((info["tainted"], info["macro_hazard"], len(info["tests"])), (None, None, 1), src)
+
+    def test_regression_271_the_hazard_scan_covers_every_rust_file_in_the_repo(self):
+        lib = "crates/tiny/src/lib.rs"
+        files = {lib: '#[cfg(feature = "never")]\nmod a;\nhelper::live_a!();\n#[test]\nfn plain() {}\n',
+                 "crates/tiny/src/a.rs": "#[test]\nfn ta() {}\n",
+                 "research/helper/src/lib.rs": "#[macro_export]\nmacro_rules! live_a { () => { #[cfg(not(feature = \"never\"))] mod a { #[test] fn ta() {} } }; }\n"}
+        for ref, full in (("crates/tiny/src/a.rs::ta", "a::ta"), ("tiny::plain", "plain")):
+            t = self.tree(recs=[self.rec(ref)], extra=files, bless=False)
+            for args in (("--rust-tests", cargo_list(os.path.join(t.d, "l.json"), [("tiny", lib, full)])), ()):
+                rc, out = t.run("--bless", *args)
+                self.assertNotEqual(rc, 0, (ref, args))
+                self.assertIn("research/helper/src/lib.rs", out, (ref, args))
+        # Build output is not source: a `target/` directory is skipped.
+        t = self.tree(recs=[self.rec("sup::it_starts_tripped")], bless=False,
+                      extra={"target/debug/build/x/out.rs": "macro_rules! m { () => { mod x; }; }\n"})
+        lst = cargo_list(os.path.join(t.d, "l.json"), [("sup", "crates/sup/tests/t.rs", "it_starts_tripped")])
+        self.assertEqual(t.run("--bless", "--rust-tests", lst)[0], 0)
+
+    def test_regression_271_a_proc_macro_crate_refuses_every_rust_credit(self):
+        for key in ("proc-macro", "proc_macro"):
+            t = self.tree(recs=[self.rec("sup::it_starts_tripped")], bless=False,
+                          extra={"crates/pm/Cargo.toml": f'[package]\nname = "pm"\n[lib]\n{key} = true\n'})
+            lst = cargo_list(os.path.join(t.d, "l.json"), [("sup", "crates/sup/tests/t.rs", "it_starts_tripped")])
+            for args in (("--rust-tests", lst), ()):
+                rc, out = t.run("--bless", *args)
+                self.assertNotEqual(rc, 0, (key, args))
+                self.assertIn("proc-macro", out)
+        t = self.tree(recs=[self.rec("sup::it_starts_tripped")], bless=False,
+                      extra={"crates/pm/Cargo.toml": '[package]\nname = "pm"\n[lib]\nproc-macro = false\n'})
+        self.assertEqual(t.run("--bless", "--rust-tests", lst)[0], 0)
+
+    def test_regression_271_the_lister_survives_a_proc_macro_test_binary_and_the_judge_refuses_it(self):
+        need_cargo(self)
+        pm = ("use proc_macro::TokenStream;\n#[proc_macro]\npub fn noop(_: TokenStream) -> TokenStream { TokenStream::new() }\n"
+              "#[test]\nfn unit() {}\n")
+        t, listed = self.scratch_tiny(pm, manifest_extra="\n[lib]\nproc-macro = true\n")
+        self.assertEqual({x["name"] for x in listed["tests"]}, {"unit"})  # listed without crashing...
+        self.assertNotEqual(self.judge(t, "tiny::unit")[0], 0)            # ...but not credited
+
+    def test_regression_271_a_failed_lister_fails_both_gates_instead_of_skipping_them(self):
+        with open(os.path.join(ROOT, ".github/workflows/conformance.yml")) as fh:
+            wf = fh.read()
+        for job, cond in (("conformance", "if: always()\n"), ("closure-gate", "if: always() && github.event_name == 'pull_request'\n")):
+            start = wf.index(f"\n  {job}:")
+            nxt = wf.find("\n  closure-gate:", start + 1) if job == "conformance" else len(wf)
+            body = wf[start:nxt]
+            self.assertIn("needs: [test-list, python-test-list]", body, job)
+            self.assertIn(cond, body, job)
+            # The first step checks both lister results, passed through env (never `${{ }}` inside `run:`).
+            first = body[body.index("    steps:"):]
+            self.assertLess(first.index("needs.test-list.result"), first.index("actions/checkout"), job)
+            self.assertIn("needs.python-test-list.result", first, job)
+            self.assertIn('!= "success"', first, job)
+            self.assertIn("exit 1", first, job)
+        for block in re.findall(r"run: \|\n((?: {10}.*\n|\n)+)", wf):
+            self.assertNotIn("${{", block)
 
     def test_regression_271_generator_and_misplaced_async_tests_never_run(self):
         names, reasons = c.python_scan(
