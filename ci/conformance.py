@@ -23,8 +23,10 @@ Rust tests are resolved against cargo's own list: pass `--rust-tests FILE`, made
 ci/rust_test_list.py. A test that does not compile, is cfg'd out, sits in a file no
 `mod` reaches or in an uninvoked macro is not in that list, so it cannot count.
 Without the flag the checker falls back to a pure-source scan and warns, because that
-scan can still be fooled. Python tests are parsed with `ast` and must be methods of a
-TestCase in ci/test_*.py that unittest discovery really runs.
+scan can still be fooled. Python tests are parsed with `ast` (a fail-closed allow-list,
+see python_scan) and must be methods of a TestCase in ci/test_*.py; with `--py-tests
+FILE`, made by ci/py_test_list.py from a real `unittest discover`, a Python ref must
+also be recorded there as passed.
 
 Exit status is non-zero on: a malformed record, an unknown or duplicate ID, a
 record naming a test or file that does not exist, a drifted record, a stale
@@ -42,6 +44,7 @@ import os
 import re
 import sys
 import tomllib
+import unittest
 
 REQ_DIR = "design/requirements"
 NAMES = "design/names.toml"
@@ -177,8 +180,11 @@ def unit_hash(unit):
 
 GLOB_CHARS = "*?["
 _ATTRS = r"((?:#\s*\[[^\]]*\]\s*)*)"
-_FN = re.compile(_ATTRS + r"(?:pub(?:\([^)]*\))?\s+)?(?:async\s+|const\s+|unsafe\s+)*fn\s+(\w+)")
-_MODDECL = re.compile(_ATTRS + r"(?:pub(?:\([^)]*\))?\s+)?(?<!\w)mod\s+(\w+)\s*([;{])")
+_VIS = r"(?:pub\s*(?:\(\s*[^)]*\))?\s+)?"
+_FN = re.compile(_ATTRS + _VIS + r"(?:async\s+|const\s+|unsafe\s+)*fn\s+(\w+)")
+_MODDECL = re.compile(_ATTRS + _VIS + r"(?<![\w#])mod\s+(?:r#)?(\w+)\s*([;{])")
+_MOD_TOKEN = re.compile(r"(?<![\w#])mod\b")
+_INCLUDE = re.compile(r"(?<!\w)include\s*!")
 _MACRO = re.compile(r"macro_rules\s*!\s*\w+\s*[{(\[]")
 _TEST_ATTR = re.compile(r"#\s*\[\s*(?:\w+::)*test\b")
 _IGNORE_ATTR = re.compile(r"#\s*\[\s*ignore\b|cfg_attr\s*\([^\]]*\bignore\b")
@@ -277,24 +283,63 @@ def _match_close(s, i):
     return n
 
 
+def _attached(code, pos):
+    """Can the declaration that starts at `pos` have lost attributes or a visibility
+    to an odd spelling? True when what precedes it is a statement end, a block edge,
+    the start of the file or an inner attribute `#![..]`; anything else (a stray
+    `]`, `)` or `pub`) means an outer attribute may sit out of the scanner's view."""
+    head = code[:pos].rstrip()
+    if not head or head[-1] in "{};":
+        return True
+    if head[-1] == "]":
+        depth, i = 0, len(head) - 1
+        while i >= 0:
+            depth += head[i] == "]"
+            depth -= head[i] == "["
+            if depth == 0:
+                break
+            i -= 1
+        return head[:i].rstrip().endswith("!") and head[:i].rstrip()[:-1].rstrip().endswith("#")
+    return False
+
+
 def scan_rust(src):
     """What a source scan sees in one Rust file, with nested comments, strings,
     `macro_rules!` bodies and modules or fns behind a never-true cfg removed:
-      tests: [(inline module path, fn name, ignored)]
-      mods:  [(inline module path, name, attrs)] for out-of-line `mod name;`.
+      tests:   [(inline module path, fn name, ignored)]
+      mods:    [(inline module path, name, attrs)] for out-of-line `mod name;`.
+      tainted: None, or why this file cannot be trusted (see below).
     Module names a scope declares more than once (a cfg'd-out `mod b;` next to a
-    live `mod b {}`), or declares with a path attribute (even inside `cfg_attr`),
-    are ambiguous without evaluating cfg: all their declarations, and the tests
-    inside them, are dropped. `mod x;` inside a macro invocation is not followed."""
+    live `mod b {}`, inline or not), or declares with a path attribute (even inside
+    `cfg_attr`), are ambiguous without evaluating cfg: all their declarations, and
+    the tests inside them, are dropped. `mod x;` inside a macro invocation is not
+    followed. FAIL CLOSED: a `mod` keyword the declaration pattern did not parse
+    (an odd spelling, a macro-built item) or an `include!` taints the file, and a
+    tainted file credits no test and has its `mod` children ignored."""
     code = blank_rust(src)
     for m in list(_MACRO.finditer(code)):
         code_open = m.end() - 1
         code = _blank_span(code, m.start(), _match_close(code, code_open))
     decls = list(_MODDECL.finditer(code))
+    kw_positions = {code.rfind("mod", m.start(), m.start(2)) for m in decls}
+    unparsed = [t for t in _MOD_TOKEN.finditer(code) if t.start() not in kw_positions]
+    taint = None
+    stray = [m for m in decls if not _attached(code, m.start())]
+    if stray:
+        line = code.count("\n", 0, stray[0].start()) + 1
+        taint = f"line {line}: a `mod` whose attributes or visibility the scanner may not see"
+    elif unparsed:
+        line = code.count("\n", 0, unparsed[0].start()) + 1
+        taint = f"line {line}: a `mod` the scanner could not parse as a declaration"
+    elif _INCLUDE.search(code):
+        line = code.count("\n", 0, _INCLUDE.search(code).start()) + 1
+        taint = f"line {line}: `include!` pulls in text the scanner cannot see"
+    if taint:
+        return {"tests": [], "mods": [], "tainted": taint}
     spans0 = sorted((m.start(), _match_brace(code, m.end() - 1), m.group(2)) for m in decls if m.group(3) == "{")
 
     def scope_at(p, spans):
-        return [name for a, b, name in spans if a <= p < b]
+        return [name for a, b, name in spans if a < p < b]  # strict: an inline module is declared in its parent's scope
 
     seen, refused = {}, set()
     for m in decls:
@@ -324,7 +369,7 @@ def scan_rust(src):
         scope = scope_at(m.start(), spans0)
         if inline_ok(scope) and (tuple(scope), m.group(2)) not in refused:
             mods.append((scope, m.group(2), m.group(1)))
-    return {"tests": tests, "mods": mods}
+    return {"tests": tests, "mods": mods, "tainted": None}
 
 
 def rust_tests(src):
@@ -335,155 +380,353 @@ def rust_tests(src):
 
 _SKIP_DECORATORS = {"skip", "skipIf", "skipUnless", "expectedFailure"}
 _TESTCASE_NAMES = {"TestCase", "IsolatedAsyncioTestCase"}
+_MODULE_HOOKS = {"load_tests", "setUpModule", "tearDownModule"}
+# Anything a TestCase class already has (run, setUp, setUpClass, asyncSetUp, __init__,
+# __new__, __init_subclass__, __call__, debug, ...) must not be redefined in a counted class.
+_TC_RESERVED = (set(dir(unittest.IsolatedAsyncioTestCase)) | set(dir(object))) - {"__doc__"}
+_SAFE_CALLS = {"pathlib.Path", "re.compile", "importlib.util.spec_from_file_location", "importlib.util.module_from_spec",
+               "sys.path.insert", "sys.path.append", "unittest.skip", "unittest.skipIf", "unittest.skipUnless"}
+_SAFE_CALL_PREFIX = ("os.path.",)
+_PATH_METHODS = {"with_name", "with_suffix", "resolve", "absolute", "joinpath"}
+_PLAIN_DECORATORS = {"classmethod", "staticmethod", "property"}
 
 
-def _decorator_name(d):
-    if isinstance(d, ast.Call):
-        d = d.func
-    if isinstance(d, ast.Attribute):
-        return d.attr
-    if isinstance(d, ast.Name):
-        return d.id
-    return ""
+class _Refuse(Exception):
+    def __init__(self, node, why):
+        super().__init__(why)
+        self.node, self.why = node, why
 
 
-def _is_skip_expr(node):
-    """Is `node` a (call of a) unittest skip decorator, as in `unittest.skip('x')`?"""
-    return _decorator_name(node) in _SKIP_DECORATORS
+def _dotted(node):
+    parts = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        return ".".join([node.id] + parts[::-1])
+    return None
 
 
-def _mentions_skiptest(node):
-    return any((isinstance(n, ast.Name) and n.id == "SkipTest") or (isinstance(n, ast.Attribute) and n.attr in ("SkipTest", "skipTest"))
-               for n in ast.walk(node))
+class _PyScan:
+    """A fail-closed reading of one Python test module. The module is counted only if
+    everything it runs at import time is on a short allow-list; see `python_scan`."""
+
+    def __init__(self, src, tree):
+        self.src, self.tree = src, tree
+        self.imports, self.reasons = {}, []
+        self.skip_aliases, self.specs, self.mods = set(), set(), set()
+        self.file_names, self.path_names = {"__file__"}, set()
+
+    def stmt(self, node):
+        seg = (ast.get_source_segment(self.src, node) or "").strip().splitlines()
+        text = seg[0] if seg else type(node).__name__
+        return (node.lineno, text[:70])
+
+    def refuse(self, node, why):
+        raise _Refuse(node, why)
+
+    def full(self, node):
+        d = _dotted(node)
+        if d is None:
+            return None
+        head, _, rest = d.partition(".")
+        base = self.imports.get(head)
+        if base is None:
+            return None
+        return base + ("." + rest if rest else "")
+
+    def safe_call(self, node):
+        if any(k.arg is None for k in node.keywords):
+            return False
+        if not all(self.safe(a) for a in node.args) or not all(self.safe(k.value) for k in node.keywords):
+            return False
+        full = self.full(node.func)
+        if full is not None and (full in _SAFE_CALLS or full.startswith(_SAFE_CALL_PREFIX)):
+            return True
+        f = node.func
+        return isinstance(f, ast.Attribute) and f.attr in _PATH_METHODS and self.is_path(f.value)
+
+    def is_path(self, node):
+        if isinstance(node, ast.Name):
+            return node.id in self.path_names
+        return isinstance(node, ast.Call) and self.safe_call(node) and (
+            self.full(node.func) == "pathlib.Path" or (isinstance(node.func, ast.Attribute) and node.func.attr in _PATH_METHODS))
+
+    def safe(self, node):
+        """An expression that only builds constants, names, attributes, containers and
+        calls on the allow-list, so evaluating it cannot run PR-chosen code."""
+        if node is None or isinstance(node, (ast.Constant, ast.Name)):
+            return True
+        if isinstance(node, ast.Attribute):
+            return self.safe(node.value)
+        if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+            return all(self.safe(e) for e in node.elts)
+        if isinstance(node, ast.Dict):
+            return all(k is not None and self.safe(k) for k in node.keys) and all(self.safe(v) for v in node.values)
+        if isinstance(node, ast.BinOp):
+            return self.safe(node.left) and self.safe(node.right)
+        if isinstance(node, ast.UnaryOp):
+            return self.safe(node.operand)
+        if isinstance(node, ast.Subscript):
+            return self.safe(node.value) and self.safe(node.slice)
+        if isinstance(node, ast.Slice):
+            return all(self.safe(x) for x in (node.lower, node.upper, node.step))
+        if isinstance(node, ast.JoinedStr):
+            return all(self.safe(v) for v in node.values)
+        if isinstance(node, ast.FormattedValue):
+            return self.safe(node.value) and self.safe(node.format_spec)
+        if isinstance(node, ast.Call):
+            return self.safe_call(node)
+        return False
+
+    def need_safe(self, node, what):
+        if not self.safe(node):
+            self.refuse(node, f"{what} is not a constant, name, attribute or allow-listed call, so it may run PR-chosen code at import")
+
+    def check_signature(self, fn):
+        a = fn.args
+        for d in a.defaults + [d for d in a.kw_defaults if d is not None]:
+            self.need_safe(d, "a default argument")
+        for arg in a.posonlyargs + a.args + a.kwonlyargs + [x for x in (a.vararg, a.kwarg) if x]:
+            if arg.annotation is not None:
+                self.need_safe(arg.annotation, "an annotation")
+        if fn.returns is not None:
+            self.need_safe(fn.returns, "an annotation")
+
+    def is_skip(self, d):
+        if isinstance(d, ast.Name):
+            return d.id in self.skip_aliases
+        if isinstance(d, ast.Call):
+            return self.safe_call(d) and self.full(d.func) in ("unittest.skip", "unittest.skipIf", "unittest.skipUnless")
+        return self.full(d) == "unittest.expectedFailure"
+
+    def is_testcase_base(self, b, local):
+        if isinstance(b, ast.Name):
+            return b.id in self.imports and self.imports[b.id] in {"unittest." + n for n in _TESTCASE_NAMES} or b.id in local
+        return self.full(b) in {"unittest." + n for n in _TESTCASE_NAMES}
+
+    def module_level(self):
+        body = self.tree.body
+        binds = {}
+        for node in body:
+            names = []
+            if isinstance(node, ast.Import):
+                names = [(a.asname or a.name.split(".")[0], "import") for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                if any(a.name == "*" for a in node.names):
+                    self.refuse(node, "`import *` can rebind anything")
+                names = [(a.asname or a.name, "import") for a in node.names]
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names = [(node.name, "def")]
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                for t in node.targets if isinstance(node, ast.Assign) else [node.target]:
+                    if not isinstance(t, ast.Name):
+                        self.refuse(node, "an assignment to an attribute, item or tuple can rebind a test or unittest itself")
+                    names.append((t.id, "assign"))
+            for n, kind in names:
+                if n in _MODULE_HOOKS:
+                    self.refuse(node, f"`{n}` changes what discovery runs")
+                binds.setdefault(n, []).append((kind, node))
+        for n, lst in binds.items():
+            if any(k == "import" for k, _ in lst) and len(lst) > 1:
+                self.refuse(lst[-1][1], f"`{n}` is imported and then bound again")
+        self.binds = binds
+        for node in body:
+            self.top_statement(node)
+
+    def top_statement(self, node):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                self.imports[a.asname or a.name.split(".")[0]] = a.name if a.asname else a.name.split(".")[0]
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                for a in node.names:
+                    self.imports.pop(a.asname or a.name, None)
+                return
+            for a in node.names:
+                self.imports[a.asname or a.name] = f"{node.module}.{a.name}"
+        elif isinstance(node, ast.Expr):
+            self.top_expr(node)
+        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+            value = node.value
+            if value is None:
+                return
+            self.need_safe(value, "an assignment value")
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            names = {t.id for t in targets}
+            if self.mentions_file(value):
+                self.file_names |= names
+            if self.is_path(value):
+                self.path_names |= names
+            if isinstance(value, ast.Call):
+                full = self.full(value.func)
+                if full in ("unittest.skip", "unittest.skipIf", "unittest.skipUnless"):
+                    self.skip_aliases |= names
+                elif full == "importlib.util.spec_from_file_location":
+                    self.check_spec(value)
+                    self.specs |= names
+                elif full == "importlib.util.module_from_spec" and len(value.args) == 1 and isinstance(value.args[0], ast.Name) \
+                        and value.args[0].id in self.specs:
+                    self.mods |= names
+                elif full == "importlib.util.module_from_spec":
+                    self.refuse(node, "module_from_spec of something that is not a spec from this file's directory")
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.decorator_list:
+                self.refuse(node, "a decorator on a module-level function runs code at import")
+            self.check_signature(node)
+        elif isinstance(node, ast.ClassDef):
+            self.check_class_header(node)
+        elif isinstance(node, ast.If) and self.is_main_guard(node):
+            pass
+        else:
+            self.refuse(node, f"a module-level `{type(node).__name__}` statement runs code at import")
+
+    def mentions_file(self, node):
+        return any(isinstance(n, ast.Name) and n.id in self.file_names for n in ast.walk(node))
+
+    def check_spec(self, call):
+        if len(call.args) < 2 or not self.mentions_file(call.args[1]):
+            self.refuse(call, "a module spec must be built from a path derived from __file__ (a sibling in ci/)")
+        for n in ast.walk(call.args[1]):
+            if isinstance(n, ast.Constant) and isinstance(n.value, str) and (".." in n.value or n.value.startswith("/")):
+                self.refuse(call, "a module spec path must stay inside ci/")
+
+    def top_expr(self, node):
+        v = node.value
+        if isinstance(v, ast.Constant) and isinstance(v.value, str):
+            return
+        if isinstance(v, ast.Call):
+            full = self.full(v.func)
+            if full in ("sys.path.insert", "sys.path.append") and self.safe(v):
+                return
+            f = v.func
+            if (isinstance(f, ast.Attribute) and f.attr == "exec_module" and isinstance(f.value, ast.Attribute) and f.value.attr == "loader"
+                    and isinstance(f.value.value, ast.Name) and f.value.value.id in self.specs and len(v.args) == 1 and not v.keywords
+                    and isinstance(v.args[0], ast.Name) and v.args[0].id in self.mods):
+                return
+        self.refuse(node, "a module-level call runs code at import")
+
+    @staticmethod
+    def is_main_guard(node):
+        t = node.test
+        return (isinstance(t, ast.Compare) and isinstance(t.left, ast.Name) and t.left.id == "__name__" and len(t.ops) == 1
+                and isinstance(t.ops[0], ast.Eq) and len(t.comparators) == 1 and isinstance(t.comparators[0], ast.Constant)
+                and t.comparators[0].value == "__main__" and not node.orelse and len(node.body) == 1
+                and isinstance(node.body[0], ast.Expr) and isinstance(node.body[0].value, ast.Call)
+                and _dotted(node.body[0].value.func) == "unittest.main" and not node.body[0].value.args
+                and not node.body[0].value.keywords)
+
+    def check_class_header(self, node):
+        if node.keywords:
+            self.refuse(node, "class keywords (a metaclass) run code at import")
+        for b in node.bases:
+            self.need_safe(b, "a base class")
+        for d in node.decorator_list:
+            if not self.is_skip(d):
+                self.refuse(node, "a class decorator runs code at import")
+        for item in node.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for d in item.decorator_list:
+                    plain = isinstance(d, ast.Name) and d.id in _PLAIN_DECORATORS and d.id not in self.binds
+                    if not (plain or self.is_skip(d)):
+                        self.refuse(item, "a method decorator runs code at import")
+                self.check_signature(item)
+            elif isinstance(item, ast.Assign):
+                if not all(isinstance(t, ast.Name) for t in item.targets):
+                    self.refuse(item, "a class-body assignment to an attribute or tuple")
+                self.need_safe(item.value, "a class-body assignment value")
+            elif isinstance(item, ast.AnnAssign):
+                if not isinstance(item.target, ast.Name):
+                    self.refuse(item, "a class-body assignment to an attribute")
+                self.need_safe(item.value, "a class-body assignment value")
+            elif isinstance(item, ast.Delete):
+                if not all(isinstance(t, ast.Name) for t in item.targets):
+                    self.refuse(item, "a class-body delete of an attribute")
+            elif isinstance(item, ast.Pass) or (isinstance(item, ast.Expr) and isinstance(item.value, ast.Constant)):
+                pass
+            else:
+                self.refuse(item, f"a class-body `{type(item).__name__}` statement runs code at import")
+
+    def classes(self):
+        local, skipped, bad, found = set(), set(), set(), set()
+        for node in self.tree.body:
+            if not isinstance(node, ast.ClassDef) or not any(self.is_testcase_base(b, local) for b in node.bases):
+                continue
+            local.add(node.name)
+            if any(not self.is_testcase_base(b, local) and not (isinstance(b, ast.Name) and b.id in local) for b in node.bases):
+                self.reasons.append(self.stmt(node) + ("a base class the scanner cannot vouch for",))
+                bad.add(node.name)
+                continue
+            if any(isinstance(b, ast.Name) and b.id in bad for b in node.bases):
+                bad.add(node.name)
+                self.reasons.append(self.stmt(node) + ("derives from a class that is not counted",))
+                continue
+            if node.decorator_list or any(isinstance(b, ast.Name) and b.id in skipped for b in node.bases):
+                skipped.add(node.name)
+                continue
+            if self.binds[node.name][-1][1] is not node:
+                continue  # a later binding of the same name replaced this class
+            defs, flagged, reserved = {}, False, None
+            for item in node.body:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    if item.name in _TC_RESERVED:
+                        reserved = reserved or item
+                    defs[item.name] = not item.decorator_list
+                elif isinstance(item, (ast.Assign, ast.AnnAssign)):
+                    for t in item.targets if isinstance(item, ast.Assign) else [item.target]:
+                        if t.id == "__unittest_skip__" and isinstance(item.value, ast.Constant) and item.value.value:
+                            flagged = True
+                        elif t.id in _TC_RESERVED:
+                            reserved = reserved or item
+                        defs[t.id] = False
+                elif isinstance(item, ast.Delete):
+                    for t in item.targets:
+                        defs.pop(t.id, None)
+            if reserved is not None:
+                bad.add(node.name)
+                name = getattr(reserved, "name", None) or "an attribute"
+                self.reasons.append(self.stmt(reserved) + (f"class {node.name} redefines `{name}`, which TestCase already has (run, setUp, "
+                                                          "setUpClass, __init__, ... change what runs)",))
+                continue
+            if flagged:
+                skipped.add(node.name)
+                continue
+            found |= {n for n, ok in defs.items() if ok and n.startswith("test_")}
+        return found
 
 
-def _is_main_guard(node):
-    return (isinstance(node, ast.If) and isinstance(node.test, ast.Compare) and isinstance(node.test.left, ast.Name)
-            and node.test.left.id == "__name__" and not node.orelse)
+def python_scan(src):
+    """(test method names, reasons) for what `unittest` discovery would really run.
 
-
-def _is_sys_path_call(node):
-    f = node.value.func if isinstance(node.value, ast.Call) else None
-    return isinstance(f, ast.Attribute) and f.attr in ("insert", "append") and isinstance(f.value, ast.Attribute) \
-        and f.value.attr == "path" and isinstance(f.value.value, ast.Name) and f.value.value.id == "sys"
+    A module is counted only if everything it runs at import time is on a short
+    allow-list: imports, docstrings, classes and functions without decorators (apart
+    from unittest skips), assignments whose right-hand side is built from constants,
+    names, attributes, containers and calls of `os.path.*`, `pathlib.Path`,
+    `re.compile`, `importlib.util.spec_from_file_location` / `module_from_spec`
+    (for a file next to the test) and `spec.loader.exec_module(module)`, `sys.path`
+    inserts, and the exact `if __name__ == "__main__": unittest.main()`. Anything else
+    (a `raise`, `if`, `try`, any other call, `load_tests` or `setUpModule` in any form,
+    an imported name bound again, a class with keywords) means the module is not
+    counted. A class counts only if it derives from `unittest.TestCase` and defines
+    none of TestCase's own attributes (`run`, `setUp`, `setUpClass`, ...). Its `test_*`
+    methods count when they carry no decorator, the last definition of a name wins,
+    and skips (decorators, `__unittest_skip__`, inherited) exclude them.
+    `reasons` lists (line, statement, why) for every module or class left out."""
+    try:
+        tree = ast.parse(src)
+    except (SyntaxError, ValueError) as e:
+        return set(), [(getattr(e, "lineno", 1) or 1, "", f"the file does not parse: {e.__class__.__name__}")]
+    scan = _PyScan(src, tree)
+    try:
+        scan.module_level()
+    except _Refuse as r:
+        return set(), [scan.stmt(r.node) + (r.why,)]
+    found = scan.classes()
+    return found, scan.reasons
 
 
 def python_tests(src):
-    """Names of the `test_*` methods that `unittest` discovery would really run.
-
-    Only a module whose top-level statements are imports, classes, functions,
-    docstrings, simple assignments, `sys.path` tweaks and a `__main__` guard is
-    counted; a module-level `raise`, `try`, `with`, loop, other call, `del`, a
-    `load_tests` or `setUpModule` of any form (def, assignment, import), or a
-    rebinding of `TestCase`, `unittest` or a test class name means it is not
-    counted. The last module-level binding of a class name wins. A counted class
-    derives from `unittest.TestCase` (imported from unittest), has no decorator, is
-    not skipped (decorator, `__unittest_skip__`, a `setUpClass` that raises
-    SkipTest), and counts only `test_*` methods whose last definition in the class
-    body is a plain function with no decorator, or only skip decorators of
-    `unittest` (which exclude it). Nothing in strings, comments or `if` blocks
-    counts, and a module-level `def test_x` is never collected."""
-    try:
-        tree = ast.parse(src)
-    except (SyntaxError, ValueError):
-        return set()
-    unittest_names, testcase_names, aliases = set(), set(), set()
-    reserved = {"load_tests", "setUpModule"}
-    bindings = {}  # module-level name -> ClassDef (or None once rebound otherwise)
-    for node in tree.body:
-        if isinstance(node, ast.Import):
-            for a in node.names:
-                bound = a.asname or a.name.split(".")[0]
-                if a.name == "unittest":
-                    unittest_names.add(bound)
-                bindings[bound] = None
-        elif isinstance(node, ast.ImportFrom):
-            for a in node.names:
-                bound = a.asname or a.name
-                if node.module == "unittest" and node.level == 0 and a.name in _TESTCASE_NAMES:
-                    testcase_names.add(bound)
-                if bound in reserved:
-                    return set()
-                bindings[bound] = None
-        elif isinstance(node, ast.ClassDef):
-            bindings[node.name] = node
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            if node.name in reserved:
-                return set()
-            if node.name == "setUpModule" or (node.name in reserved):
-                return set()
-            bindings[node.name] = None
-        elif isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for t in targets:
-                if not isinstance(t, ast.Name):
-                    return set()  # attribute or item assignment can rebind a method
-                if t.id in reserved:
-                    return set()
-                bindings[t.id] = None
-            if isinstance(node, ast.Assign) and _is_skip_expr(node.value):
-                aliases |= {t.id for t in targets if isinstance(t, ast.Name)}
-        elif isinstance(node, ast.Expr) and ((isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)) or _is_sys_path_call(node)):
-            continue
-        elif _is_main_guard(node):
-            continue
-        else:
-            return set()  # raise, try, with, loops, del, other calls, ...
-    for name in list(unittest_names) + list(testcase_names):
-        if bindings.get(name, None) is not None:
-            return set()  # `TestCase = ...` or `class TestCase` shadows the import
-    # A later rebinding of an import name (unittest = something) is caught above for
-    # classes only; an Assign to `unittest` or `TestCase` after the import is final:
-    for node in tree.body:
-        if isinstance(node, (ast.Assign, ast.AnnAssign)):
-            for t in node.targets if isinstance(node, ast.Assign) else [node.target]:
-                if isinstance(t, ast.Name) and t.id in unittest_names | testcase_names:
-                    return set()
-
-    def is_base(b, local):
-        if isinstance(b, ast.Attribute):
-            return isinstance(b.value, ast.Name) and b.value.id in unittest_names and b.attr in _TESTCASE_NAMES
-        return isinstance(b, ast.Name) and (b.id in testcase_names or b.id in local)
-
-    def skipping(d):
-        return _is_skip_expr(d) or (isinstance(d, ast.Name) and d.id in aliases) \
-            or (isinstance(d, ast.Call) and isinstance(d.func, ast.Name) and d.func.id in aliases)
-
-    local_cases, skipped_cases, found = set(), set(), set()
-    for node in tree.body:  # in order, so a class can derive from an earlier one
-        if not isinstance(node, ast.ClassDef) or not any(is_base(b, local_cases) for b in node.bases):
-            continue
-        local_cases.add(node.name)
-        if node.decorator_list or any(isinstance(b, ast.Name) and b.id in skipped_cases for b in node.bases):
-            skipped_cases.add(node.name)  # unittest.skip is inherited; other decorators are not trusted
-            continue
-        if bindings.get(node.name) is not node:
-            continue  # a later binding of the same name replaced this class
-        defs, class_skipped = {}, False
-        for item in node.body:  # in order, so the last definition of a name wins
-            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if item.name in ("setUpClass", "setUp") and _mentions_skiptest(item) and item.name == "setUpClass":
-                    class_skipped = True
-                defs[item.name] = all(skipping(d) is False and False for d in item.decorator_list) or not item.decorator_list
-                if item.decorator_list and not any(skipping(d) for d in item.decorator_list):
-                    defs[item.name] = False  # an unrecognised decorator can change what runs
-                elif any(skipping(d) for d in item.decorator_list):
-                    defs[item.name] = False
-            elif isinstance(item, ast.Assign):
-                for t in item.targets:
-                    if isinstance(t, ast.Name):
-                        if t.id == "__unittest_skip__" and isinstance(item.value, ast.Constant) and item.value.value:
-                            class_skipped = True
-                        defs[t.id] = False  # reassigned: no longer the function
-            elif isinstance(item, ast.Delete):
-                for t in item.targets:
-                    if isinstance(t, ast.Name):
-                        defs.pop(t.id, None)
-        if class_skipped:
-            skipped_cases.add(node.name)
-            continue
-        found |= {n for n, ok in defs.items() if ok and n.startswith("test_")}
-    return found
+    return python_scan(src)[0]
 
 
 def harness_false_srcs(root, pkg):
@@ -532,14 +775,18 @@ class TestIndex:
 
     `cargo` is the parsed --rust-tests JSON, or None for the source fallback."""
 
-    def __init__(self, root, cargo=None):
+    def __init__(self, root, cargo=None, pylist=None):
         self.root = root
         self.cargo = cargo
+        self.pylist = pylist
+        self.refusals = []  # (file, line, statement, why): what was left out and why
         self.entries = []   # {"lang", "package", "src", "files", "name", "leaf", "ignored"}
         self._scans = {}
         if cargo is None:
             for rel in walk(root, ("crates", "firmware", "plugins", "fuzz"), (".rs",)):
                 info = self._scan(rel)
+                if info and info["tainted"]:
+                    self.refusals.append((rel, 0, "", info["tainted"]))
                 for _, name, ign in (info["tests"] if info else []):
                     self._add("rust", self._fallback_package(rel), rel, {rel}, name, name, ign)
         else:
@@ -566,10 +813,18 @@ class TestIndex:
             if "/" in rel[len("ci/"):] or not (base.startswith("test_") and base.endswith(".py")):
                 continue
             try:
-                names = python_tests(read(root, rel))
+                names, reasons = python_scan(read(root, rel))
             except (OSError, UnicodeDecodeError):
                 continue
+            for line, text, why in reasons:
+                self.refusals.append((rel, line, text, why))
             for n in names:
+                if pylist is not None:
+                    outcomes = pylist.get((rel, n))
+                    if not outcomes or outcomes != {"passed"}:
+                        got = ", ".join(sorted(outcomes)) if outcomes else "absent"
+                        self.refusals.append((rel, 0, n, f"the test run did not record it as passed ({got})"))
+                        continue
                 self._add("python", None, rel, {rel}, n, n, False)
 
     def _scan(self, rel):
@@ -594,6 +849,9 @@ class TestIndex:
             if info is None:
                 return
             out[rel] = {}
+            if info["tainted"]:
+                self.refusals.append((rel, 0, "", info["tainted"]))
+                return  # nothing in this file or below it is credited
             for inline, name, ign in info["tests"]:
                 out[rel]["::".join(modpath + inline + [name])] = ign
             for inline, name, attrs in info["mods"]:
@@ -659,7 +917,19 @@ class TestIndex:
         if ign:
             return [], f"'{ref}' only matches ignored tests"
         how = "cargo's list of runnable tests" if self.cargo is not None else "the source scan"
-        return [], f"no test matches '{ref}' in {how}"
+        if head is not None and head.endswith((".rs", ".py")):
+            why = [r for r in self.refusals if r[0] == head]
+            if not why and head.endswith(".rs"):  # a file below a refused one is never reached: name the refusal above it
+                why = [r for r in self.refusals if r[0].endswith(".rs") and pkg_dir(self.root, r[0]) == pkg_dir(self.root, head)]
+        elif head is not None:
+            why = [r for r in self.refusals if r[0].endswith(".rs") and self._fallback_package(r[0]) == head]
+        else:
+            why = []
+        note = ""
+        if why:
+            f, line, text, reason = why[0]
+            note = f"; left out: {f}" + (f":{line}" if line else "") + (f" `{text}`" if text else "") + f" ({reason})"
+        return [], f"no test matches '{ref}' in {how}{note}"
 
 
 def load_cargo_list(path):
@@ -676,6 +946,27 @@ def load_cargo_list(path):
     if not ok:
         raise Problem(f"--rust-tests {path} is not a non-empty list of tests from ci/rust_test_list.py")
     return data
+
+
+def load_py_list(path):
+    """Parse the JSON made by ci/py_test_list.py into {(file, test name): {outcomes}}.
+    Raises Problem if malformed."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError) as e:
+        raise Problem(f"--py-tests {path} cannot be read: {e}")
+    tests = data.get("tests") if isinstance(data, dict) else None
+    ok = isinstance(tests, list) and all(
+        isinstance(t, dict) and isinstance(t.get("file"), (str, type(None))) and isinstance(t.get("name"), (str, type(None)))
+        and isinstance(t.get("outcome"), str) for t in tests)
+    if not ok:
+        raise Problem(f"--py-tests {path} is not a list of test outcomes from ci/py_test_list.py")
+    out = {}
+    for t in tests:
+        if t["file"] and t["name"]:
+            out.setdefault((t["file"], t["name"]), set()).add(t["outcome"])
+    return out
 
 
 # ---------------------------------------------------------------- loading
@@ -956,13 +1247,13 @@ def load_hws_ids(root):
     return ids
 
 
-def run_check(root, cargo=None):
+def run_check(root, cargo=None, pylist=None):
     """Return (rows, errors). rows are dicts ready for the table. `cargo` is the
     parsed --rust-tests list; None means the labelled pure-source fallback."""
     errors = []
     comps = load_names(root, errors)
     recs = load_records(root, comps, errors)
-    index = TestIndex(root, cargo)
+    index = TestIndex(root, cargo, pylist)
     tags = find_tags(root)
     known = {r["id"]: r for r in recs}
     rows = []
@@ -1109,7 +1400,7 @@ def main(argv):
     bless = "--bless" in args
     args = [a for a in args if a != "--bless"]
     opts = {}
-    for flag in ("--rust-tests", "--commits"):
+    for flag in ("--rust-tests", "--py-tests", "--commits"):
         if flag in args:
             i = args.index(flag)
             if i + 1 >= len(args):
@@ -1143,7 +1434,17 @@ def main(argv):
     else:
         print("::warning::No --rust-tests list: using the pure-source fallback, which can still count tests that "
               "never compile or run. CI passes cargo's own list (ci/rust_test_list.py).")
-    rows, errors = run_check(root, cargo)
+    pylist = None
+    if "--py-tests" in opts:
+        try:
+            pylist = load_py_list(opts["--py-tests"])
+        except Problem as e:
+            print(f"::error::{e}")
+            return 1
+    else:
+        print("::warning::No --py-tests list: Python tests are counted from the static scan alone, which a test file "
+              "that rewrites unittest at import can fool. CI passes the outcomes of a real run (ci/py_test_list.py).")
+    rows, errors = run_check(root, cargo, pylist)
     if cmd == "check":
         errors += check_status_file(root, rows, bless)
     else:

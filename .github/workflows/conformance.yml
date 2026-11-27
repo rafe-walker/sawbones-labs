@@ -8,10 +8,11 @@ name: Design conformance
 # title, body or commit messages) while a requirement tracking #N is not built.
 # See CONTRIBUTING.md, "Design conformance".
 #
-# Rust tests are resolved against cargo's own list (`test-list` job), so a test
-# that never compiles or runs cannot count as built.
+# Rust tests are resolved against cargo's own list and Python tests against the
+# outcomes of a real `unittest discover` (both made by the `test-list` job), so a
+# test that never compiles, never runs or does not pass cannot count as built.
 #
-# For a PR the judge is the copy of ci/conformance.py (and ci/rust_test_list.py)
+# For a PR the judge is the copy of ci/conformance.py (and the two listers)
 # on the base branch, so a PR cannot edit the checker to pass itself. The PR copy
 # is used only while those files are not on the base branch yet, and that is
 # announced with a warning; any other failure to read the base copy fails the
@@ -64,10 +65,24 @@ jobs:
             cp ci/rust_test_list.py "${lister}"
           fi
           python3 -I "${lister}" "${RUNNER_TEMP}/rust-tests.json" --root "${GITHUB_WORKSPACE}"
+      - name: Run the Python tests and record each outcome with the base branch copy of the lister
+        run: |
+          lister="${RUNNER_TEMP}/py_test_list.py"
+          if [ -n "${BASE_REF}" ] && git cat-file -e "${BASE_REF}:ci/py_test_list.py" 2>/dev/null; then
+            git show "${BASE_REF}:ci/py_test_list.py" > "${lister}"
+          elif [ -n "${BASE_REF}" ]; then
+            echo "::warning::ci/py_test_list.py is not on the base branch yet; using the PR copy"
+            cp ci/py_test_list.py "${lister}"
+          else
+            cp ci/py_test_list.py "${lister}"
+          fi
+          python3 -I "${lister}" "${RUNNER_TEMP}/py-tests.json" --root "${GITHUB_WORKSPACE}"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: rust-test-list
-          path: ${{ runner.temp }}/rust-tests.json
+          name: test-lists
+          path: |
+            ${{ runner.temp }}/rust-tests.json
+            ${{ runner.temp }}/py-tests.json
           if-no-files-found: error
           retention-days: 7
 
@@ -85,7 +100,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: rust-test-list
+          name: test-lists
           path: ${{ runner.temp }}/list
       - name: Check the records with the base branch copy of the checker
         run: |
@@ -101,7 +116,8 @@ jobs:
           else
             cp ci/conformance.py "${judge}"
           fi
-          python3 -I "${judge}" --root "${GITHUB_WORKSPACE}" --rust-tests "${RUNNER_TEMP}/list/rust-tests.json"
+          python3 -I "${judge}" --root "${GITHUB_WORKSPACE}" --rust-tests "${RUNNER_TEMP}/list/rust-tests.json" \
+            --py-tests "${RUNNER_TEMP}/list/py-tests.json"
       - name: Unit-test the checker (PR code, after the judge has run)
         run: python3 -I -m unittest discover -s ci -p 'test_conformance.py' -v
 
@@ -118,7 +134,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: rust-test-list
+          name: test-lists
           path: ${{ runner.temp }}/list
       - name: Judge the closing keywords (title, body and commit messages) with the base branch copy of the checker
         env:
@@ -138,4 +154,5 @@ jobs:
           # GitHub also closes issues from commit messages that reach the base branch.
           git log --format=%B "${BASE_REF}..HEAD" > "${RUNNER_TEMP}/commits.txt"
           python3 -I "${judge}" --root "${GITHUB_WORKSPACE}" --rust-tests "${RUNNER_TEMP}/list/rust-tests.json" \
+            --py-tests "${RUNNER_TEMP}/list/py-tests.json" \
             --commits "${RUNNER_TEMP}/commits.txt" closure

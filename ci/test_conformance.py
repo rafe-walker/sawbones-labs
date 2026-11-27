@@ -7,6 +7,7 @@ runs it on the real tree.
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -338,7 +339,7 @@ class Feedback(Base):
         # PR text goes through env vars only, never into a run script.
         import re
         run_blocks = re.findall(r"run: \|\n((?: {10}.*\n|\n)+)", wf)
-        self.assertEqual(len(run_blocks), 4)
+        self.assertEqual(len(run_blocks), 5)
         for b in run_blocks:
             self.assertNotIn("github.event.pull_request", b)
 
@@ -662,6 +663,50 @@ fn cfg_attr_ignored() {}
         t = self.tree(recs=[self.rec("crates/tiny/src/x.rs::t")], extra=files, bless=False)
         self.assertEqual(t.run("--bless", "--rust-tests", cargo_list(os.path.join(t.d, "l.json"), [("tiny", lib, "x::t"), ("tiny", lib, "y::t")]))[0], 0)
 
+    def test_regression_271_module_declarations_survive_spacing_raw_names_and_inline_scopes(self):
+        # i: a space inside the visibility parens must not detach the attributes.
+        i = c.scan_rust('#[path = "real_i.rs"]\npub (crate) mod i;\n')
+        self.assertEqual((i["mods"], i["tainted"]), ([], None))
+        # j: a raw identifier is the same module name as the plain one (duplicate: refused).
+        j = c.scan_rust('#[cfg(feature = "never")]\nmod j;\n#[cfg(not(feature = "never"))]\n#[path = "real_j.rs"]\nmod r#j;\n')
+        self.assertEqual(j["mods"], [])
+        # k: #[path] on an inline module redirects its children: refuse the module and what is inside it.
+        k = c.scan_rust('#[path = "elsewhere"]\nmod k {\n    mod kid;\n    #[test]\n    fn t() {}\n}\n')
+        self.assertEqual((k["mods"], k["tests"]), ([], []))
+        # l: a cfg'd-out `mod l;` next to a live inline `mod l {}` is a duplicate in the parent scope.
+        l = c.scan_rust('#[cfg(feature = "never")]\nmod l;\n#[cfg(not(feature = "never"))]\nmod l {\n    #[test]\n    fn t() {}\n}\n')
+        self.assertEqual((l["mods"], l["tests"]), ([], []))
+        two = c.scan_rust("mod m {\n    #[test]\n    fn a() {}\n}\nmod m {\n    #[test]\n    fn b() {}\n}\n")
+        self.assertEqual(two["tests"], [])
+        # What stays counted: spacing and raw names are understood, and an inline module is keyed in its parent.
+        ok = c.scan_rust("pub (crate) mod z;\nmod r#raw;\nmod ok {\n    #[test]\n    fn t() {}\n    mod deep;\n}\n")
+        self.assertEqual([(m[0], m[1]) for m in ok["mods"]], [([], "z"), ([], "raw"), (["ok"], "deep")])
+        self.assertEqual(ok["tests"], [(["ok"], "t", False)])
+        sp = c.scan_rust("pub  ( in crate::x )  fn_not_here;\n#[test]\npub (crate) fn spaced_vis() {}\n")
+        self.assertEqual([t[1] for t in sp["tests"]], ["spaced_vis"])
+
+    def test_regression_271_a_file_with_an_unparsed_mod_or_an_include_credits_nothing(self):
+        for name, src in (("mod without a space after the visibility", "pub(crate)mod q;\n#[test]\nfn t() {}\n"),
+                          ("odd mod item", "mod 'x;\n#[test]\nfn t() {}\n"),
+                          ("include!", 'include!("x.rs");\n#[test]\nfn t() {}\n'),
+                          ("include! with spacing", 'include ! ("x.rs");\n#[test]\nfn t() {}\n')):
+            info = c.scan_rust(src)
+            self.assertTrue(info["tainted"], name)
+            self.assertEqual((info["tests"], info["mods"]), ([], []), name)
+        # A `mod` or `include!` inside a comment, a string or a macro_rules body is not code.
+        for src in ('// mod x;\n// include!("a");\n#[test]\nfn t() {}\n', 'const S: &str = "mod x; include!(a)";\n#[test]\nfn t() {}\n',
+                    "macro_rules! m { () => { mod x; include!(\"a\"); } }\n#[test]\nfn t() {}\n"):
+            info = c.scan_rust(src)
+            self.assertEqual((info["tainted"], len(info["tests"])), (None, 1), src)
+        # End to end: a tainted file and its `mod` children earn no credit and the error says why.
+        lib = "crates/tiny/src/lib.rs"
+        files = {lib: 'mod child;\ninclude!("x.rs");\n#[test]\nfn own() {}\n', "crates/tiny/src/child.rs": "#[test]\nfn kid() {}\n"}
+        for ref, full in ((f"{lib}::own", "own"), ("crates/tiny/src/child.rs::kid", "child::kid")):
+            t = self.tree(recs=[self.rec(ref)], extra=files, bless=False)
+            rc, out = t.run("--bless", "--rust-tests", cargo_list(os.path.join(t.d, "l.json"), [("tiny", lib, full)]))
+            self.assertNotEqual(rc, 0, ref)
+            self.assertIn("include!", out, ref)
+
     def test_regression_271_spaced_and_macro_added_ignores_are_ignores(self):
         need_cargo(self)
         for src in ("# [ignore]\n#[test]\nfn x() {}\n", "#[test]\n#  [ ignore ]\nfn x() {}\n", "# [test]\n# [ignore = \"r\"]\nfn x() {}\n"):
@@ -708,17 +753,150 @@ fn cfg_attr_ignored() {}
             "    @off\n    def test_alias_skipped(self): pass\n"
             "    def test_plain(self): pass\n"
             "class B(unittest.TestCase):\n    __unittest_skip__ = True\n    def test_in_flagged_class(self): pass\n"
-            "@some.decorator\nclass C(unittest.TestCase):\n    def test_in_decorated_class(self): pass\n"
             "class D(ut.TestCase):\n    def test_via_alias_import(self): pass\n"
             "class E(TC):\n    def test_via_from_import(self): pass\n"
             "class F(A):\n    def test_subclass_of_a_counted_class(self): pass\n"
         )
         self.assertEqual(c.python_tests(src), {"test_revived", "test_plain", "test_via_alias_import", "test_via_from_import",
                                                "test_subclass_of_a_counted_class"})
+        # A decorator other than a unittest skip runs code at import: the module is not counted.
+        self.assertEqual(c.python_tests("import unittest\n@some.decorator\nclass C(unittest.TestCase):\n    def test_x(self): pass\n"), set())
+        self.assertEqual(c.python_tests("import unittest\nclass C(unittest.TestCase):\n    @some.decorator\n    def test_x(self): pass\n"), set())
         self.assertEqual(c.python_tests("import unittest\ndef load_tests(l, t, p): return t\nclass A(unittest.TestCase):\n    def test_x(self): pass\n"), set())
         # TestCase must come from unittest, not from anywhere named TestCase.
         self.assertEqual(c.python_tests("from other import TestCase\nclass A(TestCase):\n    def test_x(self): pass\n"), set())
         self.assertEqual(c.python_tests("class A(other.TestCase):\n    def test_x(self): pass\n"), set())
+
+    HOSTILE_PY = {
+        "p1 guard that is not the main guard": "import unittest\nclass T(unittest.TestCase):\n    def test_x(self): pass\n"
+                                               "if __name__ != '__main__':\n    raise unittest.SkipTest('x')\n",
+        "p2 side effect in sys.path args": "import sys\nimport unittest\nsys.path.insert(0, exec('raise unittest.SkipTest()'))\n"
+                                           "class T(unittest.TestCase):\n    def test_x(self): pass\n",
+        "p3 setattr on TestCase.run": "import unittest\n_ = setattr(unittest.TestCase, 'run', lambda self, result=None: None)\n"
+                                      "class T(unittest.TestCase):\n    def test_x(self): pass\n",
+        "p4 setattr replaces TestCase": "import unittest\n_ = setattr(unittest, 'TestCase', type('TestCase', (), {}))\n"
+                                        "from unittest import TestCase\nclass T(TestCase):\n    def test_x(self): pass\n",
+        "p5 run overridden": "import unittest\nclass T(unittest.TestCase):\n    def run(self, result=None):\n        return None\n"
+                             "    def test_x(self): pass\n",
+        "p6 setUp skips": "import unittest\nclass T(unittest.TestCase):\n    def setUp(self):\n        self.skipTest('x')\n"
+                          "    def test_x(self): pass\n",
+        "p7 setUpClass hides a skip": "import unittest\nclass T(unittest.TestCase):\n    @classmethod\n    def setUpClass(cls):\n"
+                                      "        raise getattr(unittest, 'Skip' + 'Test')('x')\n    def test_x(self): pass\n",
+        "p8 metaclass strips tests": "import unittest\nclass Strip(type(unittest.TestCase)):\n    pass\n"
+                                     "class T(unittest.TestCase, metaclass=Strip):\n    def test_x(self): pass\n",
+        "metaclass keyword alone": "import unittest\nclass T(unittest.TestCase, metaclass=type):\n    def test_x(self): pass\n",
+        "main guard with arguments": "import unittest\nclass T(unittest.TestCase):\n    def test_x(self): pass\n"
+                                     "if __name__ == '__main__':\n    unittest.main(verbosity=2)\n",
+        "main guard with an else": "import unittest\nclass T(unittest.TestCase):\n    def test_x(self): pass\n"
+                                   "if __name__ == '__main__':\n    unittest.main()\nelse:\n    pass\n",
+        "main guard with two statements": "import unittest\nclass T(unittest.TestCase):\n    def test_x(self): pass\n"
+                                          "if __name__ == '__main__':\n    unittest.main()\n    print('x')\n",
+        "spec from a path outside ci": "import importlib.util\nimport unittest\nspec = importlib.util.spec_from_file_location('x', '/tmp/evil.py')\n"
+                                       "m = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(m)\n"
+                                       "class T(unittest.TestCase):\n    def test_x(self): pass\n",
+        "exec_module of something else": "import unittest\nimport evil\nevil.spec.loader.exec_module(evil)\n"
+                                         "class T(unittest.TestCase):\n    def test_x(self): pass\n",
+        "default argument runs code": "import unittest\ndef f(x=exec('pass')): pass\nclass T(unittest.TestCase):\n    def test_x(self): pass\n",
+        "from import star": "import unittest\nfrom helpers import *\nclass T(unittest.TestCase):\n    def test_x(self): pass\n",
+    }
+
+    def test_regression_271_python_modules_are_fail_closed(self):
+        for name, src in self.HOSTILE_PY.items():
+            names, reasons = c.python_scan(src)
+            self.assertEqual(names, set(), name)
+            self.assertTrue(reasons and reasons[0][0] >= 1 and reasons[0][2], name)  # a line number and a reason
+        ok = ("import os\nimport sys\nimport unittest\nfrom pathlib import Path\nimport importlib.util\n"
+              "HERE = os.path.dirname(os.path.abspath(__file__))\nsys.path.insert(0, HERE)\nGUARD = Path(__file__).with_name('g.sh').resolve()\n"
+              "spec = importlib.util.spec_from_file_location('g', Path(__file__).with_name('g.py'))\n"
+              "g = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(g)\n"
+              "class T(unittest.TestCase):\n    def test_x(self): pass\n"
+              "if __name__ == '__main__':\n    unittest.main()\n")
+        self.assertEqual(c.python_scan(ok), ({"test_x"}, []))
+
+    def test_regression_271_python_classes_that_change_what_runs_are_not_counted(self):
+        for hook in ("run", "__call__", "debug", "setUp", "setUpClass", "asyncSetUp", "__init__", "__new__", "__init_subclass__", "tearDown"):
+            src = (f"import unittest\nclass Bad(unittest.TestCase):\n    def {hook}(self, *a, **k): pass\n    def test_hidden(self): pass\n"
+                   "class Sub(Bad):\n    def test_inherits_the_hook(self): pass\n"
+                   "class Good(unittest.TestCase):\n    def test_fine(self): pass\n")
+            names, reasons = c.python_scan(src)
+            self.assertEqual(names, {"test_fine"}, hook)
+            self.assertTrue(any(line == 3 and hook in text for line, text, _ in reasons), (hook, reasons))
+        names, reasons = c.python_scan("import unittest\nclass T(unittest.TestCase):\n    run = None\n    def test_x(self): pass\n")
+        self.assertEqual(names, set())
+        self.assertEqual(reasons[0][:2], (3, "run = None"))
+
+    def test_regression_271_the_real_ci_test_files_count(self):
+        # The importlib idiom in these two files must not make the whole module uncountable.
+        for rel in ("ci/test_check_standards.py", "ci/test_check_typosquat.py", "ci/test_no_build_artifacts.py",
+                    "ci/test_regression_guard.py", "ci/test_conformance.py"):
+            with open(os.path.join(ROOT, rel), encoding="utf-8") as fh:
+                text = fh.read()
+            names, reasons = c.python_scan(text)
+            self.assertEqual((len(names), reasons), (len(re.findall(r"^    def test_\w+", text, re.M)), []), rel)
+
+    def test_regression_271_the_runtime_list_must_agree_with_the_static_scan(self):
+        body = ("import unittest\nclass T(unittest.TestCase):\n    def test_passes(self): pass\n"
+                "    def test_fails(self): raise AssertionError('x')\n    def test_skips_at_runtime(self): self.skipTest('x')\n"
+                "    def test_errors(self): raise RuntimeError('x')\n")
+        hostile = self.HOSTILE_PY["p3 setattr on TestCase.run"]
+        t = self.tree(recs=[self.rec("ci/test_live.py::test_passes")], bless=False,
+                      extra={"ci/test_live.py": body})
+
+        def listed(out):
+            r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "py_test_list.py"), out, "--root", t.d], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            with open(out) as fh:
+                return {(x["file"], x["name"]): x["outcome"] for x in json.load(fh)["tests"]}
+
+        out = os.path.join(t.d, "py.json")
+        rows = listed(out)
+        self.assertEqual(rows[("ci/test_live.py", "test_passes")], "passed")
+        self.assertEqual(rows[("ci/test_live.py", "test_fails")], "failed")
+        self.assertEqual(rows[("ci/test_live.py", "test_skips_at_runtime")], "skipped")
+        self.assertEqual(rows[("ci/test_live.py", "test_errors")], "errored")
+        for ref, ok in (("ci/test_live.py::test_passes", True), ("ci/test_live.py::test_fails", False),
+                        ("ci/test_live.py::test_skips_at_runtime", False), ("ci/test_live.py::test_errors", False)):
+            t.write("design/requirements/cortex.toml", toml_of([record(acc=[("a1", "test", ref, None)],
+                    sha=c.unit_hash(c.source_unit(DESIGN, "The latch starts tripped")))]))
+            rc, text = t.run("--bless", "--py-tests", out)
+            self.assertEqual(rc == 0, ok, (ref, text))
+        # P3: one file replaces TestCase.run; the whole real run then reports no passes. The static
+        # scan refuses that file anyway, but the other file's tests would still have counted without the list.
+        t.write("ci/test_dead.py", hostile)
+        dead_out = os.path.join(t.d, "py_dead.json")
+        self.assertNotIn("passed", set(listed(dead_out).values()))
+        t.write("design/requirements/cortex.toml", toml_of([record(acc=[("a1", "test", "ci/test_live.py::test_passes", None)],
+                sha=c.unit_hash(c.source_unit(DESIGN, "The latch starts tripped")))]))
+        rc, text = t.run("--bless", "--py-tests", dead_out)
+        self.assertNotEqual(rc, 0, text)
+        self.assertIn("did not record it as passed", text)
+        self.assertEqual(t.run("--bless")[0], 0)  # the static scan alone is fooled: that is why the list exists
+        # Without the list the static scan still counts what it can see, and says so.
+        t.write("design/requirements/cortex.toml", toml_of([record(acc=[("a1", "test", "ci/test_live.py::test_fails", None)],
+                sha=c.unit_hash(c.source_unit(DESIGN, "The latch starts tripped")))]))
+        rc, text = t.run("--bless")
+        self.assertEqual(rc, 0, text)
+        self.assertIn("No --py-tests list", text)
+        # A forged list cannot revive what the static scan refuses, and a malformed one is a clean error.
+        forged = os.path.join(t.d, "forged.json")
+        with open(forged, "w") as fh:
+            json.dump({"version": 1, "tests": [{"id": "x", "file": "ci/test_dead.py", "class": "T", "name": "test_x", "outcome": "passed"}]}, fh)
+        t.write("design/requirements/cortex.toml", toml_of([record(acc=[("a1", "test", "ci/test_dead.py::test_x", None)],
+                sha=c.unit_hash(c.source_unit(DESIGN, "The latch starts tripped")))]))
+        self.assertNotEqual(t.run("--bless", "--py-tests", forged)[0], 0)
+        with open(forged, "w") as fh:
+            fh.write('{"tests": "nope"}')
+        rc, text = t.run("--bless", "--py-tests", forged)
+        self.assertNotEqual(rc, 0)
+        self.assertNotIn("Traceback", text)
+
+    def test_regression_271_the_workflow_builds_and_uses_the_python_list(self):
+        with open(os.path.join(ROOT, ".github/workflows/conformance.yml")) as fh:
+            wf = fh.read()
+        self.assertIn("py_test_list.py", wf)
+        self.assertEqual(wf.count("--py-tests"), 2)  # the judge and the closure gate
+        self.assertEqual(wf.count("--rust-tests"), 2)
+        self.assertIn("py-tests.json", wf)
 
     def test_regression_271_directory_form_refs_are_refused(self):
         for ref in ("crates/sup::it_starts_tripped", "crates/sup/tests::it_starts_tripped", "crates/sup/::it_starts_tripped"):
@@ -781,7 +959,6 @@ fn cfg_attr_ignored() {}
             "class T(unittest.TestCase):\n    def test_old(self): pass\n"
             "class T(unittest.TestCase):\n    def test_new(self): pass\n"
             "class D(unittest.TestCase):\n"
-            "    @some.decorator\n    def test_wrapped(self): pass\n"
             "    def test_plain(self): pass\n"
             "    def test_twice(self): pass\n"
             "    test_twice = None\n"

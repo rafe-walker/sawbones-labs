@@ -77,7 +77,7 @@ level = "MUST"
 title = "Only tests that compile, are not ignored and are written in reachable source count as built; a hostile PR can still forge the list"
 source = "CONTRIBUTING.md"
 anchor = "**Real tests only.**"
-source_sha = "216e0d797b1ae568"
+source_sha = "67e822238d6c00c8"
 tracks = [269, 271]
 acceptance = [
   { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_271_source_fallback_drops_comments_never_cfg_macros_and_cfg_attr_ignore" },
@@ -103,6 +103,13 @@ acceptance = [
   { id = "a21", kind = "test", ref = "ci/test_conformance.py::test_regression_271_dead_or_ambiguous_module_declarations_earn_no_credit" },
   { id = "a22", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_modules_with_side_effects_are_not_counted" },
   { id = "a23", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_last_binding_and_decorators_decide" },
+  { id = "a24", kind = "test", ref = "ci/test_conformance.py::test_regression_271_module_declarations_survive_spacing_raw_names_and_inline_scopes" },
+  { id = "a25", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_file_with_an_unparsed_mod_or_an_include_credits_nothing" },
+  { id = "a26", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_modules_are_fail_closed" },
+  { id = "a27", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_classes_that_change_what_runs_are_not_counted" },
+  { id = "a28", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_real_ci_test_files_count" },
+  { id = "a29", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_runtime_list_must_agree_with_the_static_scan" },
+  { id = "a30", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_workflow_builds_and_uses_the_python_list" },
 ]
 
 [[requirement]]
