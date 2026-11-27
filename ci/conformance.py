@@ -286,13 +286,17 @@ def python_tests(src):
     except (SyntaxError, ValueError):
         return set()
     testcase = {"TestCase", "IsolatedAsyncioTestCase"}
-    found = set()
+    skipped, found = set(), set()
     for node in tree.body:
         if not isinstance(node, ast.ClassDef):
             continue
         if not any(_base_name(b) in testcase for b in node.bases):
             continue
         testcase.add(node.name)  # later classes may derive from this one
+        if any(_decorator_name(d) in _SKIP_DECORATORS for d in node.decorator_list) \
+                or any(_base_name(b) in skipped for b in node.bases):
+            skipped.add(node.name)  # unittest.skip on a class is inherited by its subclasses
+            continue
         for item in node.body:
             if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name.startswith("test_"):
                 if not any(_decorator_name(d) in _SKIP_DECORATORS for d in item.decorator_list):
@@ -336,8 +340,21 @@ class TestIndex:
             for rel, names in self.decl_ign.items():
                 self._add("rust", self._fallback_package(rel), pkg_dir(root, rel), rel, names, True)
         else:
+            # Cargo's list is the authority on what compiles and runs, but a test binary
+            # (harness = false, build.rs, a proc macro) can print any --list it likes. So
+            # an entry also needs a `#[test] fn <name>` written in its package's source,
+            # and a test the source marks ignored is ignored whatever cargo's list says.
+            pkg_live, pkg_ign = {}, {}
+            for rel, names in self.decl.items():
+                pkg_live.setdefault(pkg_dir(root, rel), set()).update(names)
+            for rel, names in self.decl_ign.items():
+                pkg_ign.setdefault(pkg_dir(root, rel), set()).update(names)
             for t in cargo["tests"]:
-                self._add("rust", t["package"], pkg_dir(root, t["src"]), t["src"], [t["name"]], bool(t["ignored"]))
+                d = pkg_dir(root, t["src"])
+                leaf = t["name"].rsplit("::", 1)[-1]
+                if leaf not in pkg_live.get(d, set()) | pkg_ign.get(d, set()):
+                    continue
+                self._add("rust", t["package"], d, t["src"], [t["name"]], bool(t["ignored"]) or leaf in pkg_ign.get(d, set()))
         # Only files `unittest discover -s ci -p 'test_*.py'` collects.
         for rel in walk(root, ("ci",), (".py",)):
             base = os.path.basename(rel)
@@ -369,14 +386,29 @@ class TestIndex:
         # in the same package whose source declares a test of that name.
         if pkg_dir(self.root, f) != e["dir"]:
             return False
-        names = self.decl.get(f, set()) | self.decl_ign.get(f, set())
-        return e["leaf"] in names
+        if e["leaf"] not in self.decl.get(f, set()) | self.decl_ign.get(f, set()):
+            return False
+        # A dead file must not borrow a live test's name: the test's module path has to
+        # be the one `mod` declarations would give this file under the binary's root.
+        base = os.path.dirname(e["src"])
+        rel = os.path.relpath(f, base) if f.startswith(base + "/") or not base else None
+        if rel is None:
+            return False
+        parts = rel[:-3].split("/") if rel.endswith(".rs") else []
+        if parts and parts[-1] == "mod":
+            parts.pop()
+        stem = os.path.basename(e["src"])[:-3]
+        paths = [parts] + ([parts[1:]] if parts and parts[0] == stem else [])  # tests/x.rs owns tests/x/*.rs
+        return any(p and e["name"].startswith("::".join(p) + "::") for p in paths)
 
     def resolve(self, ref):
         """Return (matching test names, problem or None) for `path::pattern`,
         `crate::pattern` or a bare `pattern`."""
-        head, _, pattern = ref.rpartition("::")
-        head = head or None
+        head, sep, pattern = ref.partition("::")  # `crate::module::name` is crate + a module path
+        if not sep:
+            head, pattern = None, ref
+        elif not head:
+            head = None
         if not pattern or pattern != pattern.strip() or re.search(r"\s", pattern):
             return [], f"'{ref}' is not a test name or glob"
         if pattern[0] in GLOB_CHARS:
@@ -400,8 +432,9 @@ class TestIndex:
         hits = [e for e in self.entries if selected(e) and (fnmatch.fnmatchcase(e["leaf"], pattern) or fnmatch.fnmatchcase(e["name"], pattern))]
         live = [e for e in hits if not e["ignored"]]
         ign = [e for e in hits if e["ignored"]]
-        if head is None and len({(e["lang"], e["package"], e["leaf"]) for e in hits}) > 1:
-            return [], f"'{ref}' is not unique (matches {len(hits)} tests); qualify it with a crate or file"
+        distinct = {(e["lang"], e["package"], e["src"], e["name"]) for e in hits}
+        if not is_glob and len(distinct) > 1:
+            return [], f"'{ref}' matches {len(distinct)} different tests; use a longer name (`module::name`) or qualify it with a crate or file"
         if is_glob and ign:
             return [], f"'{ref}': the glob also matches the ignored test '{ign[0]['name']}'"
         if live:
@@ -436,6 +469,8 @@ def load_toml(root, rel):
         return tomllib.loads(read(root, rel))
     except FileNotFoundError:
         raise Problem(f"{rel} is missing")
+    except OSError as e:
+        raise Problem(f"{rel} cannot be read: {e}")
     except (tomllib.TOMLDecodeError, UnicodeDecodeError) as e:
         raise Problem(f"{rel} does not parse: {e}")
 
@@ -475,8 +510,13 @@ def load_names(root, errors):
         for crate in c.get("crates", []) if isinstance(c.get("crates"), list) else []:
             if not os.path.isdir(os.path.join(root, "crates", crate)):
                 errors.append(f"{NAMES}: component '{key}' names crate '{crate}' which is not in crates/")
-    if os.path.exists(os.path.join(root, NAMES_DOC)):
-        doc = read(root, NAMES_DOC)
+    doc = None
+    if repo_file(root, NAMES_DOC):
+        try:
+            doc = read(root, NAMES_DOC)
+        except (OSError, UnicodeDecodeError):
+            doc = None
+    if doc is not None:
         for key, c in comps.items():
             if isinstance(c.get("name"), str) and c["name"] not in doc:
                 errors.append(f"{NAMES_DOC} does not mention '{c['name']}' ({key})")
@@ -803,10 +843,8 @@ def check_status_file(root, rows, bless):
         return []
     try:
         current = read(root, STATUS_FILE)
-    except FileNotFoundError:
-        current = None
-    except UnicodeDecodeError:
-        current = ""
+    except (OSError, UnicodeDecodeError):
+        current = None  # missing, a directory or unreadable: stale either way
     if current != want:
         return [f"{STATUS_FILE} is stale or edited by hand: run `python3 ci/conformance.py --bless`"]
     return []

@@ -87,8 +87,6 @@ jobs:
         with:
           name: rust-test-list
           path: ${{ runner.temp }}/list
-      - name: Unit-test the checker
-        run: python3 -I -m unittest discover -s ci -p 'test_conformance.py' -v
       - name: Check the records with the base branch copy of the checker
         run: |
           judge="${RUNNER_TEMP}/conformance.py"
@@ -104,6 +102,8 @@ jobs:
             cp ci/conformance.py "${judge}"
           fi
           python3 -I "${judge}" --root "${GITHUB_WORKSPACE}" --rust-tests "${RUNNER_TEMP}/list/rust-tests.json"
+      - name: Unit-test the checker (PR code, after the judge has run)
+        run: python3 -I -m unittest discover -s ci -p 'test_conformance.py' -v
 
   closure-gate:
     name: closing an issue needs its requirements built

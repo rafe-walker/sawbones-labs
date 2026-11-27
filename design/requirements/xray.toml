@@ -51,6 +51,7 @@ acceptance = [
   { id = "a8", kind = "test", ref = "ci/test_conformance.py::test_regression_271_file_kind_wants_a_regular_file_inside_the_repo" },
   { id = "a9", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_source_outside_the_repo_is_refused" },
   { id = "a10", kind = "test", ref = "ci/test_conformance.py::test_hws_ids_are_validated_against_the_standard" },
+  { id = "a11", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_directory_where_a_file_belongs_is_a_clean_error" },
 ]
 
 [[requirement]]
@@ -87,6 +88,11 @@ acceptance = [
   { id = "a7", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_tests_are_what_unittest_runs" },
   { id = "a8", kind = "test", ref = "ci/test_conformance.py::test_regression_271_python_refs_resolve_only_in_ci_test_files" },
   { id = "a9", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_malformed_cargo_list_fails_cleanly" },
+  { id = "a10", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_dead_file_cannot_borrow_a_live_tests_name" },
+  { id = "a11", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_non_glob_ref_must_match_exactly_one_test" },
+  { id = "a12", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_forged_test_list_cannot_add_tests_or_clear_ignores" },
+  { id = "a13", kind = "test", ref = "ci/test_conformance.py::test_regression_271_examples_and_benches_are_not_listed" },
+  { id = "a14", kind = "test", ref = "ci/test_conformance.py::test_regression_271_class_level_skips_are_honoured" },
 ]
 
 [[requirement]]
@@ -121,6 +127,7 @@ acceptance = [
   { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_the_workflow_judges_from_the_base_branch_and_holds_no_privilege" },
   { id = "a2", kind = "file", ref = ".github/workflows/conformance.yml" },
   { id = "a3", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_judge_fails_closed_once_it_is_on_the_base_branch" },
+  { id = "a4", kind = "test", ref = "ci/test_conformance.py::test_regression_271_the_unit_tests_run_after_the_judge" },
 ]
 
 [[requirement]]

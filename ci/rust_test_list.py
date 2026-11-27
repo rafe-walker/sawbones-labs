@@ -45,7 +45,9 @@ def main(argv):
     if len(args) != 1:
         print(__doc__)
         return 2
-    cmd = ["cargo", "test", "--workspace", "--all-targets", "--no-run", "--message-format=json"]
+    # Exactly what ci.yml runs (`cargo test --workspace --locked`): no --all-targets, so
+    # examples and benches, which that job never runs, are not listed.
+    cmd = ["cargo", "test", "--workspace", "--no-run", "--message-format=json"]
     if locked:
         cmd.append("--locked")
     r = subprocess.run(cmd, cwd=root, capture_output=True, text=True)

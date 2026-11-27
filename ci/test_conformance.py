@@ -73,6 +73,7 @@ class Tree:
         self.write("docs/D.md", design)
         self.write("docs/NAMES.md", "C.O.R.T.E.X. is the supervisor.\n")
         self.write("design/names.toml", names)
+        self.write("crates/sup/Cargo.toml", '[package]\nname = "sup"\n')
         self.write("crates/sup/tests/t.rs", rust)
         for path, text in (extra or {}).items():
             self.write(path, text)
@@ -416,7 +417,8 @@ fn cfg_attr_ignored() {}
         for ref, ok in (("sup::it_starts_tripped", True), ("other::it_starts_tripped", True), ("nope::it_starts_tripped", False),
                         ("crates/sup/tests/t.rs::it_starts_tripped", True), ("crates/other/tests/t.rs::it_starts_tripped", False),
                         ("it_starts_tripped", False)):  # bare and not unique across crates
-            t = self.tree(recs=[self.rec(ref)], bless=False)
+            t = self.tree(recs=[self.rec(ref)], bless=False,
+                          extra={"crates/other/Cargo.toml": '[package]\nname = "other"\n', "crates/other/tests/o.rs": RUST})
             lst = cargo_list(os.path.join(t.d, "l.json"), lst_tests)
             rc, out = t.run("--bless", "--rust-tests", lst)
             self.assertEqual(rc == 0, ok, (ref, out))
@@ -430,16 +432,17 @@ fn cfg_attr_ignored() {}
         tests = [("sup", "crates/sup/tests/t.rs", "regression_9_a"), ("sup", "crates/sup/tests/t.rs", "regression_9_b", True)]
         cases = (("sup::*", "literal prefix"), ("sup::?egression_9_a", "literal prefix"), ("sup::[r]egression_9_a", "literal prefix"),
                  ("regression_9_*", "qualified"), ("sup::regression_9_*", "ignored test"))
+        fixture = RUST + "\n#[test]\n#[ignore]\nfn regression_9_b() {}\n"
         for ref, why in cases:
-            t = self.tree(recs=[self.rec(ref)], bless=False)
+            t = self.tree(recs=[self.rec(ref)], bless=False, rust=fixture)
             lst = cargo_list(os.path.join(t.d, "l.json"), tests)
             rc, out = t.run("--bless", "--rust-tests", lst)
             self.assertNotEqual(rc, 0, ref)
             self.assertIn(why, out, ref)
             # The same rules hold for the source fallback.
             if why != "ignored test":
-                self.assertNotEqual(self.tree(recs=[self.rec(ref)], bless=False).run("--bless")[0], 0, ref)
-        t = self.tree(recs=[self.rec("sup::regression_9_a*")], bless=False)
+                self.assertNotEqual(self.tree(recs=[self.rec(ref)], bless=False, rust=fixture).run("--bless")[0], 0, ref)
+        t = self.tree(recs=[self.rec("sup::regression_9_a*")], bless=False, rust=fixture)
         lst = cargo_list(os.path.join(t.d, "l.json"), tests[:1])
         self.assertEqual(t.run("--bless", "--rust-tests", lst)[0], 0)
 
@@ -477,6 +480,89 @@ fn cfg_attr_ignored() {}
             t.write("design/requirements/cortex.toml", toml_of([record(acc=[("a1", "test", "tiny::" + ref, None)], sha=c.unit_hash(c.source_unit(DESIGN, "The latch starts tripped")))]))
             rc, out = t.run("--bless", "--rust-tests", lst)
             self.assertEqual(rc == 0, ref == "real_test", (ref, out))
+
+    def test_regression_271_a_dead_file_cannot_borrow_a_live_tests_name(self):
+        lib = "#[test]\nfn shared() {}\n"
+        files = {"crates/tiny/Cargo.toml": '[package]\nname = "tiny"\n', "crates/tiny/src/lib.rs": lib,
+                 "crates/tiny/src/dead.rs": lib, "crates/tiny/src/live.rs": "#[test]\nfn in_live_mod() {}\n",
+                 "crates/tiny/src/sub/mod.rs": "#[test]\nfn in_sub_mod() {}\n"}
+        tests = [("tiny", "crates/tiny/src/lib.rs", "shared"), ("tiny", "crates/tiny/src/lib.rs", "live::in_live_mod"),
+                 ("tiny", "crates/tiny/src/lib.rs", "sub::in_sub_mod")]
+        for ref, ok in (("crates/tiny/src/lib.rs::shared", True), ("crates/tiny/src/dead.rs::shared", False),
+                        ("crates/tiny/src/live.rs::in_live_mod", True), ("crates/tiny/src/sub/mod.rs::in_sub_mod", True),
+                        ("crates/tiny/src/dead.rs::in_live_mod", False), ("crates/tiny/src/live.rs::shared", False)):
+            t = self.tree(recs=[self.rec(ref)], extra=files, bless=False)
+            lst = cargo_list(os.path.join(t.d, "l.json"), tests)
+            rc, out = t.run("--bless", "--rust-tests", lst)
+            self.assertEqual(rc == 0, ok, (ref, out))
+
+    def test_regression_271_a_non_glob_ref_must_match_exactly_one_test(self):
+        src = "mod a {\n#[test]\nfn dup() {}\n}\nmod b {\n#[test]\nfn dup() {}\n}\n"
+        files = {"crates/tiny/Cargo.toml": '[package]\nname = "tiny"\n', "crates/tiny/src/lib.rs": src}
+        tests = [("tiny", "crates/tiny/src/lib.rs", "a::dup"), ("tiny", "crates/tiny/src/lib.rs", "b::dup")]
+        for ref, ok in (("tiny::dup", False), ("crates/tiny/src/lib.rs::dup", False), ("tiny::a::dup", True), ("tiny::b::dup", True)):
+            t = self.tree(recs=[self.rec(ref)], extra=files, bless=False)
+            rc, out = t.run("--bless", "--rust-tests", cargo_list(os.path.join(t.d, "l.json"), tests))
+            self.assertEqual(rc == 0, ok, (ref, out))
+            if not ok:
+                self.assertIn("different tests", out)
+
+    def test_regression_271_a_forged_test_list_cannot_add_tests_or_clear_ignores(self):
+        # A harness = false binary, a build.rs or a proc macro can print any `--list`.
+        for name, ignored in (("ghost_test_not_in_source", False), ("skipped_one", False), ("only_in_a_comment", False)):
+            t = self.tree(recs=[self.rec(f"sup::{name}")], bless=False)
+            lst = cargo_list(os.path.join(t.d, "l.json"), [("sup", "crates/sup/tests/t.rs", name, ignored)])
+            rc, out = t.run("--bless", "--rust-tests", lst)
+            self.assertNotEqual(rc, 0, name)
+        t = self.tree(recs=[self.rec("sup::it_starts_tripped")], bless=False)
+        lst = cargo_list(os.path.join(t.d, "l.json"), [("sup", "crates/sup/tests/t.rs", "it_starts_tripped")])
+        self.assertEqual(t.run("--bless", "--rust-tests", lst)[0], 0)
+
+    def test_regression_271_examples_and_benches_are_not_listed(self):
+        with open(os.path.join(HERE, "rust_test_list.py")) as fh:
+            src = fh.read()
+        cmd = [l for l in src.splitlines() if l.strip().startswith("cmd = [")][0]
+        self.assertNotIn("--all-targets", cmd)  # ci.yml runs `cargo test --workspace --locked`
+        if not shutil.which("cargo"):
+            self.skipTest("needs cargo")
+        t = self.tree(bless=False)
+        shutil.rmtree(os.path.join(t.d, "crates/sup"))
+        t.write("Cargo.toml", '[workspace]\nmembers = ["crates/*"]\nresolver = "2"\n')
+        t.write("crates/tiny/Cargo.toml", '[package]\nname = "tiny"\nversion = "0.0.0"\nedition = "2021"\n')
+        t.write("crates/tiny/src/lib.rs", "#[test]\nfn in_lib() {}\n")
+        t.write("crates/tiny/examples/ex.rs", "fn main() {}\n#[test]\nfn in_example() {}\n")
+        t.write("crates/tiny/benches/b.rs", "#[test]\nfn in_bench() {}\n")
+        r = subprocess.run([sys.executable, "-I", os.path.join(HERE, "rust_test_list.py"), os.path.join(t.d, "l.json"), "--unlocked",
+                            "--root", t.d], capture_output=True, text=True, env=dict(os.environ, CARGO_TARGET_DIR=os.path.join(t.d, "tgt")))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        with open(os.path.join(t.d, "l.json")) as fh:
+            names = {x["name"] for x in json.load(fh)["tests"]}
+        self.assertEqual(names, {"in_lib"})
+
+    def test_regression_271_class_level_skips_are_honoured(self):
+        src = ("import unittest\n"
+               "@unittest.skip('x')\n"
+               "class Off(unittest.TestCase):\n    def test_in_skipped_class(self): pass\n"
+               "class Sub(Off):\n    def test_in_subclass_of_skipped_class(self): pass\n"
+               "@unittest.skipIf(True, 'x')\n"
+               "class Off2(unittest.TestCase):\n    def test_in_skipif_class(self): pass\n"
+               "class On(unittest.TestCase):\n    def test_live(self): pass\n")
+        self.assertEqual(c.python_tests(src), {"test_live"})
+
+    def test_regression_271_the_unit_tests_run_after_the_judge(self):
+        with open(os.path.join(ROOT, ".github/workflows/conformance.yml")) as fh:
+            wf = fh.read()
+        job = wf[wf.index("\n  conformance:"):wf.index("\n  closure-gate:")]
+        self.assertLess(job.index("Check the records with the base branch copy"), job.index("Unit-test the checker"))
+
+    def test_regression_271_a_directory_where_a_file_belongs_is_a_clean_error(self):
+        for rel in ("design/STATUS.md", "docs/NAMES.md", "design/names.toml"):
+            t = self.tree()
+            os.remove(os.path.join(t.d, rel))
+            os.makedirs(os.path.join(t.d, rel))
+            rc, out = t.run()
+            self.assertNotIn("Traceback", out, rel)
+            self.assertNotEqual(rc, 0, rel)
 
     def test_regression_271_python_tests_are_what_unittest_runs(self):
         src = (
