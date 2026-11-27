@@ -607,6 +607,17 @@ fn cfg_attr_ignored() {}
         self.assertEqual(t.run("closure", "--commits", os.path.join(t.d, "commits.txt"), env=env)[0], 0)
         self.assertNotEqual(t.run("closure", "--commits", os.path.join(t.d, "missing.txt"), env=env)[0], 0)
 
+    def test_hws_ids_are_validated_against_the_standard(self):
+        std = '[[requirement]]\nid = "HWS-TXT-1"\narea = "TXT"\n'
+        for ids, ok in (('["HWS-TXT-1"]', True), ('["HWS-TXT-9"]', False), ('[]', False), ('["TXT-1"]', False),
+                        ('["HWS-TXT-1", "HWS-TXT-1"]', False), ('"HWS-TXT-1"', False), ('[1]', False)):
+            t = self.tree(recs=[record(extra=f"hws = {ids}")], extra={"standards/hws/0.1/requirements.toml": std}, bless=False)
+            rc, out = t.run("--bless")
+            self.assertEqual(rc == 0, ok, (ids, out))
+            self.assertNotIn("Traceback", out)
+        t = self.tree(recs=[record(extra='hws = ["HWS-TXT-1"]')], bless=False)  # no standards directory at all
+        self.assertNotEqual(t.run("--bless")[0], 0)
+
     def test_regression_271_the_judge_fails_closed_once_it_is_on_the_base_branch(self):
         with open(os.path.join(ROOT, ".github/workflows/conformance.yml")) as fh:
             wf = fh.read()

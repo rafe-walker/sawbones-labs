@@ -7,6 +7,7 @@ source = "docs/THREAT-MODEL.md"
 anchor = "Supervisor clears a latched fault"
 source_sha = "b799dd211156981f"
 tracks = [197, 144]
+hws = ["HWS-ISF-4"]
 acceptance = [
   { id = "a1", kind = "test", ref = "sawbones-interlock::regression_197_a_supervisor_clear_is_refused_in_every_state" },
   { id = "a2", kind = "test", ref = "sawbones-interlock::regression_197_a_restart_is_never_cleaner_than_ram_or_record" },
@@ -23,6 +24,7 @@ source = "docs/THREAT-MODEL.md"
 anchor = "An armed rail lets any frame out"
 source_sha = "4607165d2f9933b9"
 tracks = [203, 169]
+hws = ["HWS-BUS-1"]
 acceptance = [
   { id = "a1", kind = "test", ref = "sawbones-busguard::regression_203_exactly_the_approved_actions_frame_passes" },
   { id = "a2", kind = "test", ref = "sawbones-busguard::regression_203_another_action_never_spends_the_lease" },

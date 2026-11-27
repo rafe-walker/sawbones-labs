@@ -22,7 +22,7 @@ level = "MUST"
 title = "Prose that changes without its record is flagged by paragraph hash"
 source = "CONTRIBUTING.md"
 anchor = "**Records.**"
-source_sha = "6620b1415ed9b30a"
+source_sha = "63ea58f184c2722d"
 tracks = [269]
 acceptance = [
   { id = "a1", kind = "test", ref = "ci/test_conformance.py::test_regression_drifted_when_the_design_prose_changes" },
@@ -50,6 +50,7 @@ acceptance = [
   { id = "a7", kind = "test", ref = "ci/test_conformance.py::test_regression_271_only_toml_files_belong_in_the_requirements_dir" },
   { id = "a8", kind = "test", ref = "ci/test_conformance.py::test_regression_271_file_kind_wants_a_regular_file_inside_the_repo" },
   { id = "a9", kind = "test", ref = "ci/test_conformance.py::test_regression_271_a_source_outside_the_repo_is_refused" },
+  { id = "a10", kind = "test", ref = "ci/test_conformance.py::test_hws_ids_are_validated_against_the_standard" },
 ]
 
 [[requirement]]

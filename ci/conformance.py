@@ -53,12 +53,14 @@ MARK_END = "<!-- status:end -->"
 BUILT, PARTIAL, NOT_BUILT, DRIFTED, WAIVED = "built", "partial", "not built", "drifted", "waived"
 ORDER = [BUILT, PARTIAL, NOT_BUILT, DRIFTED, WAIVED]
 
-REQ_KEYS = {"id", "rev", "level", "title", "source", "anchor", "source_sha", "tracks", "acceptance", "waiver"}
+REQ_KEYS = {"id", "rev", "level", "title", "source", "anchor", "source_sha", "tracks", "acceptance", "waiver", "hws"}
 REQ_REQUIRED = {"id", "rev", "title", "source", "anchor", "source_sha", "tracks", "acceptance"}
 ACC_KEYS = {"id", "kind", "ref", "pending", "note"}
 ACC_REQUIRED = {"id", "kind", "ref"}
 KINDS = {"test", "file"}
 LEVELS = {"MUST", "SHOULD", "MAY"}
+HWS_ID_RE = re.compile(r"^HWS-[A-Z]+-[1-9][0-9]*$")
+HWS_GLOB = "standards/hws"
 ID_RE = re.compile(r"^SAW-([A-Z]+)-([A-Z0-9]+)-([1-9][0-9]*)$")
 TAG_RE = re.compile(r"\[impl->(SAW-[A-Z]+-[A-Z0-9]+-[0-9]+)(?:@([0-9]+))?\]")
 SCAN_DIRS = ("crates", "firmware", "plugins", "ci", "fuzz")
@@ -508,6 +510,10 @@ def check_shape(rec, where, comp):
     if not (isinstance(tracks, list) and all(isinstance(t, int) and not isinstance(t, bool) and t > 0 for t in tracks)):
         errs.append(f"{where}: tracks must be a list of issue numbers (empty only for a built requirement)")
         tracks = []
+    if "hws" in rec:
+        h = rec["hws"]
+        if not (isinstance(h, list) and h and all(isinstance(x, str) and HWS_ID_RE.match(x) for x in h) and len(set(h)) == len(h)):
+            errs.append(f"{where}: hws must be a non-empty list of distinct HWS ids such as \"HWS-TXT-1\"")
     if "waiver" in rec:
         w = rec["waiver"]
         if not (isinstance(w, dict) and set(w) <= {"reason", "ref"} and isinstance(w.get("reason"), str) and w["reason"].strip()
@@ -677,6 +683,22 @@ def evaluate(root, rec, index, errors):
     return status, {"resolved": resolved, "pending": pending, "drift": drift, "needs_issue": needs_issue}
 
 
+def load_hws_ids(root):
+    """Every requirement id in standards/hws/*/requirements.toml (the Hardware
+    Write Safety standard), so records can cite the clauses they implement."""
+    ids = set()
+    base = os.path.join(root, HWS_GLOB)
+    for version in sorted(os.listdir(base)) if os.path.isdir(base) else []:
+        rel = f"{HWS_GLOB}/{version}/requirements.toml"
+        if os.path.isfile(os.path.join(root, rel)):
+            try:
+                data = load_toml(root, rel)
+            except Problem:
+                continue
+            ids |= {r["id"] for r in data.get("requirement", []) if isinstance(r, dict) and isinstance(r.get("id"), str)}
+    return ids
+
+
 def run_check(root, cargo=None):
     """Return (rows, errors). rows are dicts ready for the table. `cargo` is the
     parsed --rust-tests list; None means the labelled pure-source fallback."""
@@ -687,7 +709,11 @@ def run_check(root, cargo=None):
     tags = find_tags(root)
     known = {r["id"]: r for r in recs}
     rows = []
+    hws_ids = load_hws_ids(root)
     for rec in recs:
+        for h in rec.get("hws", []):
+            if h not in hws_ids:
+                errors.append(f"{rec['id']}: cites {h}, which is not in {HWS_GLOB}/*/requirements.toml. Fix the id in {rec['_file']} or add the clause to the standard")
         status, detail = evaluate(root, rec, index, errors)
         for path, line, rev in tags.get(rec["id"], []):
             if rev is not None and rev != rec["rev"]:

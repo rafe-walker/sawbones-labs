@@ -7,6 +7,7 @@ source = "docs/project-document.md"
 anchor = "The MCP surface is a few fixed"
 source_sha = "37375373d438a054"
 tracks = [103, 204, 272]
+hws = ["HWS-TXT-5"]
 acceptance = [
   { id = "a1", kind = "test", ref = "sawbones-mcp::the_tool_list_is_pinned" },
   { id = "a2", kind = "test", ref = "sawbones-redteam::redteam_103_hot_plug_changes_data_not_the_tool_list" },

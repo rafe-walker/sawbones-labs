@@ -1,0 +1,43 @@
+name: Standards
+
+# Checks the versioned working standards under standards/ (HWS): the TOML
+# parses, IDs are unique and well formed, levels are valid, and a released
+# version folder (one with a RELEASED file) is never modified. See
+# ci/check_standards.py and standards/README.md.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: standards-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  standards:
+    name: standards records are well formed and released versions are immutable
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check standards
+        env:
+          PR_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || '' }}
+          PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+        run: |
+          base="${PR_BASE}"
+          if [ -z "${base}" ] && [ -n "${PUSH_BEFORE}" ] && [ "${PUSH_BEFORE}" != "0000000000000000000000000000000000000000" ]; then
+            base="${PUSH_BEFORE}"
+          fi
+          if [ -n "${base}" ]; then
+            python3 -I ci/check_standards.py --base "${base}"
+          else
+            python3 -I ci/check_standards.py
+          fi
