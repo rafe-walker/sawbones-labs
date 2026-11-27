@@ -109,6 +109,12 @@ Tracked in #166. The plugin and store index design itself is written up after th
 | Agent notes in C.H.A.R.T. | The agent may write notes and findings into C.H.A.R.T. without asking. They are always labelled at the agent-inferred tier, never measured. |
 | Helper reader | Wanted, risk-based rather than all-or-nothing: a tool-less helper model reads outside text and hands the agent only typed fields from a closed vocabulary. Whether that trips S.C.R.U.B. is decided per hazard class by a deterministic risk rule in C.O.R.T.E.X.; free text always trips it; class 3 keeps its per-action press; class 4 never. Built behind a flag and benchmarked against latch-only before it is turned on. #266. |
 
+## 26 November 2026, publishing benchmark losses
+
+| Topic | Decision |
+| --- | --- |
+| T.R.I.A.G.E. benchmark losses | Published alongside the wins, under the pre-registered plan. Every scenario where our design loses to a plain MCP becomes an issue: either we change the design until it matches or beats the baseline, or we record it here as a deliberate trade-off of the safety design (for example extra steps a safety gate costs) with the measured cost. A loss is never left unexplained. |
+
 ## Reversals and corrections
 
 | Was | Now | Why |
